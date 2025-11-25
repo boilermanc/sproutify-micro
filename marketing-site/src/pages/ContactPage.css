@@ -1,0 +1,178 @@
+.contact-page {
+  min-height: 100vh;
+  padding: 4rem 0;
+}
+
+.contact-page .container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.back-link {
+  color: #5B7C99;
+  text-decoration: none;
+  font-weight: 500;
+  margin-bottom: 2rem;
+  display: inline-block;
+  transition: color 0.2s;
+}
+
+.back-link:hover {
+  color: #4A6479;
+}
+
+.contact-page h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #2A3744;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #5A6673;
+  font-size: 1.125rem;
+  margin-bottom: 3rem;
+}
+
+.contact-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+}
+
+.contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #2A3744;
+  font-size: 0.875rem;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 0.875rem;
+  border: 2px solid #D8DFE5;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #5B7C99;
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: #8A95A1;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 150px;
+}
+
+.btn {
+  padding: 0.875rem 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  display: inline-block;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-primary {
+  background: #5B7C99;
+  color: #FFFFFF;
+}
+
+.btn-primary:hover {
+  background: #4A6479;
+}
+
+.contact-info {
+  background: #FFFFFF;
+  padding: 2rem;
+  border-radius: 12px;
+  border: 1px solid #D8DFE5;
+  height: fit-content;
+}
+
+.contact-info h2 {
+  color: #2A3744;
+  margin-bottom: 1rem;
+}
+
+.contact-info > p {
+  color: #5A6673;
+  line-height: 1.6;
+  margin-bottom: 2rem;
+}
+
+.info-card {
+  background: #F7F9FA;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.info-card h3 {
+  color: #5B7C99;
+  margin-bottom: 0.75rem;
+  font-size: 1.125rem;
+}
+
+.info-card p {
+  color: #5A6673;
+  margin-bottom: 0.5rem;
+}
+
+.info-card p:last-child {
+  margin-bottom: 0;
+}
+
+.success-message {
+  text-align: center;
+  padding: 4rem 2rem;
+  background: #FFFFFF;
+  border-radius: 12px;
+  max-width: 600px;
+  margin: 4rem auto;
+}
+
+.success-message h1 {
+  color: #4CAF50;
+  margin-bottom: 1rem;
+}
+
+.success-message p {
+  color: #5A6673;
+  font-size: 1.125rem;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 768px) {
+  .contact-content {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}

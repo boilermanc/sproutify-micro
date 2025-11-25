@@ -1,0 +1,87 @@
+{
+  "name": "Generate Microgreen Labels",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-labels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "generate-labels-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "TEMPLATE_DOC_ID",
+          "mode": "id"
+        },
+        "templateData": "={{ JSON.stringify($json.trays) }}"
+      },
+      "name": "Generate PDF from Template",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "1",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "email": "={{ $json.email }}",
+        "subject": "Your Microgreen Labels",
+        "message": "Hi there,\n\nAttached are the labels you requested for your microgreen trays.\n\nBest regards,\nSproutify Micro Team",
+        "attachments": "={{ $json.pdfUrl }}"
+      },
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [650, 300],
+      "credentials": {
+        "smtp": {
+          "id": "2",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"Labels sent successfully\" } }}"
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Generate PDF from Template", "type": "main", "index": 0}]]
+    },
+    "Generate PDF from Template": {
+      "main": [[{"node": "Send Email", "type": "main", "index": 0}]]
+    },
+    "Send Email": {
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-22T00:00:00.000Z",
+  "versionId": "1"
+}

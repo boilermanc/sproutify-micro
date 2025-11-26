@@ -142,6 +142,10 @@
   overflow-y: auto;
 }
 
+.main-content--full {
+  padding: 0;
+}
+
 @media (max-width: 768px) {
   .sidebar.open {
     position: fixed;
@@ -155,5 +159,9 @@
 
   .main-content {
     padding: 1rem;
+  }
+
+  .main-content--full {
+    padding: 0;
   }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 import { 
   BarChart, 
   Bar, 
@@ -14,10 +15,20 @@ import {
   Legend
 } from 'recharts';
 import { Sprout, Scissors, Package, User, ClipboardList, ShoppingBasket } from 'lucide-react';
+import { useOnboarding } from '../hooks/useOnboarding';
+import WelcomeModal from '../components/onboarding/WelcomeModal';
+import OnboardingWizard from '../components/onboarding/OnboardingWizard';
+import ProgressIndicator from '../components/onboarding/ProgressIndicator';
+import TrialBanner from '../components/onboarding/TrialBanner';
 import './Dashboard.css';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { state, startWizard, startWizardAtStep, completeOnboarding } = useOnboarding();
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [trialEndDate, setTrialEndDate] = useState<string | null>(null);
+  
   const [stats, setStats] = useState({
     totalTrays: 0,
     activeTrays: 0,
@@ -28,64 +39,273 @@ const Dashboard = () => {
   });
 
   const [farmInfo, setFarmInfo] = useState({
-    farmName: 'Demo Farm',
-    farmUuid: 'demo-farm-uuid',
+    farmName: '',
+    farmUuid: '',
   });
 
-  // Mock data for charts
-  const harvestData = [
-    { name: 'Mon', yield: 45 },
-    { name: 'Tue', yield: 52 },
-    { name: 'Wed', yield: 38 },
-    { name: 'Thu', yield: 65 },
-    { name: 'Fri', yield: 48 },
-    { name: 'Sat', yield: 55 },
-    { name: 'Sun', yield: 40 },
-  ];
+  // Chart data (will be populated from Supabase)
+  const [harvestData, setHarvestData] = useState([
+    { name: 'Mon', yield: 0 },
+    { name: 'Tue', yield: 0 },
+    { name: 'Wed', yield: 0 },
+    { name: 'Thu', yield: 0 },
+    { name: 'Fri', yield: 0 },
+    { name: 'Sat', yield: 0 },
+    { name: 'Sun', yield: 0 },
+  ]);
 
-  const varietyData = [
-    { name: 'Sunflower', value: 35 },
-    { name: 'Pea Shoots', value: 25 },
-    { name: 'Radish', value: 20 },
-    { name: 'Broccoli', value: 15 },
-    { name: 'Others', value: 5 },
-  ];
+  const [varietyData, setVarietyData] = useState([
+    { name: 'No Data', value: 1 },
+  ]);
 
   const COLORS = ['#5B7C99', '#4CAF50', '#FFB74D', '#E57373', '#90A4AE'];
 
   useEffect(() => {
-    // In production, fetch from Supabase
-    setStats({
-      totalTrays: 156,
-      activeTrays: 89,
-      totalVarieties: 12,
-      totalOrders: 34,
-      recentHarvests: 23,
-      upcomingHarvests: 45,
-    });
+    // Check if onboarding should be shown
+    const sessionData = localStorage.getItem('sproutify_session');
+    if (sessionData) {
+      const session = JSON.parse(sessionData);
+      setTrialEndDate(session.trialEndDate || null);
+      setFarmInfo((prev) => ({
+        farmName: session.farmName || prev.farmName,
+        farmUuid: session.farmUuid || prev.farmUuid,
+      }));
 
-    const session = localStorage.getItem('sproutify_session');
-    if (session) {
-      const { farmUuid } = JSON.parse(session);
-      setFarmInfo({ farmName: 'Demo Farm', farmUuid });
+      if (!state.onboarding_completed && !state.wizard_started) {
+        setShowWelcomeModal(true);
+      } else if (state.wizard_started && !state.onboarding_completed) {
+        setShowWizard(true);
+      }
     }
+  }, [state.onboarding_completed, state.wizard_started]);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const sessionData = localStorage.getItem('sproutify_session');
+        if (!sessionData) return;
+
+        const { farmUuid, farmName } = JSON.parse(sessionData);
+
+        const { data: farmRecord } = await supabase
+          .from('farms')
+          .select('*')
+          .eq('farm_uuid', farmUuid)
+          .single();
+
+        const resolvedFarmName =
+          farmRecord?.farm_name ??
+          farmRecord?.farmname ??
+          farmName ??
+          'My Farm';
+        setFarmInfo({ farmName: resolvedFarmName, farmUuid });
+
+        if (farmRecord?.trial_end_date) {
+          setTrialEndDate((prev) => prev ?? farmRecord.trial_end_date);
+        }
+
+        // Fetch trays count
+        const { count: totalTrays } = await supabase
+          .from('trays')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid);
+
+        // Fetch active trays (trays without harvest_date)
+        const { count: activeTrays } = await supabase
+          .from('trays')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid)
+          .is('harvest_date', null);
+
+        // Fetch varieties count
+        const { count: totalVarieties } = await supabase
+          .from('varieties')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid)
+          .eq('is_active', true);
+
+        // Fetch recent harvests (last 7 days)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const { count: recentHarvests } = await supabase
+          .from('trays')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid)
+          .not('harvest_date', 'is', null)
+          .gte('harvest_date', sevenDaysAgo.toISOString());
+
+        // Fetch upcoming harvests (next 7 days)
+        const today = new Date();
+        const nextWeek = new Date();
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const { count: upcomingHarvests } = await supabase
+          .from('trays')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid)
+          .is('harvest_date', null)
+          .gte('sow_date', today.toISOString())
+          .lte('sow_date', nextWeek.toISOString());
+
+        setStats({
+          totalTrays: totalTrays || 0,
+          activeTrays: activeTrays || 0,
+          totalVarieties: totalVarieties || 0,
+          totalOrders: 0, // Orders table doesn't exist in schema, keeping at 0
+          recentHarvests: recentHarvests || 0,
+          upcomingHarvests: upcomingHarvests || 0,
+        });
+
+        // Fetch harvest data for chart (last 7 days)
+        const { data: harvestDataRaw } = await supabase
+          .from('trays')
+          .select('harvest_date, yield')
+          .eq('farm_uuid', farmUuid)
+          .not('harvest_date', 'is', null)
+          .gte('harvest_date', sevenDaysAgo.toISOString())
+          .order('harvest_date', { ascending: true });
+
+        if (harvestDataRaw) {
+          // Group by day and sum yields
+          const dailyYields: { [key: string]: number } = {};
+          harvestDataRaw.forEach(tray => {
+            if (tray.harvest_date && tray.yield) {
+              const date = new Date(tray.harvest_date).toLocaleDateString('en-US', { weekday: 'short' });
+              dailyYields[date] = (dailyYields[date] || 0) + Number(tray.yield);
+            }
+          });
+
+          // Convert to chart format
+          const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          const chartData = days.map(day => ({
+            name: day,
+            yield: dailyYields[day] || 0
+          }));
+          setHarvestData(chartData);
+        }
+
+        // Fetch variety distribution
+        const { data: traysData } = await supabase
+          .from('trays')
+          .select(`
+            recipe_id,
+            recipes!inner(variety_name)
+          `)
+          .eq('farm_uuid', farmUuid)
+          .is('harvest_date', null);
+
+        if (traysData) {
+          const varietyCounts: { [key: string]: number } = {};
+          traysData.forEach((tray: any) => {
+            const variety = tray.recipes?.variety_name || 'Unknown';
+            varietyCounts[variety] = (varietyCounts[variety] || 0) + 1;
+          });
+
+          const varietyChartData = Object.entries(varietyCounts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 5);
+          setVarietyData(varietyChartData);
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      }
+    };
+
+    fetchDashboardData();
   }, []);
+
+  const handleWelcomeStart = () => {
+    setShowWelcomeModal(false);
+    startWizard();
+    setShowWizard(true);
+  };
+
+  const handleWelcomeSkip = () => {
+    setShowWelcomeModal(false);
+    completeOnboarding();
+  };
+
+  const handleWizardComplete = () => {
+    setShowWizard(false);
+    completeOnboarding();
+  };
+
+  const handleWizardClose = () => {
+    setShowWizard(false);
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
+
+  const friendlyGreeting = getGreeting();
+  const todaySummary = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date());
+
+  const trialEndLabel = trialEndDate
+    ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+        new Date(trialEndDate)
+      )
+    : null;
+  const shouldShowTrialBanner = false;
 
   return (
     <div className="dashboard">
+      {showWelcomeModal && (
+        <WelcomeModal
+          farmName={farmInfo.farmName}
+          onStart={handleWelcomeStart}
+          onSkip={handleWelcomeSkip}
+        />
+      )}
+      
+      {showWizard && (
+        <OnboardingWizard
+          onComplete={handleWizardComplete}
+          onClose={handleWizardClose}
+        />
+      )}
+
       <div className="dashboard-hero fade-in-up">
         <div className="farm-identity">
-          <div className="farm-icon-large">🌱</div>
+          <div className="farm-icon-large" aria-hidden="true">🌱</div>
           <div className="farm-text">
-            <h1>{farmInfo.farmName}</h1>
-            <p className="farm-location">Farm ID: {farmInfo.farmUuid}</p>
+            <p className="hero-label">{friendlyGreeting}</p>
+            <h1>{farmInfo.farmName || 'Your Farm'}</h1>
+            <p className="hero-subtitle">It's {todaySummary}. Everything is synced and ready.</p>
+            <div className="farm-meta">
+              {trialEndLabel && (
+                <span className="farm-pill subtle">Trial ends {trialEndLabel}</span>
+              )}
+            </div>
           </div>
         </div>
-        <div className="welcome-message">
-          <h2>Welcome back</h2>
-          <p>Here's what's happening on your farm today.</p>
-        </div>
       </div>
+
+      {!state.onboarding_completed && (
+        <div style={{ marginBottom: '2rem' }}>
+          <ProgressIndicator
+            onStartStep={(stepIndex) => {
+              setShowWelcomeModal(false);
+              startWizardAtStep(stepIndex ?? 0);
+              setShowWizard(true);
+            }}
+            onRestart={() => {
+              setShowWelcomeModal(false);
+              startWizardAtStep(0);
+              setShowWizard(true);
+            }}
+          />
+        </div>
+      )}
+
+      {shouldShowTrialBanner && <TrialBanner trialEndDate={trialEndDate} />}
 
       <div className="stats-grid">
         <div className="stat-card primary fade-in-up" style={{animationDelay: '0.1s'}}>
@@ -240,3 +460,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 import './LoginPage.css';
 
 const LoginPage = () => {
@@ -7,7 +8,6 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,13 +15,45 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      // Ensure we are redirecting to the correct URL with protocol and query params
-      const targetUrl = `http://localhost:3001/login?email=${encodeURIComponent(email)}`;
-      // Force a hard redirect to ensure the new app loads
+      // Authenticate with Supabase
+      const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      if (!user || !session) {
+        throw new Error('Authentication failed');
+      }
+
+      // Fetch user profile with farm information
+      const { data: profile, error: profileError } = await supabase
+        .from('profile')
+        .select('*, farms(*)')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError || !profile) {
+        throw new Error('Profile not found. Please contact your administrator.');
+      }
+
+      // Store session
+      localStorage.setItem('sproutify_session', JSON.stringify({
+        email: user.email,
+        farmUuid: profile.farm_uuid,
+        role: profile.role,
+        userId: user.id,
+        farmName: profile.farms?.farm_name || 'Unknown Farm'
+      }));
+
+      // Redirect to web-admin app
+      const targetUrl = `http://localhost:5174/`;
       window.location.assign(targetUrl);
-    } catch (err) {
-      setError('An error occurred. Please try again.');
-    } finally {
+    } catch (err: any) {
+      setError(err.message || 'Invalid credentials. Please try again.');
       setLoading(false);
     }
   };
@@ -66,7 +98,10 @@ const LoginPage = () => {
           </form>
 
           <div className="login-footer">
-            <a href="/">← Back to Home</a>
+            <p style={{ marginBottom: '0.5rem', color: '#636E72', fontSize: '0.875rem' }}>
+              Don't have an account? <Link to="/signup">Sign up for free</Link>
+            </p>
+            <Link to="/">← Back to Home</Link>
           </div>
         </div>
       </div>

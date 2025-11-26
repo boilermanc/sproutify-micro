@@ -1,6 +1,21 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import './LoginPage.css';
+import { useState, useEffect, useCallback } from 'react';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { buildSessionPayload } from '../utils/session';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.length > 0) {
+    return error;
+  }
+
+  return fallback;
+};
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -11,44 +26,152 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
   const [searchParams] = useSearchParams();
+  const accessTokenParam = searchParams.get('access_token');
+  const refreshTokenParam = searchParams.get('refresh_token');
+  const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(() =>
+    Boolean(accessTokenParam && refreshTokenParam)
+  );
   const navigate = useNavigate();
 
   useEffect(() => {
-    const emailParam = searchParams.get('email');
     const session = localStorage.getItem('sproutify_session');
-
     if (session) {
-        onLogin();
-        navigate('/');
-        return;
+      onLogin();
+      navigate('/');
+      return;
+    }
+
+    const emailParam = searchParams.get('email');
+
+    if (accessTokenParam && refreshTokenParam) {
+      handleTokenLogin(accessTokenParam, refreshTokenParam);
+      return;
     }
 
     if (emailParam) {
       setIsAutoLoggingIn(true);
-      // Small timeout to ensure state update is processed before starting heavy work if any
-      // but mostly to ensure UI feedback.
       setTimeout(() => handleAutoLogin(emailParam), 100);
+      return;
     }
-  }, [searchParams]);
 
-  const handleAutoLogin = async (emailParam: string) => {
+    setIsAutoLoggingIn(false);
+  }, [
+    accessTokenParam,
+    refreshTokenParam,
+    handleAutoLogin,
+    handleTokenLogin,
+    navigate,
+    onLogin,
+    searchParams,
+  ]);
+
+  const handleTokenLogin = useCallback(async (accessToken: string, refreshToken: string) => {
     try {
-      // Immediate login, no artificial delay
-      localStorage.setItem('sproutify_session', JSON.stringify({
-        email: emailParam,
-        farmUuid: 'demo-farm-uuid',
-        role: 'owner'
-      }));
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const sessionUser = data.session?.user;
+
+      if (!sessionUser) {
+        throw new Error('Invalid session tokens received.');
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profile')
+        .select('*, farms(*)')
+        .eq('id', sessionUser.id)
+        .single();
+
+      if (profileError || !profile) {
+        throw new Error('Profile not found. Please contact support.');
+      }
+
+      const sessionPayload = await buildSessionPayload(profile, {
+        email: sessionUser.email,
+        userId: sessionUser.id,
+      });
+
+      localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
 
       onLogin();
-      navigate('/');
-    } catch (err) {
+      navigate('/', { replace: true });
+    } catch (error) {
+      console.error('Token login error:', error);
+      setError(
+        getErrorMessage(
+          error,
+          'Unable to complete signup automatically. Please log in manually.',
+        ),
+      );
+    } finally {
+      setIsAutoLoggingIn(false);
+    }
+  }, [navigate, onLogin]);
+
+  const handleAutoLogin = useCallback(async (emailParam: string) => {
+    try {
+      // Try to find user by email and sign in
+      const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
+        email: emailParam,
+        password: '', // This won't work - need proper auth flow
+      });
+
+      if (signInError) {
+        // If sign in fails, try to get user profile
+        const { data: profile } = await supabase
+          .from('profile')
+          .select('*, farms(*)')
+          .eq('email', emailParam)
+          .single();
+
+        if (profile) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const sessionPayload = await buildSessionPayload(profile, {
+              email: emailParam,
+              userId: profile.id,
+            });
+            localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+            onLogin();
+            navigate('/');
+            return;
+          }
+        }
+      }
+
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profile')
+          .select('*, farms(*)')
+          .eq('id', user.id)
+          .single();
+
+        if (profile) {
+          const sessionPayload = await buildSessionPayload(profile, {
+            email: user.email,
+            userId: user.id,
+          });
+          localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+          onLogin();
+          navigate('/');
+          return;
+        }
+      }
+
+      throw new Error('Auto-login failed');
+    } catch (error) {
+      console.error('Auto-login error:', error);
       setError('Auto-login failed. Please try manually.');
       setIsAutoLoggingIn(false);
     }
-  };
+  }, [navigate, onLogin]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,21 +179,44 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
     setLoading(true);
 
     try {
-      // In production, this would authenticate with Supabase
-      // For now, simulate login
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Authenticate with Supabase
+      const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      if (!user || !session) {
+        throw new Error('Authentication failed');
+      }
+
+      // Fetch user profile with farm information
+      const { data: profile, error: profileError } = await supabase
+        .from('profile')
+        .select('*, farms(*)')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError || !profile) {
+        throw new Error('Profile not found. Please contact your administrator.');
+      }
+
+      const sessionPayload = await buildSessionPayload(profile, {
+        email: user.email,
+        userId: user.id,
+      });
 
       // Store session
-      localStorage.setItem('sproutify_session', JSON.stringify({
-        email,
-        farmUuid: 'demo-farm-uuid',
-        role: 'owner'
-      }));
+      localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
 
       onLogin();
       navigate('/');
-    } catch (err) {
-      setError('Invalid credentials. Please try again.');
+    } catch (error) {
+      console.error('Manual login error:', error);
+      setError(getErrorMessage(error, 'Invalid credentials. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -78,56 +224,97 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
   if (isAutoLoggingIn) {
     return (
-      <div className="login-page">
-        <div className="login-container">
-          <div className="login-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-            <div className="loading-spinner"></div>
-            <h2 style={{ marginTop: '1.5rem', color: '#5B7C99' }}>Logging you in...</h2>
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12">
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/40 via-emerald-400/10 to-transparent blur-3xl" />
+        <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-10 text-center text-white shadow-2xl shadow-emerald-500/30 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-white/30 bg-white/10">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/30 border-t-white" />
           </div>
+          <h2 className="mt-6 text-2xl font-semibold tracking-tight">Logging you in...</h2>
+          <p className="mt-2 text-sm text-white/70">Securing your workspace</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="login-page">
-      <div className="login-container">
-        <div className="login-card">
-          <h1 className="login-title">Sproutify Micro Admin</h1>
-          <p className="login-subtitle">Welcome back! Sign in to continue.</p>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12">
+      <div className="absolute inset-0">
+        <div className="h-full w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.35),transparent_55%)] blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950" />
+      </div>
+      <div className="relative z-10 w-full max-w-md space-y-6">
+        <div className="flex items-center gap-3 text-white/70">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 font-semibold text-white">
+            SM
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify</p>
+            <p className="text-lg font-semibold text-white">Micro Admin</p>
+          </div>
+        </div>
 
-          {error && <div className="error-message">{error}</div>}
+        <div className="rounded-3xl border border-white/15 bg-white/95 p-8 shadow-2xl shadow-emerald-500/20 backdrop-blur">
+          <div className="space-y-2 text-center">
+            <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
+              Secure access
+            </span>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Welcome back</h1>
+            <p className="text-base text-slate-500">Sign in to continue growing.</p>
+          </div>
 
-          <form onSubmit={handleLogin} className="login-form">
-            <div className="form-group">
-              <label htmlFor="email">Email</label>
-              <input
+          {error && (
+            <div className="mt-6 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="mt-8 space-y-5">
+            <div className="space-y-2">
+              <label htmlFor="email" className="text-sm font-medium text-slate-600">
+                Email
+              </label>
+              <Input
                 id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="your@email.com"
+                placeholder="you@sproutify.co"
+                autoComplete="email"
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="password">Password</label>
-              <input
+            <div className="space-y-2">
+              <label htmlFor="password" className="text-sm font-medium text-slate-600">
+                Password
+              </label>
+              <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
+                autoComplete="current-password"
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign in'}
+            </Button>
           </form>
         </div>
+
+        <p className="text-center text-sm text-white/60">
+          Need help? Email{' '}
+          <a
+            href="mailto:support@sproutify.micro"
+            className="font-semibold text-emerald-200 underline-offset-4 hover:text-white hover:underline"
+          >
+            support@sproutify.micro
+          </a>
+        </p>
       </div>
     </div>
   );

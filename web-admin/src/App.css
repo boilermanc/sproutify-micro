@@ -4,27 +4,14 @@
   box-sizing: border-box;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #F7F9FA;
-  color: #2A3744;
-}
-
-#root {
-  min-height: 100vh;
-}
-
 .loading {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  font-size: 1.25rem;
-  color: #5B7C99;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: hsl(var(--primary));
 }
 
 /* Global Animations */

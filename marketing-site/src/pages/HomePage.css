@@ -20,33 +20,51 @@
   justify-content: center;
   z-index: 1000;
   animation: fadeIn 0.3s ease-out;
+  padding: 2rem 1rem;
   /* Ensure modal sits on top of everything */
 }
 
 .modal-content {
   background: #FFFFFF;
-  padding: 0; /* Let the login component handle padding */
-  border-radius: 12px;
+  padding: 0;
+  border-radius: 16px;
   position: relative;
   width: 90%;
-  max-width: 480px; /* Increased slightly */
-  /* max-height: 90vh; Remove height constraint to avoid scrollbars if possible */
+  max-width: 440px;
+  max-height: calc(100vh - 4rem);
   animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-  overflow: hidden; /* Contain border radius */
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.15);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-close {
   position: absolute;
   top: 1rem;
   right: 1rem;
-  background: none;
+  background: rgba(255, 255, 255, 0.9);
   border: none;
-  font-size: 2rem;
+  font-size: 1.5rem;
   cursor: pointer;
   color: #636E72;
   z-index: 10;
   line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 1);
+  color: #2D3436;
+  transform: scale(1.1);
 }
 
 @keyframes slideDown {
@@ -100,6 +118,17 @@
   color: #2E7D32;
 }
 
+/* Ensure buttons in nav have proper colors */
+.nav .btn-primary {
+  background: #1976D2 !important;
+  color: #FFFFFF !important;
+}
+
+.nav .btn-primary:hover {
+  background: #1565C0 !important;
+  color: #FFFFFF !important;
+}
+
 .btn-login {
   background: #1976D2; /* Changed from Green to Blue */
   color: #FFFFFF !important;
@@ -127,10 +156,11 @@
 /* Hero */
 .hero {
   padding: 0;
-  height: 100vh;
+  min-height: 100vh;
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  padding-top: 120px; /* Add padding to account for header */
   background: radial-gradient(circle at top right, #E8F5E9 0%, transparent 50%); /* Stronger overall gradient */
   overflow: hidden;
   position: relative;
@@ -141,8 +171,8 @@
   align-items: center;
   gap: 4rem;
   justify-content: space-between;
-  height: 100%;
-  padding-top: 80px; /* Account for header */
+  width: 100%;
+  min-height: calc(100vh - 120px);
 }
 
 .hero-content {
@@ -276,15 +306,22 @@
 }
 
 .feature-icon {
-  font-size: 3rem;
   margin-bottom: 1.5rem;
-  background: #F1F8E9;
+  background: #F7F8F9;
   width: 80px;
   height: 80px;
   border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #121417;
+  border: 1px solid #E5E8EC;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.feature-icon svg {
+  width: 34px;
+  height: 34px;
 }
 
 .feature-card h3 {
@@ -544,5 +581,18 @@
   
   .pricing-grid {
     grid-template-columns: 1fr;
+  }
+
+  .modal-content {
+    max-height: calc(100vh - 2rem);
+    width: 95%;
+  }
+
+  .login-card {
+    padding: 1.5rem;
+  }
+
+  .login-title {
+    font-size: 1.75rem;
   }
 }

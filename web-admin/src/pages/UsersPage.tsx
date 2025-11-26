@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import './TablePage.css';
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2, UserPlus, X, Eye, EyeOff, Mail, Lock, User, Shield } from 'lucide-react';
 
 interface User {
   id: string;
@@ -13,39 +14,126 @@ interface User {
 }
 
 const UsersPage = () => {
-  const [users] = useState<User[]>([
-    {
-      id: '1',
-      name: 'John Doe',
-      email: 'john@example.com',
-      role: 'Owner',
-      isActive: true,
-      lastActive: '2025-01-20',
-      createdAt: '2024-12-01',
-    },
-    {
-      id: '2',
-      name: 'Jane Smith',
-      email: 'jane@example.com',
-      role: 'Editor',
-      isActive: true,
-      lastActive: '2025-01-22',
-      createdAt: '2024-12-15',
-    },
-    {
-      id: '3',
-      name: 'Bob Johnson',
-      email: 'bob@example.com',
-      role: 'Viewer',
-      isActive: false,
-      lastActive: '2025-01-10',
-      createdAt: '2024-11-20',
-    },
-  ]);
-
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('All');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  
+  // Form state
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'Viewer',
+  });
+  const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const sessionData = localStorage.getItem('sproutify_session');
+        if (!sessionData) return;
+
+        const { farmUuid } = JSON.parse(sessionData);
+
+        const { data, error } = await supabase
+          .from('profile')
+          .select('*')
+          .eq('farm_uuid', farmUuid);
+
+        if (error) throw error;
+
+        const formattedUsers: User[] = (data || []).map((user: any) => ({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isActive: user.is_active,
+          lastActive: user.last_active ? new Date(user.last_active).toLocaleDateString() : 'Never',
+          createdAt: user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown',
+        }));
+
+        setUsers(formattedUsers);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        setError('Failed to load users');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  const handleCreateUser = async () => {
+    if (!formData.name || !formData.email || !formData.password) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    setCreating(true);
+    setError('');
+
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const response = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          name: formData.name,
+          role: formData.role,
+          farmUuid,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create user');
+      }
+
+      // Format and add the new user to the list
+      const newUser: User = {
+        id: result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        role: result.user.role,
+        isActive: result.user.isActive,
+        lastActive: 'Just now',
+        createdAt: new Date(result.user.createdAt).toLocaleDateString(),
+      };
+      setUsers([newUser, ...users]);
+      
+      // Reset form and close modal
+      setFormData({ name: '', email: '', password: '', role: 'Viewer' });
+      setShowAddModal(false);
+      setError('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create user');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -53,6 +141,19 @@ const UsersPage = () => {
     const matchesRole = roleFilter === 'All' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
+
+  if (loading) {
+    return (
+      <div className="table-page">
+        <div className="page-header">
+          <div>
+            <h1>User Management</h1>
+            <p className="subtitle">Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="table-page">
@@ -138,35 +239,134 @@ const UsersPage = () => {
         <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Add New User</h2>
-              <button className="close-btn" onClick={() => setShowAddModal(false)}>&times;</button>
+              <div className="modal-header-content">
+                <div className="modal-icon-wrapper">
+                  <UserPlus size={24} />
+                </div>
+                <div>
+                  <h2>Create New User</h2>
+                  <p className="modal-subtitle">Add a new team member to your farm</p>
+                </div>
+              </div>
+              <button className="close-btn" onClick={() => setShowAddModal(false)}>
+                <X size={20} />
+              </button>
             </div>
             <div className="modal-body">
-              <div className="form-group">
-                <label>Name</label>
-                <input type="text" placeholder="Enter user name" />
-              </div>
-              <div className="form-group">
-                <label>Email</label>
-                <input type="email" placeholder="user@example.com" />
-              </div>
-              <div className="form-group">
-                <label>Role</label>
-                <select>
-                  <option value="Viewer">Viewer</option>
-                  <option value="Editor">Editor</option>
-                  <option value="Owner">Owner</option>
-                </select>
-              </div>
+              {error && (
+                <div className="error-message">
+                  <div className="error-icon">!</div>
+                  <div className="error-text">{error}</div>
+                </div>
+              )}
+              <form onSubmit={(e) => { e.preventDefault(); handleCreateUser(); }}>
+                <div className="form-group">
+                  <label>
+                    <User size={16} />
+                    Full Name
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="John Doe" 
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                    disabled={creating}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>
+                    <Mail size={16} />
+                    Email Address
+                  </label>
+                  <input 
+                    type="email" 
+                    placeholder="john.doe@example.com" 
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    required
+                    disabled={creating}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>
+                    <Lock size={16} />
+                    Password
+                  </label>
+                  <div className="password-input-wrapper">
+                    <input 
+                      type={showPassword ? "text" : "password"} 
+                      placeholder="Minimum 6 characters" 
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      required
+                      disabled={creating}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      disabled={creating}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                  <div className="password-hint">Password must be at least 6 characters long</div>
+                </div>
+                <div className="form-group">
+                  <label>
+                    <Shield size={16} />
+                    Role
+                  </label>
+                  <select 
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    disabled={creating}
+                  >
+                    <option value="Viewer">Viewer - Read-only access</option>
+                    <option value="Editor">Editor - Can edit data</option>
+                    <option value="Owner">Owner - Full access</option>
+                  </select>
+                  <div className="role-description">
+                    {formData.role === 'Viewer' && 'Can view data but cannot make changes'}
+                    {formData.role === 'Editor' && 'Can view and edit data but cannot manage users'}
+                    {formData.role === 'Owner' && 'Full access including user management'}
+                  </div>
+                </div>
+              </form>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowAddModal(false)}>
+              <button 
+                type="button"
+                className="btn btn-secondary" 
+                onClick={() => {
+                  setShowAddModal(false);
+                  setFormData({ name: '', email: '', password: '', role: 'Viewer' });
+                  setError('');
+                  setShowPassword(false);
+                }}
+                disabled={creating}
+              >
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={() => {
-                alert('User added!');
-                setShowAddModal(false);
-              }}>Add User</button>
+              <button 
+                type="button"
+                className="btn btn-primary" 
+                onClick={handleCreateUser}
+                disabled={creating}
+              >
+                {creating ? (
+                  <>
+                    <span className="spinner"></span>
+                    Creating User...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus size={18} />
+                    Create User
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -1,0 +1,250 @@
+/* Step-specific styles */
+
+.education-step {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.flow-diagram {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2rem 0;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.flow-item {
+  flex: 1;
+  min-width: 120px;
+  text-align: center;
+  position: relative;
+  animation: slideInUp 0.5s ease-out both;
+}
+
+.flow-icon {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+  animation: bounceIn 0.6s ease-out both;
+}
+
+.flow-label {
+  font-weight: 700;
+  color: #2A3744;
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.flow-description {
+  font-size: 0.875rem;
+  color: #5A6673;
+}
+
+.flow-arrow {
+  position: absolute;
+  right: -2rem;
+  top: 50%;
+  transform: translateY(-50%);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translateY(-50%) translateX(5px);
+  }
+}
+
+.education-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.info-card {
+  background: #F7F9FA;
+  border: 2px solid #E0E6ED;
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s;
+  animation: slideInUp 0.5s ease-out both;
+}
+
+.info-card:hover {
+  border-color: #5B7C99;
+  box-shadow: 0 4px 12px rgba(91, 124, 153, 0.1);
+  transform: translateY(-2px);
+}
+
+.info-card h3 {
+  font-size: 1.25rem;
+  color: #2A3744;
+  margin-bottom: 0.5rem;
+}
+
+.info-card p {
+  color: #5A6673;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Variety Step */
+.variety-suggestions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.variety-suggestion-btn {
+  padding: 1rem;
+  background: #F7F9FA;
+  border: 2px solid #E0E6ED;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-align: center;
+  font-weight: 600;
+  color: #2A3744;
+}
+
+.variety-suggestion-btn:hover {
+  border-color: #5B7C99;
+  background: #E8F0F7;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(91, 124, 153, 0.1);
+}
+
+.variety-suggestion-btn.selected {
+  border-color: #5B7C99;
+  background: linear-gradient(135deg, #5B7C99 0%, #4A6B8A 100%);
+  color: white;
+}
+
+/* Recipe Step */
+.recipe-steps-preview {
+  background: #F7F9FA;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.recipe-steps-preview h4 {
+  color: #2A3744;
+  margin-bottom: 1rem;
+}
+
+.total-days-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #5B7C99 0%, #4A6B8A 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-weight: 700;
+  margin-top: 1rem;
+}
+
+/* Batch Step */
+.skip-section {
+  text-align: center;
+  padding: 2rem;
+  border-top: 2px dashed #E0E6ED;
+  margin-top: 2rem;
+}
+
+/* Tray Step */
+.tray-preview {
+  background: linear-gradient(135deg, #E8F0F7 0%, #F7F9FA 100%);
+  border: 2px solid #5B7C99;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-top: 1.5rem;
+}
+
+.tray-preview h4 {
+  color: #2A3744;
+  margin-bottom: 1rem;
+}
+
+.tray-preview-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #E0E6ED;
+}
+
+.tray-preview-item:last-child {
+  border-bottom: none;
+}
+
+.tray-preview-label {
+  color: #5A6673;
+  font-weight: 600;
+}
+
+.tray-preview-value {
+  color: #2A3744;
+  font-weight: 700;
+}
+
+/* Completion Step */
+.completion-celebration {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.completion-checklist {
+  background: #F7F9FA;
+  border-radius: 12px;
+  padding: 2rem;
+  margin: 2rem 0;
+}
+
+.completion-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #E0E6ED;
+}
+
+.completion-checklist-item:last-child {
+  border-bottom: none;
+}
+
+.completion-checklist-item.completed {
+  color: #4CAF50;
+}
+
+.completion-next-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.completion-next-step-btn {
+  padding: 1rem;
+  background: white;
+  border: 2px solid #E0E6ED;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-align: center;
+  text-decoration: none;
+  color: #2A3744;
+  font-weight: 600;
+  display: block;
+}
+
+.completion-next-step-btn:hover {
+  border-color: #5B7C99;
+  background: #E8F0F7;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(91, 124, 153, 0.1);
+}
+

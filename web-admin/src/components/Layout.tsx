@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import './Layout.css';
 
@@ -8,6 +8,8 @@ interface LayoutProps {
 
 const Layout = ({ onLogout }: LayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const isDashboard = location.pathname === '/';
 
   const handleLogout = () => {
     localStorage.removeItem('sproutify_session');
@@ -76,7 +78,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
           </button>
         </div>
       </aside>
-      <main className="main-content">
+      <main className={`main-content ${isDashboard ? 'main-content--full' : ''}`}>
         <Outlet />
       </main>
     </div>

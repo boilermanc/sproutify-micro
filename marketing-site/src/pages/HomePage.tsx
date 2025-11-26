@@ -1,12 +1,48 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FiLayers, FiBookOpen, FiTruck, FiUsers, FiBarChart2, FiSmartphone } from 'react-icons/fi';
 import GrowingMicrogreens from '../components/GrowingMicrogreens';
 import './HomePage.css';
 import LoginPage from './LoginPage';
+import SignUpPage from './SignUpPage';
 
 const HomePage = () => {
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
   const [showLogin, setShowLogin] = useState(false);
+  const [showSignUp, setShowSignUp] = useState(false);
+
+  const featureItems = [
+    {
+      icon: FiLayers,
+      title: 'Tray Management',
+      description: 'Track every tray from seed to harvest with detailed lifecycle monitoring and batch operations.',
+    },
+    {
+      icon: FiBookOpen,
+      title: 'Recipe Library',
+      description: 'Create and manage growing recipes with step-by-step instructions for consistent quality.',
+    },
+    {
+      icon: FiTruck,
+      title: 'Order Management',
+      description: 'Streamline customer orders, track fulfillment, and manage deliveries all in one place.',
+    },
+    {
+      icon: FiUsers,
+      title: 'Multi-User Support',
+      description: 'Collaborate with your team with role-based access for owners, editors, and viewers.',
+    },
+    {
+      icon: FiBarChart2,
+      title: 'Inventory Tracking',
+      description: 'Monitor supplies, seed batches, and vendors to keep your operation running smoothly.',
+    },
+    {
+      icon: FiSmartphone,
+      title: 'Mobile & Web Apps',
+      description: 'Access your farm from anywhere with our web admin and mobile worker apps.',
+    },
+  ];
 
   return (
     <div className="home-page">
@@ -19,14 +55,24 @@ const HomePage = () => {
         </div>
       )}
 
+      {showSignUp && (
+        <div className="modal-overlay" onClick={() => setShowSignUp(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSignUp(false)}>×</button>
+            <SignUpPage />
+          </div>
+        </div>
+      )}
+
       <header className="header">
         <div className="container">
           <div className="logo">Sproutify Micro</div>
-          <nav className="nav">
+            <nav className="nav">
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
             <Link to="/contact">Contact</Link>
-            <button onClick={() => setShowLogin(true)} className="btn-login">Login</button>
+            <Link to="/login" className="btn-login" style={{ textDecoration: 'none', display: 'inline-block' }}>Login</Link>
+            <button onClick={() => setShowSignUp(true)} className="btn btn-primary" style={{ padding: '0.6rem 1.25rem', fontSize: '0.9rem' }}>Sign Up Free</button>
           </nav>
         </div>
       </header>
@@ -42,8 +88,20 @@ const HomePage = () => {
               The complete management solution for microgreen growers. Track trays, manage batches,
               streamline orders, and grow your business with Sproutify Micro.
             </p>
+            <p className="hero-trial-badge" style={{ 
+              display: 'inline-block',
+              background: '#E8F5E9',
+              color: '#2E7D32',
+              padding: '0.5rem 1.25rem',
+              borderRadius: '50px',
+              fontSize: '0.95rem',
+              fontWeight: '600',
+              marginBottom: '1.5rem'
+            }}>
+              🎉 Start your 7-day free trial - No credit card required
+            </p>
             <div className="hero-actions">
-              <button onClick={() => setShowLogin(true)} className="btn btn-primary">Get Started</button>
+              <button onClick={() => setShowSignUp(true)} className="btn btn-primary">Start Free Trial</button>
               <a href="#features" className="btn btn-secondary">Learn More</a>
             </div>
           </div>
@@ -57,36 +115,15 @@ const HomePage = () => {
         <div className="container">
           <h2 className="section-title">Everything You Need to Grow</h2>
           <div className="features-grid">
-            <div className="feature-card">
-              <div className="feature-icon">🌱</div>
-              <h3>Tray Management</h3>
-              <p>Track every tray from seed to harvest with detailed lifecycle monitoring and batch operations.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📋</div>
-              <h3>Recipe Library</h3>
-              <p>Create and manage growing recipes with step-by-step instructions for consistent quality.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📦</div>
-              <h3>Order Management</h3>
-              <p>Streamline customer orders, track fulfillment, and manage deliveries all in one place.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">👥</div>
-              <h3>Multi-User Support</h3>
-              <p>Collaborate with your team with role-based access for owners, editors, and viewers.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📊</div>
-              <h3>Inventory Tracking</h3>
-              <p>Monitor supplies, seed batches, and vendors to keep your operation running smoothly.</p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📱</div>
-              <h3>Mobile & Web Apps</h3>
-              <p>Access your farm from anywhere with our web admin and mobile worker apps.</p>
-            </div>
+            {featureItems.map(({ icon: Icon, title, description }) => (
+              <div className="feature-card" key={title}>
+                <div className="feature-icon" aria-hidden="true">
+                  <Icon />
+                </div>
+                <h3>{title}</h3>
+                <p>{description}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -94,6 +131,9 @@ const HomePage = () => {
       <section id="pricing" className="pricing">
         <div className="container">
           <h2 className="section-title">Simple, Transparent Pricing</h2>
+          <p style={{ textAlign: 'center', color: '#636E72', marginBottom: '1rem', fontSize: '1.1rem' }}>
+            Try any plan free for 7 days - No credit card required
+          </p>
           <div className="pricing-toggle">
             <button 
               className={`toggle-btn ${billingPeriod === 'monthly' ? 'active' : ''}`} 
@@ -128,7 +168,7 @@ const HomePage = () => {
                 <p className="price-savings annual">Save $58/year</p>
               )}
               {billingPeriod === 'monthly' && (
-                <p className="price-savings">&nbsp;</p>
+                <p className="price-savings" style={{ color: '#2E7D32', fontWeight: '600' }}>7-day free trial</p>
               )}
               <ul className="features-list">
                 <li>1 Farm Location</li>
@@ -138,7 +178,7 @@ const HomePage = () => {
                 <li>Mobile App Access</li>
                 <li>Email Support</li>
               </ul>
-              <button onClick={() => setShowLogin(true)} className="btn btn-secondary">Get Started</button>
+              <button onClick={() => setShowSignUp(true)} className="btn btn-secondary">Start Free Trial</button>
             </div>
             <div className="pricing-card featured">
               <div className="badge">Most Popular</div>
@@ -160,7 +200,7 @@ const HomePage = () => {
                 <p className="price-savings annual">Save $158/year</p>
               )}
                {billingPeriod === 'monthly' && (
-                <p className="price-savings">&nbsp;</p>
+                <p className="price-savings" style={{ color: '#2E7D32', fontWeight: '600' }}>7-day free trial</p>
               )}
               <ul className="features-list">
                 <li>3 Farm Locations</li>
@@ -171,7 +211,7 @@ const HomePage = () => {
                 <li>Label Printing</li>
                 <li>Priority Support</li>
               </ul>
-              <button onClick={() => setShowLogin(true)} className="btn btn-primary">Get Started</button>
+              <button onClick={() => setShowSignUp(true)} className="btn btn-primary">Start Free Trial</button>
             </div>
             <div className="pricing-card">
               <h3>Enterprise</h3>

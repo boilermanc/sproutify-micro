@@ -1,73 +1,44 @@
-# React + TypeScript + Vite
+# Sproutify Micro – Web Admin
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Modern React + TypeScript + Vite dashboard for operators. The UI layer now runs on Tailwind CSS with the shadcn/ui component primitives so that we can iterate on the visual system quickly.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19 + Vite 7 with strict ESLint config
+- Tailwind CSS + custom design tokens in `src/index.css`
+- shadcn/ui components generated via `components.json`
+- Supabase client shared via `@/lib/supabaseClient`
 
-## React Compiler
+## Development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The dev server mounts at `http://localhost:5173`. Tailwind is configured in `tailwind.config.ts` and PostCSS via `postcss.config.cjs`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Styling System
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- Global CSS variables (colors, radii, font stacks) live in `src/index.css`.
+- `Space Grotesk` is the default sans font (`--font-sans`) and can be swapped centrally.
+- Utility classes come from Tailwind; semantic tokens (`bg-background`, `text-foreground`, etc.) keep things consistent between light/dark themes.
+- Reuse tokens in legacy CSS modules via the `var(--token)` / `hsl(var(--token))` pattern while the rest of the app moves to Tailwind.
+
+## Using shadcn/ui
+
+`components.json` is already configured for this Vite workspace. Generate new primitives with:
+
+```bash
+npx shadcn@latest add button
 ```
+
+The CLI writes files under `src/components/ui` and uses the `@/lib/utils` alias for helpers such as `cn`. Feel free to customize generated styles—Tailwind variants live inside each component.
+
+## Path Aliases
+
+- `@/` → `src/`
+- `@shared/` → shared package (`../shared`)
+
+Update `tsconfig.app.json` and `vite.config.ts` if more aliases are required.

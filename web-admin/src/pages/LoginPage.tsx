@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { buildSessionPayload } from '../utils/session';
@@ -34,37 +34,8 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   );
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const session = localStorage.getItem('sproutify_session');
-    if (session) {
-      onLogin();
-      navigate('/');
-      return;
-    }
-
-    const emailParam = searchParams.get('email');
-
-    if (accessTokenParam && refreshTokenParam) {
-      handleTokenLogin(accessTokenParam, refreshTokenParam);
-      return;
-    }
-
-    if (emailParam) {
-      setIsAutoLoggingIn(true);
-      setTimeout(() => handleAutoLogin(emailParam), 100);
-      return;
-    }
-
-    setIsAutoLoggingIn(false);
-  }, [
-    accessTokenParam,
-    refreshTokenParam,
-    handleAutoLogin,
-    handleTokenLogin,
-    navigate,
-    onLogin,
-    searchParams,
-  ]);
+  const handleTokenLoginRef = useRef<((accessToken: string, refreshToken: string) => Promise<void>) | null>(null);
+  const handleAutoLoginRef = useRef<((emailParam: string) => Promise<void>) | null>(null);
 
   const handleTokenLogin = useCallback(async (accessToken: string, refreshToken: string) => {
     try {
@@ -172,6 +143,40 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       setIsAutoLoggingIn(false);
     }
   }, [navigate, onLogin]);
+
+  // Update refs when callbacks change
+  handleTokenLoginRef.current = handleTokenLogin;
+  handleAutoLoginRef.current = handleAutoLogin;
+
+  useEffect(() => {
+    const session = localStorage.getItem('sproutify_session');
+    if (session) {
+      onLogin();
+      navigate('/');
+      return;
+    }
+
+    const emailParam = searchParams.get('email');
+
+    if (accessTokenParam && refreshTokenParam && handleTokenLoginRef.current) {
+      handleTokenLoginRef.current(accessTokenParam, refreshTokenParam);
+      return;
+    }
+
+    if (emailParam && handleAutoLoginRef.current) {
+      setIsAutoLoggingIn(true);
+      setTimeout(() => handleAutoLoginRef.current!(emailParam), 100);
+      return;
+    }
+
+    setIsAutoLoggingIn(false);
+  }, [
+    accessTokenParam,
+    refreshTokenParam,
+    navigate,
+    onLogin,
+    searchParams,
+  ]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

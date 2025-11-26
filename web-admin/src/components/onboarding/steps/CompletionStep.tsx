@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Check, Sprout, ShoppingBasket, Package, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '../../../hooks/useOnboarding';
+import { Button } from '@/components/ui/button';
 import './steps.css';
 
 interface CompletionStepProps {
@@ -151,23 +152,22 @@ const CompletionStep = ({ onComplete, onBack }: CompletionStepProps) => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-        <button
+      <div className="flex gap-4 mt-6">
+        <Button
           type="button"
-          className="btn-modern btn-secondary-modern"
+          variant="outline"
           onClick={onBack}
-          style={{ flex: 1 }}
+          className="flex-1"
         >
           ← Back
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn-modern btn-primary-modern"
           onClick={onComplete}
-          style={{ flex: 2 }}
+          className="flex-[2]"
         >
           Start Using Sproutify →
-        </button>
+        </Button>
       </div>
     </div>
   );

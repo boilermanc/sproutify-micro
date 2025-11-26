@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import './TablePage.css';
-import { Edit, Trash2, UserPlus, X, Eye, EyeOff, Mail, Lock, User, Shield } from 'lucide-react';
+import { Edit, Trash2, UserPlus, Eye, EyeOff, Mail, Lock, User as UserIcon, Shield } from 'lucide-react';
+
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 interface User {
   id: string;
@@ -48,9 +55,9 @@ const UsersPage = () => {
 
         const formattedUsers: User[] = (data || []).map((user: any) => ({
           id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
+          name: user.name || '',
+          email: user.email || '',
+          role: user.role || 'Viewer',
           isActive: user.is_active,
           lastActive: user.last_active ? new Date(user.last_active).toLocaleDateString() : 'Never',
           createdAt: user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown',
@@ -115,12 +122,12 @@ const UsersPage = () => {
       // Format and add the new user to the list
       const newUser: User = {
         id: result.user.id,
-        name: result.user.name,
-        email: result.user.email,
-        role: result.user.role,
-        isActive: result.user.isActive,
+        name: result.user.name || formData.name,
+        email: result.user.email || formData.email,
+        role: result.user.role || formData.role,
+        isActive: result.user.isActive ?? true,
         lastActive: 'Just now',
-        createdAt: new Date(result.user.createdAt).toLocaleDateString(),
+        createdAt: result.user.createdAt ? new Date(result.user.createdAt).toLocaleDateString() : new Date().toLocaleDateString(),
       };
       setUsers([newUser, ...users]);
       
@@ -136,19 +143,30 @@ const UsersPage = () => {
   };
 
   const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const name = user.name || '';
+    const email = user.email || '';
+    const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'All' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
+
+  const getRoleBadgeVariant = (role: string) => {
+    switch (role.toLowerCase()) {
+      case 'owner': return 'default';
+      case 'editor': return 'secondary';
+      case 'viewer': return 'outline';
+      default: return 'outline';
+    }
+  };
 
   if (loading) {
     return (
       <div className="table-page">
         <div className="page-header">
           <div>
-            <h1>User Management</h1>
-            <p className="subtitle">Loading...</p>
+            <h1 className="text-3xl font-bold">User Management</h1>
+            <p className="text-muted-foreground">Loading...</p>
           </div>
         </div>
       </div>
@@ -156,221 +174,213 @@ const UsersPage = () => {
   }
 
   return (
-    <div className="table-page">
-      <div className="page-header">
+    <div className="space-y-6 p-8">
+      <div className="flex justify-between items-center">
         <div>
-          <h1>User Management</h1>
-          <p className="subtitle">Manage farm users and permissions</p>
+          <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
+          <p className="text-muted-foreground">Manage farm users and permissions</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-          + Add User
-        </button>
-      </div>
-
-      <div className="filters-bar">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Search users..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        <select
-          className="filter-select"
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-        >
-          <option value="All">All Roles</option>
-          <option value="Owner">Owner</option>
-          <option value="Editor">Editor</option>
-          <option value="Viewer">Viewer</option>
-        </select>
-      </div>
-
-      <div className="table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Last Active</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredUsers.map(user => (
-              <tr key={user.id}>
-                <td className="font-semibold">{user.name}</td>
-                <td>{user.email}</td>
-                <td>
-                  <span className={`badge badge-${user.role.toLowerCase()}`}>
-                    {user.role}
-                  </span>
-                </td>
-                <td>
-                  <span className={`status ${user.isActive ? 'active' : 'inactive'}`}>
-                    {user.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td>{user.lastActive}</td>
-                <td>{user.createdAt}</td>
-                <td>
-                  <div className="actions">
-                    <button className="action-icon" title="Edit" onClick={() => alert(`Edit ${user.name}`)}><Edit size={18} color="#5B7C99" /></button>
-                    <button className="action-icon" title="Delete" onClick={() => alert(`Delete ${user.name}`)}><Trash2 size={18} color="#E57373" /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {filteredUsers.length === 0 && (
-        <div className="empty-state">
-          <p>No users found</p>
-        </div>
-      )}
-
-      {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-content">
-                <div className="modal-icon-wrapper">
-                  <UserPlus size={24} />
-                </div>
-                <div>
-                  <h2>Create New User</h2>
-                  <p className="modal-subtitle">Add a new team member to your farm</p>
-                </div>
+        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+          <DialogTrigger asChild>
+            <Button>
+              <UserPlus className="mr-2 h-4 w-4" />
+              Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Create New User</DialogTitle>
+              <DialogDescription>
+                Add a new team member to your farm
+              </DialogDescription>
+            </DialogHeader>
+            
+            {error && (
+              <div className="bg-destructive/15 text-destructive p-3 rounded-md text-sm mb-4 flex items-center gap-2">
+                <span>!</span>
+                <span>{error}</span>
               </div>
-              <button className="close-btn" onClick={() => setShowAddModal(false)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className="modal-body">
-              {error && (
-                <div className="error-message">
-                  <div className="error-icon">!</div>
-                  <div className="error-text">{error}</div>
-                </div>
-              )}
-              <form onSubmit={(e) => { e.preventDefault(); handleCreateUser(); }}>
-                <div className="form-group">
-                  <label>
-                    <User size={16} />
-                    Full Name
-                  </label>
-                  <input 
-                    type="text" 
-                    placeholder="John Doe" 
+            )}
+
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="name">Full Name</Label>
+                <div className="relative">
+                  <UserIcon className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    placeholder="John Doe"
+                    className="pl-8"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
                     disabled={creating}
                   />
                 </div>
-                <div className="form-group">
-                  <label>
-                    <Mail size={16} />
-                    Email Address
-                  </label>
-                  <input 
-                    type="email" 
-                    placeholder="john.doe@example.com" 
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="email">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="john.doe@example.com"
+                    className="pl-8"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
                     disabled={creating}
                   />
                 </div>
-                <div className="form-group">
-                  <label>
-                    <Lock size={16} />
-                    Password
-                  </label>
-                  <div className="password-input-wrapper">
-                    <input 
-                      type={showPassword ? "text" : "password"} 
-                      placeholder="Minimum 6 characters" 
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      required
-                      disabled={creating}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle"
-                      onClick={() => setShowPassword(!showPassword)}
-                      disabled={creating}
-                    >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                  <div className="password-hint">Password must be at least 6 characters long</div>
-                </div>
-                <div className="form-group">
-                  <label>
-                    <Shield size={16} />
-                    Role
-                  </label>
-                  <select 
-                    value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Minimum 6 characters"
+                    className="pl-8 pr-10"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    disabled={creating}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowPassword(!showPassword)}
                     disabled={creating}
                   >
-                    <option value="Viewer">Viewer - Read-only access</option>
-                    <option value="Editor">Editor - Can edit data</option>
-                    <option value="Owner">Owner - Full access</option>
-                  </select>
-                  <div className="role-description">
-                    {formData.role === 'Viewer' && 'Can view data but cannot make changes'}
-                    {formData.role === 'Editor' && 'Can view and edit data but cannot manage users'}
-                    {formData.role === 'Owner' && 'Full access including user management'}
-                  </div>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
-              </form>
+                <p className="text-xs text-muted-foreground">Password must be at least 6 characters long</p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="role">Role</Label>
+                <Select 
+                  value={formData.role} 
+                  onValueChange={(value) => setFormData({ ...formData, role: value })}
+                  disabled={creating}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Viewer">Viewer - Read-only access</SelectItem>
+                    <SelectItem value="Editor">Editor - Can edit data</SelectItem>
+                    <SelectItem value="Owner">Owner - Full access</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {formData.role === 'Viewer' && 'Can view data but cannot make changes'}
+                  {formData.role === 'Editor' && 'Can view and edit data but cannot manage users'}
+                  {formData.role === 'Owner' && 'Full access including user management'}
+                </p>
+              </div>
             </div>
-            <div className="modal-footer">
-              <button 
-                type="button"
-                className="btn btn-secondary" 
-                onClick={() => {
-                  setShowAddModal(false);
-                  setFormData({ name: '', email: '', password: '', role: 'Viewer' });
-                  setError('');
-                  setShowPassword(false);
-                }}
-                disabled={creating}
-              >
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddModal(false)} disabled={creating}>
                 Cancel
-              </button>
-              <button 
-                type="button"
-                className="btn btn-primary" 
-                onClick={handleCreateUser}
-                disabled={creating}
-              >
+              </Button>
+              <Button onClick={handleCreateUser} disabled={creating}>
                 {creating ? (
                   <>
-                    <span className="spinner"></span>
-                    Creating User...
+                    <span className="animate-spin mr-2">⏳</span>
+                    Creating...
                   </>
                 ) : (
                   <>
-                    <UserPlus size={18} />
+                    <UserPlus className="mr-2 h-4 w-4" />
                     Create User
                   </>
                 )}
-              </button>
-            </div>
-          </div>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="flex items-center space-x-4">
+        <div className="flex-1 max-w-sm">
+          <Input
+            placeholder="Search users..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
-      )}
+        <div className="w-[200px]">
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Filter by role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Roles</SelectItem>
+              <SelectItem value="Owner">Owner</SelectItem>
+              <SelectItem value="Editor">Editor</SelectItem>
+              <SelectItem value="Viewer">Viewer</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last Active</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredUsers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="h-24 text-center">
+                  No users found.
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredUsers.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell className="font-medium">{user.name}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>
+                    <Badge variant={getRoleBadgeVariant(user.role)}>
+                      {user.role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={user.isActive ? 'default' : 'secondary'} className={user.isActive ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500'}>
+                      {user.isActive ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{user.lastActive}</TableCell>
+                  <TableCell>{user.createdAt}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => alert(`Edit ${user.name}`)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => alert(`Delete ${user.name}`)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 };

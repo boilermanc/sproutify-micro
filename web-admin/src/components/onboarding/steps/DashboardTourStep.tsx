@@ -1,4 +1,5 @@
 import { ShoppingBasket, Sprout, ClipboardList, Scissors } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import './steps.css';
 
 interface DashboardTourStepProps {
@@ -62,23 +63,22 @@ const DashboardTourStep = ({ onNext, onBack }: DashboardTourStepProps) => {
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-        <button
+      <div className="flex gap-4 mt-6">
+        <Button
           type="button"
-          className="btn-modern btn-secondary-modern"
+          variant="outline"
           onClick={onBack}
-          style={{ flex: 1 }}
+          className="flex-1"
         >
           ← Back
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn-modern btn-primary-modern"
           onClick={onNext}
-          style={{ flex: 2 }}
+          className="flex-[2]"
         >
           Continue →
-        </button>
+        </Button>
       </div>
     </div>
   );

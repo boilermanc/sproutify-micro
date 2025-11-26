@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
+import { Button } from '@/components/ui/button';
 import './steps.css';
 
 interface BatchStepProps {
@@ -22,14 +23,15 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
   useEffect(() => {
     if (varietyId) {
       const fetchVariety = async () => {
+        // Actual DB column: varietyid, name (not variety_id, variety_name)
         const { data } = await supabase
           .from('varieties')
-          .select('variety_name')
-          .eq('variety_id', varietyId)
+          .select('varietyid, name')
+          .eq('varietyid', varietyId)
           .single();
         
         if (data) {
-          setVarietyName(data.variety_name);
+          setVarietyName(data.name || data.variety_name || '');
         }
       };
       fetchVariety();
@@ -70,14 +72,21 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
 
       const { farmUuid } = JSON.parse(sessionData);
 
+      // seedbatches table uses varietyid (FK), not variety_name
+      // Use the varietyId prop that was passed in
+      if (!varietyId) {
+        throw new Error('Variety ID is required');
+      }
+
       const { data, error: insertError } = await supabase
         .from('seedbatches')
         .insert({
-          variety_name: varietyName,
-          purchase_date: purchaseDate,
+          varietyid: varietyId, // Actual column: varietyid (FK to varieties.varietyid)
+          purchasedate: purchaseDate, // Actual column: purchasedate
           quantity: parseFloat(quantity),
-          vendor_id: vendorId || null,
+          vendorid: vendorId || null, // Actual column: vendorid
           farm_uuid: farmUuid,
+          status: 'new', // Required field
         })
         .select()
         .single();
@@ -85,7 +94,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
       if (insertError) throw insertError;
 
       if (data) {
-        onDataCreated(data.batch_id);
+        onDataCreated(data.batchid || data.batch_id); // Actual column: batchid
         setTimeout(() => {
           onNext();
         }, 500);
@@ -161,35 +170,34 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-          <button
+        <div className="flex gap-4 mt-6">
+          <Button
             type="button"
-            className="btn-modern btn-secondary-modern"
+            variant="outline"
             onClick={onBack}
-            style={{ flex: 1 }}
+            className="flex-1"
           >
             ← Back
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className="btn-modern btn-primary-modern"
             disabled={loading}
-            style={{ flex: 2 }}
+            className="flex-[2]"
           >
             {loading ? 'Creating...' : 'Add Batch →'}
-          </button>
+          </Button>
         </div>
       </form>
 
-      <div className="skip-section">
-        <button
+      <div className="mt-6 text-center">
+        <Button
           type="button"
-          className="wizard-btn-skip"
+          variant="ghost"
           onClick={onSkip}
-          style={{ fontSize: '1rem', padding: '0.75rem 1.5rem' }}
+          className="text-sm"
         >
           Skip for now →
-        </button>
+        </Button>
         <p style={{ color: '#8A95A1', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           You can add batches later when you purchase seeds
         </p>

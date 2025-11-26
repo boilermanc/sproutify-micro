@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useOnboarding } from '../../hooks/useOnboarding';
 import OnboardingStep from './OnboardingStep';
 import EducationStep from './steps/EducationStep';
@@ -9,7 +9,10 @@ import BatchStep from './steps/BatchStep';
 import TrayStep from './steps/TrayStep';
 import DashboardTourStep from './steps/DashboardTourStep';
 import CompletionStep from './steps/CompletionStep';
-import './onboarding.css';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
 interface OnboardingWizardProps {
   onComplete: () => void;
@@ -145,57 +148,68 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
   };
 
   return (
-    <div className="onboarding-wizard-overlay" onClick={onClose}>
-      <div className="onboarding-wizard" onClick={(e) => e.stopPropagation()}>
-        <div className="wizard-header">
-          <button className="wizard-close-btn" onClick={onClose} aria-label="Close">
-            <X size={20} />
-          </button>
-          <div className="wizard-header-content">
-            <h2>Setup Wizard</h2>
-            <p style={{ opacity: 0.9, marginTop: '0.5rem' }}>
-              Step {currentStepIndex + 1} of {TOTAL_STEPS}
-            </p>
-            <div className="wizard-progress-bar">
-              <div
-                className="wizard-progress-fill"
-                style={{ width: `${progress}%` }}
-              />
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col p-0 [&>button]:hidden">
+        <Card className="border-0 shadow-none flex flex-col h-full">
+          <CardHeader className="border-b pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <DialogTitle className="text-2xl">Setup Wizard</DialogTitle>
+                <DialogDescription className="mt-2">
+                  Step {currentStepIndex + 1} of {TOTAL_STEPS}
+                </DialogDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="h-8 w-8"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
+            <div className="mt-4">
+              <Progress value={progress} className="h-2" />
+            </div>
+          </CardHeader>
+
+          <CardContent className="flex-1 overflow-y-auto p-6">
+            <OnboardingStep
+              title={stepTitles[currentStepIndex]}
+              description={stepDescriptions[currentStepIndex]}
+              isExiting={isExiting}
+            >
+              {renderStep()}
+            </OnboardingStep>
+          </CardContent>
+
+          <div className="border-t p-4 flex items-center justify-between gap-4">
+            {currentStepIndex > 0 ? (
+              <Button variant="outline" onClick={handleBack}>
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+            ) : (
+              <div />
+            )}
+            <div className="flex-1" />
+            {currentStepIndex < TOTAL_STEPS - 1 ? (
+              <Button onClick={handleNext}>
+                Next
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            ) : (
+              <Button onClick={handleComplete}>
+                Complete Setup
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            )}
           </div>
-        </div>
-
-        <div className="wizard-content">
-          <OnboardingStep
-            title={stepTitles[currentStepIndex]}
-            description={stepDescriptions[currentStepIndex]}
-            isExiting={isExiting}
-          >
-            {renderStep()}
-          </OnboardingStep>
-        </div>
-
-        <div className="wizard-footer">
-          {currentStepIndex > 0 && (
-            <button className="wizard-nav-btn wizard-btn-back" onClick={handleBack}>
-              ← Back
-            </button>
-          )}
-          <div style={{ flex: 1 }} />
-          {currentStepIndex < TOTAL_STEPS - 1 ? (
-            <button className="wizard-nav-btn wizard-btn-next" onClick={handleNext}>
-              Next →
-            </button>
-          ) : (
-            <button className="wizard-nav-btn wizard-btn-next" onClick={handleComplete}>
-              Complete Setup
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+        </Card>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 export default OnboardingWizard;
-

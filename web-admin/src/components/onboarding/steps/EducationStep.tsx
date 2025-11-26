@@ -1,5 +1,6 @@
 import { ArrowRight } from 'lucide-react';
-import './steps.css';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 interface EducationStepProps {
   onNext: () => void;
@@ -15,47 +16,75 @@ const EducationStep = ({ onNext }: EducationStepProps) => {
   ];
 
   return (
-    <div className="education-step">
-      <div className="flow-diagram">
+    <div className="space-y-6">
+      <div className="flex items-center gap-4 overflow-x-auto pb-4">
         {flowSteps.map((step, index) => (
-          <div key={index} className="flow-item" style={{ animationDelay: `${index * 0.1}s` }}>
-            <div className="flow-icon">{step.icon}</div>
-            <div className="flow-label">{step.label}</div>
-            <div className="flow-description">{step.description}</div>
+          <div key={index} className="flex items-center gap-2 min-w-[140px]">
+            <div className="flex flex-col items-center gap-2 p-4 rounded-lg bg-muted/50">
+              <div className="text-3xl">{step.icon}</div>
+              <div className="text-sm font-semibold text-center">{step.label}</div>
+              <div className="text-xs text-muted-foreground text-center">{step.description}</div>
+            </div>
             {index < flowSteps.length - 1 && (
-              <div className="flow-arrow">
-                <ArrowRight size={24} color="#5B7C99" />
-              </div>
+              <ArrowRight className="h-6 w-6 text-muted-foreground flex-shrink-0" />
             )}
           </div>
         ))}
       </div>
 
-      <div className="education-content">
-        <div className="info-card">
-          <h3>🌱 Varieties</h3>
-          <p>Types of microgreens you grow (e.g., Broccoli, Pea Shoots, Sunflower)</p>
-        </div>
-        <div className="info-card">
-          <h3>📋 Recipes</h3>
-          <p>Growing instructions for each variety, including steps and timing</p>
-        </div>
-        <div className="info-card">
-          <h3>📦 Batches</h3>
-          <p>Track your seed purchases to manage inventory</p>
-        </div>
-        <div className="info-card">
-          <h3>🧺 Trays</h3>
-          <p>Physical containers you're growing - the core tracking unit</p>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-semibold mb-2 flex items-center gap-2">
+              <span className="text-2xl">🌱</span>
+              Varieties
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Types of microgreens you grow (e.g., Broccoli, Pea Shoots, Sunflower)
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-semibold mb-2 flex items-center gap-2">
+              <span className="text-2xl">📋</span>
+              Recipes
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Growing instructions for each variety, including steps and timing
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-semibold mb-2 flex items-center gap-2">
+              <span className="text-2xl">📦</span>
+              Batches
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Track your seed purchases to manage inventory
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-semibold mb-2 flex items-center gap-2">
+              <span className="text-2xl">🧺</span>
+              Trays
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Physical containers you're growing - the core tracking unit
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      <button className="btn-modern btn-primary-modern" onClick={onNext} style={{ width: '100%', marginTop: '2rem' }}>
-        Got it! Let's Start →
-      </button>
+      <Button onClick={onNext} className="w-full mt-6">
+        Got it! Let's Start
+        <ArrowRight className="ml-2 h-4 w-4" />
+      </Button>
     </div>
   );
 };
 
 export default EducationStep;
-

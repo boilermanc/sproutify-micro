@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOnboarding } from '../../hooks/useOnboarding';
-import './onboarding.css';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 interface WelcomeModalProps {
   farmName: string;
@@ -9,50 +10,43 @@ interface WelcomeModalProps {
 }
 
 const WelcomeModal = ({ farmName, onStart, onSkip }: WelcomeModalProps) => {
-  const [isVisible, setIsVisible] = useState(true);
-  const [isClosing, setIsClosing] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
 
   const handleStart = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsVisible(false);
-      onStart();
-    }, 300);
+    setIsOpen(false);
+    onStart();
   };
 
   const handleSkip = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setIsVisible(false);
-      onSkip();
-    }, 300);
+    setIsOpen(false);
+    onSkip();
   };
 
-  if (!isVisible) return null;
-
   return (
-    <div className={`welcome-modal-overlay ${isClosing ? 'closing' : ''}`} onClick={handleSkip}>
-      <div className="welcome-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="welcome-modal-content">
-          <h1>🌱 Welcome to {farmName}!</h1>
-          <p>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="text-4xl">🌱</div>
+            <DialogTitle className="text-2xl">Welcome to {farmName}!</DialogTitle>
+          </div>
+          <DialogDescription className="text-base">
             You're starting a <strong>7-day free trial</strong> of Sproutify Micro. 
             Let's get your farm set up in just a few minutes so you can start tracking 
             your microgreen operations right away.
-          </p>
-          <div className="welcome-modal-buttons">
-            <button className="btn-modern btn-primary-modern" onClick={handleStart}>
-              Let's Get Started
-            </button>
-            <button className="btn-modern btn-secondary-modern" onClick={handleSkip}>
-              I'll Explore on My Own
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+          <Button variant="outline" onClick={handleSkip} className="w-full sm:w-auto">
+            I'll Explore on My Own
+          </Button>
+          <Button onClick={handleStart} className="w-full sm:w-auto">
+            Let's Get Started
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 export default WelcomeModal;
-

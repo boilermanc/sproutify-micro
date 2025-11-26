@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
+import { Button } from '@/components/ui/button';
 import './steps.css';
 
 interface TrayStepProps {
@@ -43,14 +44,39 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
         }
       }
 
-      // Fetch batches
+      // Fetch batches - actual columns: batchid, varietyid (FK)
       const { data: batchesData } = await supabase
         .from('seedbatches')
-        .select('batch_id, variety_name')
+        .select('batchid, varietyid')
         .eq('farm_uuid', farmUuid);
 
       if (batchesData) {
-        setBatches(batchesData);
+        // Fetch variety names
+        const varietyIds = batchesData
+          .map(b => b.varietyid)
+          .filter(id => id !== null && id !== undefined);
+        
+        let varietiesMap: Record<number, string> = {};
+        if (varietyIds.length > 0) {
+          const { data: varietiesData } = await supabase
+            .from('varieties')
+            .select('varietyid, name')
+            .in('varietyid', varietyIds);
+          
+          varietiesMap = (varietiesData || []).reduce((acc, v) => {
+            acc[v.varietyid] = v.name;
+            return acc;
+          }, {} as Record<number, string>);
+        }
+        
+        // Normalize batches with variety names
+        const normalized = batchesData.map((batch: any) => ({
+          batch_id: batch.batchid, // Map for compatibility
+          batchid: batch.batchid,
+          variety_name: varietiesMap[batch.varietyid] || ''
+        }));
+        
+        setBatches(normalized);
       }
     };
 
@@ -183,23 +209,22 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-          <button
+        <div className="flex gap-4 mt-6">
+          <Button
             type="button"
-            className="btn-modern btn-secondary-modern"
+            variant="outline"
             onClick={onBack}
-            style={{ flex: 1 }}
+            className="flex-1"
           >
             ← Back
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className="btn-modern btn-primary-modern"
             disabled={loading || !selectedRecipeId}
-            style={{ flex: 2 }}
+            className="flex-[2]"
           >
             {loading ? 'Creating...' : 'Create Tray →'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

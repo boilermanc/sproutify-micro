@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '../../hooks/useOnboarding';
-import './onboarding.css';
+import { Button } from '@/components/ui/button';
 
 interface EmptyStateProps {
   icon?: ReactNode;
@@ -38,24 +38,28 @@ const EmptyState = ({
   };
 
   return (
-    <div className="empty-state">
-      {icon && <div className="empty-state-icon">{icon}</div>}
-      <h3>{title}</h3>
-      <p>{description}</p>
+    <div className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
+      {icon && (
+        <div className="flex items-center justify-center mb-4">
+          {icon}
+        </div>
+      )}
+      <h3 className="text-xl font-semibold text-foreground">{title}</h3>
+      <p className="text-muted-foreground max-w-md">{description}</p>
       {actionLabel && (
-        <button className="btn-modern btn-primary-modern" onClick={handleAction}>
+        <Button onClick={handleAction} className="mt-4">
           {actionLabel}
-        </button>
+        </Button>
       )}
       {showOnboardingLink && !state.onboarding_completed && (
-        <div style={{ marginTop: '1rem' }}>
-          <button
-            className="wizard-btn-skip"
+        <div className="mt-4">
+          <Button
+            variant="ghost"
             onClick={handleStartOnboarding}
-            style={{ fontSize: '0.875rem' }}
+            className="text-sm"
           >
             Need help? Start the setup wizard →
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -63,4 +67,3 @@ const EmptyState = ({
 };
 
 export default EmptyState;
-

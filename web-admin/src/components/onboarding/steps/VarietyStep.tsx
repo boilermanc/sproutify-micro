@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
+import { Button } from '@/components/ui/button';
 import './steps.css';
 
 interface VarietyStepProps {
@@ -46,32 +47,25 @@ const VarietyStep = ({ onNext, onDataCreated }: VarietyStepProps) => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const payloadBase = {
-        variety_name: varietyName.trim(),
+      // Use actual DB column names: name (not variety_name), no farm_uuid
+      const payload = {
+        name: varietyName.trim(), // DB column is 'name'
         description: description.trim() || null,
-        is_active: true,
+        // No farm_uuid - varieties are global
       };
 
-      const insertWithColumn = async (column: string) =>
-        supabase
-          .from('varieties')
-          .insert({
-            ...payloadBase,
-            [column]: farmUuid,
-          })
-          .select()
-          .single();
-
-      let { data, error: insertError } = await insertWithColumn('farm_uuid');
-
-      if (insertError?.code === '42703') {
-        ({ data, error: insertError } = await insertWithColumn('farmuuid'));
-      }
+      const { data, error: insertError } = await supabase
+        .from('varieties')
+        .insert(payload)
+        .select()
+        .single();
 
       if (insertError) throw insertError;
 
       if (data) {
-        onDataCreated(data.variety_id);
+        // Map varietyid to variety_id for consistency
+        const varietyId = data.varietyid || data.variety_id;
+        onDataCreated(varietyId);
         setTimeout(() => {
           onNext();
         }, 500);
@@ -129,14 +123,13 @@ const VarietyStep = ({ onNext, onDataCreated }: VarietyStepProps) => {
           </div>
         )}
 
-        <button
+        <Button
           type="submit"
-          className="btn-modern btn-primary-modern"
           disabled={loading}
-          style={{ width: '100%' }}
+          className="w-full"
         >
           {loading ? 'Creating...' : 'Create Variety →'}
-        </button>
+        </Button>
       </form>
     </div>
   );

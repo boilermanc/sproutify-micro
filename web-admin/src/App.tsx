@@ -14,6 +14,7 @@ import VendorsPage from './pages/VendorsPage';
 import SuppliesPage from './pages/SuppliesPage';
 import TraysPage from './pages/TraysPage';
 import SettingsPage from './pages/SettingsPage';
+import DailyFlow from './components/DailyFlow';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
 import './App.css';
@@ -109,6 +110,7 @@ function App() {
           <Route path="vendors" element={<VendorsPage />} />
           <Route path="supplies" element={<SuppliesPage />} />
           <Route path="trays" element={<TraysPage />} />
+          <Route path="flow" element={<DailyFlow />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

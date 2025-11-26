@@ -1,7 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || import.meta.env.EXPO_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || import.meta.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+if (!supabaseUrl) {
+  throw new Error(
+    'Missing Supabase URL. Please set VITE_SUPABASE_URL in your .env file. ' +
+    'Create a .env file in the web-admin directory with: VITE_SUPABASE_URL=your_supabase_url'
+  );
+}
+
+if (!supabaseAnonKey) {
+  throw new Error(
+    'Missing Supabase Anon Key. Please set VITE_SUPABASE_ANON_KEY in your .env file. ' +
+    'Create a .env file in the web-admin directory with: VITE_SUPABASE_ANON_KEY=your_supabase_anon_key'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -35,6 +49,8 @@ export type Database = {
           description: string;
           farm_uuid: string;
           is_active: boolean;
+          stock: number;
+          stock_unit: string;
           created_at: string;
         };
       };

@@ -208,3 +208,5 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
 
 export default BatchStep;
 
+
+

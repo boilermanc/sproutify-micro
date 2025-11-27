@@ -39,6 +39,9 @@ const Dashboard = () => {
     totalOrders: 0,
     recentHarvests: 0,
     upcomingHarvests: 0,
+    totalProducts: 0,
+    standingOrders: 0,
+    weeklyTasks: 0,
   });
 
   const [farmInfo, setFarmInfo] = useState({
@@ -158,13 +161,74 @@ const Dashboard = () => {
           .gte('sow_date', today.toISOString())
           .lte('sow_date', nextWeek.toISOString());
 
+        // Fetch products count
+        let totalProducts = 0;
+        try {
+          const { count: productsCount } = await supabase
+            .from('products')
+            .select('*', { count: 'exact', head: true })
+            .eq('farm_uuid', farmUuid)
+            .eq('is_active', true);
+          totalProducts = productsCount || 0;
+        } catch (e) {
+          // Products table might not exist yet
+        }
+
+        // Fetch standing orders count
+        let standingOrders = 0;
+        try {
+          const { count: standingOrdersCount } = await supabase
+            .from('standing_orders')
+            .select('*', { count: 'exact', head: true })
+            .eq('farm_uuid', farmUuid)
+            .eq('is_active', true);
+          standingOrders = standingOrdersCount || 0;
+        } catch (e) {
+          // Standing orders table might not exist yet
+        }
+
+        // Fetch weekly tasks count (pending tasks for this week)
+        let weeklyTasks = 0;
+        try {
+          const weekStart = new Date();
+          weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
+
+          const { count: tasksCount } = await supabase
+            .from('weekly_tasks')
+            .select('*', { count: 'exact', head: true })
+            .eq('farm_uuid', farmUuid)
+            .eq('status', 'pending')
+            .gte('task_date', weekStart.toISOString().split('T')[0])
+            .lte('task_date', weekEnd.toISOString().split('T')[0]);
+          weeklyTasks = tasksCount || 0;
+        } catch (e) {
+          // Weekly tasks table might not exist yet
+        }
+
+        // Fetch orders count (from new orders table)
+        let totalOrders = 0;
+        try {
+          const { count: ordersCount } = await supabase
+            .from('orders')
+            .select('*', { count: 'exact', head: true })
+            .eq('farm_uuid', farmUuid);
+          totalOrders = ordersCount || 0;
+        } catch (e) {
+          // Orders table might not exist yet, keep at 0
+        }
+
         setStats({
           totalTrays: totalTrays || 0,
           activeTrays: activeTrays || 0,
           totalVarieties: totalVarieties || 0,
-          totalOrders: 0, // Orders table doesn't exist in schema, keeping at 0
+          totalOrders,
           recentHarvests: recentHarvests || 0,
           upcomingHarvests: upcomingHarvests || 0,
+          totalProducts,
+          standingOrders,
+          weeklyTasks,
         });
 
         // Fetch harvest data for chart (last 7 days)
@@ -200,7 +264,10 @@ const Dashboard = () => {
           .from('trays')
           .select(`
             recipe_id,
-            recipes!inner(variety_name)
+            recipes!inner(
+              variety_id,
+              varieties!inner(varietyid, name)
+            )
           `)
           .eq('farm_uuid', farmUuid)
           .is('harvest_date', null);
@@ -208,7 +275,7 @@ const Dashboard = () => {
         if (traysData) {
           const varietyCounts: { [key: string]: number } = {};
           traysData.forEach((tray: any) => {
-            const variety = tray.recipes?.variety_name || 'Unknown';
+            const variety = tray.recipes?.varieties?.name || tray.recipes?.variety_name || 'Unknown';
             varietyCounts[variety] = (varietyCounts[variety] || 0) + 1;
           });
 
@@ -225,7 +292,10 @@ const Dashboard = () => {
           .select(`
             yield,
             recipe_id,
-            recipes!inner(variety_name)
+            recipes!inner(
+              variety_id,
+              varieties!inner(varietyid, name)
+            )
           `)
           .eq('farm_uuid', farmUuid)
           .not('customer_id', 'is', null)
@@ -234,7 +304,7 @@ const Dashboard = () => {
         if (salesTraysData && salesTraysData.length > 0) {
           const varietySales: { [key: string]: number } = {};
           salesTraysData.forEach((tray: any) => {
-            const variety = tray.recipes?.variety_name || 'Unknown';
+            const variety = tray.recipes?.varieties?.name || tray.recipes?.variety_name || 'Unknown';
             const yieldValue = parseFloat(tray.yield || 0);
             const sales = yieldValue * 10; // $10 per unit yield (same as OrdersPage)
             varietySales[variety] = (varietySales[variety] || 0) + sales;
@@ -422,7 +492,7 @@ const Dashboard = () => {
 
       {shouldShowTrialBanner && <TrialBanner trialEndDate={trialEndDate} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
         <Card className="border-l-4 border-l-emerald-500 shadow-sm hover:shadow-md transition-all duration-200">
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
@@ -463,6 +533,51 @@ const Dashboard = () => {
                 <p className="text-sm font-medium text-gray-500">Orders</p>
                 <h3 className="text-2xl font-bold text-gray-900">{stats.totalOrders}</h3>
                 <p className="text-xs text-gray-500">active orders</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-indigo-500 shadow-sm hover:shadow-md transition-all duration-200">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-indigo-50 rounded-lg">
+                <Package className="h-8 w-8 text-indigo-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Products</p>
+                <h3 className="text-2xl font-bold text-gray-900">{stats.totalProducts}</h3>
+                <p className="text-xs text-gray-500">active products</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-purple-500 shadow-sm hover:shadow-md transition-all duration-200">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-purple-50 rounded-lg">
+                <ShoppingBasket className="h-8 w-8 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Standing Orders</p>
+                <h3 className="text-2xl font-bold text-gray-900">{stats.standingOrders}</h3>
+                <p className="text-xs text-gray-500">recurring orders</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-teal-500 shadow-sm hover:shadow-md transition-all duration-200">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-teal-50 rounded-lg">
+                <ClipboardList className="h-8 w-8 text-teal-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-500">Weekly Tasks</p>
+                <h3 className="text-2xl font-bold text-gray-900">{stats.weeklyTasks}</h3>
+                <p className="text-xs text-gray-500">pending this week</p>
               </div>
             </div>
           </CardContent>

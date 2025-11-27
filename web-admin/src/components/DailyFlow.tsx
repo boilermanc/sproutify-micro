@@ -8,12 +8,29 @@ import {
   ChevronRight, 
   MoreVertical,
   ArrowRight,
-  Sprout
+  Sprout,
+  Eye,
+  ExternalLink,
+  SkipForward
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { fetchDailyTasks, completeTask, getActiveTraysCount } from '../services/dailyFlowService';
 import type { DailyTask } from '../services/dailyFlowService';
 import { cn } from '@/lib/utils';
@@ -23,6 +40,7 @@ export default function DailyFlow() {
   const [activeTraysCount, setActiveTraysCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+  const [viewingTask, setViewingTask] = useState<DailyTask | null>(null);
 
   const loadTasks = async () => {
     setLoading(true);
@@ -47,24 +65,40 @@ export default function DailyFlow() {
     return () => clearInterval(interval);
   }, []);
 
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    show: boolean;
+  }>({ type: 'success', message: '', show: false });
+
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message, show: true });
+    setTimeout(() => setNotification({ type, message, show: false }), 5000);
+  };
+
   const handleComplete = async (task: DailyTask) => {
     setCompletingIds(prev => new Set(prev).add(task.id));
     try {
       const success = await completeTask(task);
       if (success) {
-        // Remove completed task from list
+        // Remove completed task from list immediately for better UX
         setTasks(prev => prev.filter(t => t.id !== task.id));
-        // Reload to get updated counts
-        await loadTasks();
         
-        // Simple notification (you can replace with toast later)
-        alert(`Batch ${task.batchId} marked as ${task.action === 'Harvest' ? 'harvested' : 'completed'}.`);
+        // Wait a moment for database to commit, then reload to get updated counts
+        // This ensures the fetchDailyTasks sees the updated tray_steps
+        setTimeout(async () => {
+          await loadTasks();
+        }, 500);
+        
+        // Show formatted success notification
+        showNotification('success', `${task.action} completed for ${task.trays} ${task.trays === 1 ? 'tray' : 'trays'} (${task.batchId})`);
       } else {
-        alert('Failed to complete task. Please try again.');
+        showNotification('error', 'Failed to complete task. Please try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error completing task:', error);
-      alert('Failed to complete task. Please try again.');
+      const errorMessage = error?.message || 'Failed to complete task. Please try again.';
+      showNotification('error', errorMessage);
     } finally {
       setCompletingIds(prev => {
         const next = new Set(prev);
@@ -72,6 +106,18 @@ export default function DailyFlow() {
         return next;
       });
     }
+  };
+
+  const handleViewDetails = (task: DailyTask) => {
+    setViewingTask(task);
+  };
+
+  const handleSkip = async (task: DailyTask) => {
+    if (!confirm(`Skip this ${task.action} task for ${task.trays} tray(s)? You can complete it later.`)) {
+      return;
+    }
+    // For now, just remove from the list (you might want to mark as skipped in the database)
+    setTasks(prev => prev.filter(t => t.id !== task.id));
   };
 
   // Grouping Logic: Group by action type
@@ -133,6 +179,7 @@ export default function DailyFlow() {
                   variant="harvest" 
                   onComplete={handleComplete}
                   isCompleting={completingIds.has(task.id)}
+                  onViewDetails={handleViewDetails}
                 />
               ))}
             </div>
@@ -155,6 +202,8 @@ export default function DailyFlow() {
                   variant={task.action.toLowerCase() === 'uncover' ? 'warning' : 'default'} 
                   onComplete={handleComplete}
                   isCompleting={completingIds.has(task.id)}
+                  onViewDetails={handleViewDetails}
+                  onSkip={handleSkip}
                 />
               ))}
             </div>
@@ -173,6 +222,149 @@ export default function DailyFlow() {
         )}
 
       </div>
+
+      {/* Notification Toast */}
+      {notification.show && (
+        <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-5">
+          <Card className={cn(
+            "p-4 shadow-lg border-2 min-w-[300px]",
+            notification.type === 'success' 
+              ? "bg-emerald-50 border-emerald-200 text-emerald-900" 
+              : "bg-red-50 border-red-200 text-red-900"
+          )}>
+            <div className="flex items-start gap-3">
+              <div className={cn(
+                "h-5 w-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
+                notification.type === 'success' ? "bg-emerald-500" : "bg-red-500"
+              )}>
+                {notification.type === 'success' ? (
+                  <Check className="h-3 w-3 text-white" />
+                ) : (
+                  <span className="text-white text-xs font-bold">×</span>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-sm">
+                  {notification.type === 'success' ? 'Success' : 'Error'}
+                </p>
+                <p className="text-sm mt-1">{notification.message}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-slate-500 hover:text-slate-900"
+                onClick={() => setNotification({ ...notification, show: false })}
+              >
+                <span className="text-lg">×</span>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Task Details Modal */}
+      <Dialog open={!!viewingTask} onOpenChange={(open) => !open && setViewingTask(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {viewingTask && (
+                <>
+                  {viewingTask.action === 'Harvest' && <Scissors className="h-5 w-5 text-emerald-600" />}
+                  {viewingTask.action === 'Uncover' && <Sun className="h-5 w-5 text-amber-600" />}
+                  {(viewingTask.action === 'Water' || viewingTask.action === 'Blackout') && <Droplets className="h-5 w-5 text-blue-600" />}
+                  Task Details
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed information about this task
+            </DialogDescription>
+          </DialogHeader>
+          {viewingTask && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Action</p>
+                  <p className="text-base font-semibold text-slate-900">{viewingTask.action}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Crop</p>
+                  <p className="text-base font-semibold text-slate-900">{viewingTask.crop}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Batch ID</p>
+                  <p className="text-base font-mono text-slate-900">{viewingTask.batchId}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Number of Trays</p>
+                  <p className="text-base font-semibold text-slate-900">{viewingTask.trays} {viewingTask.trays === 1 ? 'Tray' : 'Trays'}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-slate-500">Growth Progress</p>
+                <div className="flex items-center gap-2">
+                  <Progress 
+                    value={(viewingTask.dayCurrent / viewingTask.dayTotal) * 100} 
+                    className="flex-1 h-2"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">
+                    Day {viewingTask.dayCurrent} of {viewingTask.dayTotal}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Location</p>
+                  <p className="text-base text-slate-900">{viewingTask.location}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Status</p>
+                  <Badge 
+                    variant={viewingTask.status === 'urgent' ? 'destructive' : 'secondary'}
+                    className="mt-1"
+                  >
+                    {viewingTask.status === 'urgent' ? 'Urgent' : 'Pending'}
+                  </Badge>
+                </div>
+              </div>
+
+              {viewingTask.stepDescription && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Current Step</p>
+                  <p className="text-base text-slate-900 italic">{viewingTask.stepDescription}</p>
+                </div>
+              )}
+
+              <div className="pt-4 border-t border-slate-200">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setViewingTask(null)}
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setViewingTask(null);
+                      handleComplete(viewingTask);
+                    }}
+                    className="flex-1"
+                    disabled={completingIds.has(viewingTask.id)}
+                  >
+                    {completingIds.has(viewingTask.id) ? 'Processing...' : 'Mark as Done'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -183,9 +375,11 @@ interface TaskCardProps {
   variant: 'harvest' | 'warning' | 'default';
   onComplete: (task: DailyTask) => void;
   isCompleting: boolean;
+  onViewDetails?: (task: DailyTask) => void;
+  onSkip?: (task: DailyTask) => void;
 }
 
-const TaskCard = ({ task, variant, onComplete, isCompleting }: TaskCardProps) => {
+const TaskCard = ({ task, variant, onComplete, isCompleting, onViewDetails, onSkip }: TaskCardProps) => {
   // Styles based on action type
   const styles = {
     harvest: {
@@ -287,13 +481,48 @@ const TaskCard = ({ task, variant, onComplete, isCompleting }: TaskCardProps) =>
             )}
           </Button>
           
-          <Button 
-            variant="outline"
-            size="icon"
-            className="border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-          >
-            <MoreVertical size={18} />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="outline"
+                size="icon"
+                className="border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              >
+                <MoreVertical size={18} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem 
+                onClick={() => onViewDetails?.(task)}
+                className="cursor-pointer"
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                View Details
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => {
+                  // Navigate to trays page filtered by this batch/recipe
+                  window.location.href = `/trays?recipe=${task.recipeId}`;
+                }}
+                className="cursor-pointer"
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                View Trays
+              </DropdownMenuItem>
+              {onSkip && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    onClick={() => onSkip(task)}
+                    className="cursor-pointer text-amber-600 focus:text-amber-600"
+                  >
+                    <SkipForward className="mr-2 h-4 w-4" />
+                    Skip Task
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </Card>

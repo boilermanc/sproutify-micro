@@ -7,12 +7,17 @@ import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
 import VarietiesPage from './pages/VarietiesPage';
 import RecipesPage from './pages/RecipesPage';
+import ProductsPage from './pages/ProductsPage';
+import MixCalculatorPage from './pages/MixCalculatorPage';
 import BatchesPage from './pages/BatchesPage';
 import OrdersPage from './pages/OrdersPage';
+import StandingOrdersPage from './pages/StandingOrdersPage';
+import WeeklyTasksPage from './pages/WeeklyTasksPage';
 import CustomersPage from './pages/CustomersPage';
 import VendorsPage from './pages/VendorsPage';
 import SuppliesPage from './pages/SuppliesPage';
 import TraysPage from './pages/TraysPage';
+import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import DailyFlow from './components/DailyFlow';
 import Layout from './components/Layout';
@@ -104,12 +109,17 @@ function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="varieties" element={<VarietiesPage />} />
           <Route path="recipes" element={<RecipesPage />} />
+          <Route path="products" element={<ProductsPage />} />
+          <Route path="mix-calculator" element={<MixCalculatorPage />} />
           <Route path="batches" element={<BatchesPage />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="standing-orders" element={<StandingOrdersPage />} />
+          <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="vendors" element={<VendorsPage />} />
           <Route path="supplies" element={<SuppliesPage />} />
           <Route path="trays" element={<TraysPage />} />
+          <Route path="reports" element={<ReportsPage />} />
           <Route path="flow" element={<DailyFlow />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

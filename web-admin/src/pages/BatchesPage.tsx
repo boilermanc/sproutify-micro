@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Eye, Edit, Package, Plus, Search } from 'lucide-react';
+import { Edit, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,7 +16,12 @@ const BatchesPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [selectedBatch, setSelectedBatch] = useState<any>(null);
+  const [editingBatch, setEditingBatch] = useState<any>(null);
   const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [newBatch, setNewBatch] = useState({
     variety_id: '',
     vendor_id: '',
@@ -311,6 +316,83 @@ const BatchesPage = () => {
     }
   };
 
+  const handleViewBatch = (batch: any) => {
+    setSelectedBatch(batch);
+    setIsViewDialogOpen(true);
+  };
+
+  const handleEditBatch = (batch: any) => {
+    // Prepare editing batch with normalized fields
+    // The batch object should already have normalized fields from fetchBatches
+    const batchId = batch.batch_id || batch.batchid;
+    const varietyId = batch.variety_id || batch.varietyid;
+    const vendorId = batch.vendor_id || batch.vendorid;
+    
+    const editData = {
+      batch_id: batchId,
+      variety_id: varietyId ? varietyId.toString() : '',
+      vendor_id: vendorId ? vendorId.toString() : '',
+      quantity: batch.quantity?.toString() || '',
+      unit: batch.unit || 'lbs',
+      lot_number: batch.lot_number || batch.lotnumber || '',
+      purchase_date: batch.purchase_date || batch.purchasedate 
+        ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
+    };
+    
+    setEditingBatch(editData);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateBatch = async () => {
+    if (!editingBatch || !editingBatch.variety_id || !editingBatch.quantity) return;
+
+    setUpdating(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      const { farmUuid } = JSON.parse(sessionData);
+
+      const batchId = editingBatch.batch_id;
+
+      // Map to actual DB column names: varietyid, vendorid, purchasedate
+      const payload: any = {
+        varietyid: parseInt(editingBatch.variety_id), // Actual DB column
+        vendorid: editingBatch.vendor_id ? parseInt(editingBatch.vendor_id) : null, // Actual DB column
+        quantity: parseFloat(editingBatch.quantity),
+        lot_number: editingBatch.lot_number || null,
+        purchasedate: editingBatch.purchase_date, // Actual DB column
+      };
+
+      // Map cost to totalprice if provided (actual DB column)
+      if (editingBatch.cost) {
+        payload.totalprice = parseFloat(editingBatch.cost);
+        // Calculate priceperounce if we have quantity and unit
+        if (editingBatch.quantity && editingBatch.unit === 'oz') {
+          payload.priceperounce = parseFloat(editingBatch.cost) / parseFloat(editingBatch.quantity);
+        }
+      }
+
+      const { error } = await supabase
+        .from('seedbatches')
+        .update(payload)
+        .eq('batchid', batchId)
+        .eq('farm_uuid', farmUuid);
+
+      if (error) throw error;
+
+      setIsEditDialogOpen(false);
+      setEditingBatch(null);
+      fetchBatches();
+    } catch (error) {
+      console.error('Error updating batch:', error);
+      alert('Failed to update batch');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const filteredBatches = batches.filter(batch => {
     // Normalized field names should already be set
     const varietyName = (batch.variety_name || '') as string;
@@ -523,7 +605,14 @@ const BatchesPage = () => {
             ) : (
               filteredBatches.map((batch) => (
                 <TableRow key={batch.batch_id || batch.batchid}>
-                  <TableCell className="font-medium">B-{batch.batch_id || batch.batchid}</TableCell>
+                  <TableCell className="font-medium">
+                    <button
+                      onClick={() => handleViewBatch(batch)}
+                      className="text-primary hover:underline cursor-pointer"
+                    >
+                      B-{batch.batch_id || batch.batchid}
+                    </button>
+                  </TableCell>
                   <TableCell>{batch.variety_name || 'N/A'}</TableCell>
                   <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
                   <TableCell>{batch.quantity ? `${batch.quantity} ${batch.unit || 'units'}` : 'N/A'}</TableCell>
@@ -531,10 +620,16 @@ const BatchesPage = () => {
                   <TableCell>{batch.trayCount || 0}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => alert(`View details for ${batch.batch_id}`)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => alert(`Edit ${batch.batch_id}`)}>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleEditBatch(batch);
+                        }}
+                      >
                         <Edit className="h-4 w-4" />
                       </Button>
                     </div>
@@ -545,6 +640,208 @@ const BatchesPage = () => {
           </TableBody>
         </Table>
       </div>
+
+      {/* View Batch Details Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Batch Details</DialogTitle>
+            <DialogDescription>
+              View detailed information about this seed batch.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedBatch && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Batch ID</Label>
+                  <div className="font-medium">B-{selectedBatch.batch_id || selectedBatch.batchid}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Variety</Label>
+                  <div>{selectedBatch.variety_name || 'N/A'}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Purchase Date</Label>
+                  <div>
+                    {(selectedBatch.purchase_date || selectedBatch.purchasedate) 
+                      ? new Date((selectedBatch.purchase_date || selectedBatch.purchasedate) as string).toLocaleDateString() 
+                      : 'N/A'}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Vendor</Label>
+                  <div>{selectedBatch.vendors?.vendor_name || '-'}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Quantity</Label>
+                  <div>{selectedBatch.quantity ? `${selectedBatch.quantity} ${selectedBatch.unit || 'units'}` : 'N/A'}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Lot Number</Label>
+                  <div>{selectedBatch.lot_number || selectedBatch.lotnumber || '-'}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Cost</Label>
+                  <div>{selectedBatch.totalprice || selectedBatch.cost ? `$${parseFloat((selectedBatch.totalprice || selectedBatch.cost).toString()).toFixed(2)}` : '-'}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Trays</Label>
+                  <div>{selectedBatch.trayCount || 0}</div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
+              Close
+            </Button>
+            {selectedBatch && (
+              <Button onClick={() => {
+                setIsViewDialogOpen(false);
+                handleEditBatch(selectedBatch);
+              }}>
+                Edit Batch
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Batch Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Batch</DialogTitle>
+            <DialogDescription>
+              Update the batch information.
+            </DialogDescription>
+          </DialogHeader>
+          {editingBatch && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-variety">Variety</Label>
+                  <Select 
+                    value={editingBatch.variety_id} 
+                    onValueChange={(value) => setEditingBatch({ ...editingBatch, variety_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select variety" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {varieties.map((variety) => (
+                        <SelectItem key={variety.variety_id} value={variety.variety_id.toString()}>
+                          {variety.variety_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-vendor">Vendor (Optional)</Label>
+                  <Select 
+                    value={editingBatch.vendor_id || 'none'} 
+                    onValueChange={(value) => setEditingBatch({ ...editingBatch, vendor_id: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select vendor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {vendors.map((vendor) => (
+                        <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
+                          {vendor.vendor_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-quantity">Quantity</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="edit-quantity"
+                      type="number"
+                      step="0.1"
+                      placeholder="0.0"
+                      value={editingBatch.quantity}
+                      onChange={(e) => setEditingBatch({ ...editingBatch, quantity: e.target.value })}
+                    />
+                    <Select 
+                      value={editingBatch.unit} 
+                      onValueChange={(value) => setEditingBatch({ ...editingBatch, unit: value })}
+                    >
+                      <SelectTrigger className="w-[80px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="lbs">lbs</SelectItem>
+                        <SelectItem value="oz">oz</SelectItem>
+                        <SelectItem value="kg">kg</SelectItem>
+                        <SelectItem value="g">g</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                   <Label htmlFor="edit-cost">Cost (Optional)</Label>
+                   <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">$</span>
+                      <Input
+                        id="edit-cost"
+                        type="number"
+                        step="0.01"
+                        className="pl-6"
+                        placeholder="0.00"
+                        value={editingBatch.cost}
+                        onChange={(e) => setEditingBatch({ ...editingBatch, cost: e.target.value })}
+                      />
+                   </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-lot">Lot Number (Optional)</Label>
+                  <Input
+                    id="edit-lot"
+                    placeholder="e.g., L-12345"
+                    value={editingBatch.lot_number}
+                    onChange={(e) => setEditingBatch({ ...editingBatch, lot_number: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-date">Purchase Date</Label>
+                  <Input
+                    id="edit-date"
+                    type="date"
+                    value={editingBatch.purchase_date}
+                    onChange={(e) => setEditingBatch({ ...editingBatch, purchase_date: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateBatch} disabled={updating || !editingBatch?.variety_id || !editingBatch?.quantity}>
+              {updating ? 'Updating...' : 'Update Batch'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -37,6 +37,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         recipe_id,
         sow_date,
         batch_id,
+        location,
         recipes!inner(
           recipe_id,
           recipe_name,
@@ -56,7 +57,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       .from('steps')
       .select('*')
       .in('recipe_id', recipeIds)
-      .order('recipe_id, step_order');
+      .order('recipe_id, sequence_order');
 
     if (stepsError) throw stepsError;
 
@@ -79,9 +80,10 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
     if (trayStepsError) throw trayStepsError;
 
     // Create a map of completed steps per tray
+    // Use 'status' = 'Completed' instead of 'completed' boolean
     const completedStepsMap: Record<number, Set<number>> = {};
     (traySteps || []).forEach((ts: any) => {
-      if (ts.completed) {
+      if (ts.status === 'Completed' || ts.completed_date) {
         if (!completedStepsMap[ts.tray_id]) {
           completedStepsMap[ts.tray_id] = new Set();
         }
@@ -108,28 +110,53 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
     const tasks: DailyTask[] = [];
     const taskMap: Record<string, DailyTask> = {};
 
-    trays.forEach((tray: any) => {
+    for (const tray of trays) {
       const recipe = tray.recipes;
       const steps = stepsByRecipe[recipe.recipe_id] || [];
       if (steps.length === 0) return;
 
       const sowDate = new Date(tray.sow_date);
-      const daysSinceSow = Math.max(0, Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24)));
+      sowDate.setHours(0, 0, 0, 0); // Normalize sow date to midnight for accurate day calculation
+      // Calculate days since sow - if sown today, it's day 1, not day 0
+      const daysSinceSow = Math.max(1, Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
       
-      // Calculate total days for the recipe
-      const totalDays = steps.reduce((sum: number, step: any) => sum + (step.duration_days || 0), 0);
-      const dayCurrent = Math.min(Math.max(0, daysSinceSow), totalDays);
+      // Calculate total days for the recipe, accounting for duration_unit
+      const totalDays = steps.reduce((sum: number, step: any) => {
+        const duration = step.duration || 0;
+        const unit = (step.duration_unit || 'Days').toUpperCase();
+        if (unit === 'DAYS') {
+          return sum + duration;
+        } else if (unit === 'HOURS') {
+          // Hours >= 12 counts as 1 day, otherwise 0
+          return sum + (duration >= 12 ? 1 : 0);
+        }
+        return sum + duration; // default: treat as days
+      }, 0);
+      const dayCurrent = Math.min(Math.max(1, daysSinceSow), totalDays);
 
       // Find the current step based on days elapsed
+      // Note: daysSinceSow is 1-based (day 1 = sown today), so we subtract 1 for step range comparison
       let currentStep: any = null;
       let daysIntoRecipe = 0;
+      const daysForStepComparison = daysSinceSow - 1; // Convert to 0-based for step range logic
       
       for (const step of steps) {
-        if (daysSinceSow >= daysIntoRecipe && daysSinceSow < daysIntoRecipe + (step.duration_days || 0)) {
+        const duration = step.duration || 0;
+        const unit = (step.duration_unit || 'Days').toUpperCase();
+        let stepDurationDays = 0;
+        if (unit === 'DAYS') {
+          stepDurationDays = duration;
+        } else if (unit === 'HOURS') {
+          stepDurationDays = duration >= 12 ? 1 : 0;
+        } else {
+          stepDurationDays = duration;
+        }
+        
+        if (daysForStepComparison >= daysIntoRecipe && daysForStepComparison < daysIntoRecipe + stepDurationDays) {
           currentStep = step;
           break;
         }
-        daysIntoRecipe += step.duration_days || 0;
+        daysIntoRecipe += stepDurationDays;
       }
 
       // If past all steps, the task is harvest
@@ -143,7 +170,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       }
 
       // Determine action from step description
-      const stepDesc = currentStep.step_description.toLowerCase();
+      const stepDesc = (currentStep.description_name || currentStep.step_description || '').toLowerCase();
       let action = 'Water'; // Default
       
       if (stepDesc.includes('harvest')) {
@@ -160,27 +187,41 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       const completedSteps = completedStepsMap[tray.tray_id] || new Set();
       const isStepCompleted = completedSteps.has(currentStep.step_id);
 
-      // Skip if this step is already completed
-      if (isStepCompleted && action !== 'Harvest') {
-        // Move to next incomplete step
+      // If current step is completed, try to find next incomplete step
+      if (isStepCompleted) {
+        let foundNextIncomplete = false;
         const stepIndex = steps.findIndex((s: any) => s.step_id === currentStep.step_id);
-        if (stepIndex < steps.length - 1) {
-          currentStep = steps[stepIndex + 1];
-          const nextStepDesc = currentStep.step_description.toLowerCase();
-          if (nextStepDesc.includes('harvest')) {
-            action = 'Harvest';
-          } else if (nextStepDesc.includes('uncover') || nextStepDesc.includes('light')) {
-            action = 'Uncover';
-          } else if (nextStepDesc.includes('water') || nextStepDesc.includes('irrigat')) {
-            action = 'Water';
+        
+        // Look for next incomplete step
+        for (let i = stepIndex + 1; i < steps.length; i++) {
+          if (!completedSteps.has(steps[i].step_id)) {
+            currentStep = steps[i];
+            foundNextIncomplete = true;
+            const nextStepDesc = (currentStep.description_name || currentStep.step_description || '').toLowerCase();
+            if (nextStepDesc.includes('harvest')) {
+              action = 'Harvest';
+            } else if (nextStepDesc.includes('uncover') || nextStepDesc.includes('light')) {
+              action = 'Uncover';
+            } else if (nextStepDesc.includes('water') || nextStepDesc.includes('irrigat')) {
+              action = 'Water';
+            } else if (nextStepDesc.includes('blackout')) {
+              action = 'Blackout';
+            }
+            break;
           }
+        }
+        
+        // If all remaining steps are completed (including harvest), skip this tray
+        // The tray should be harvested and will be filtered out by harvest_date check
+        if (!foundNextIncomplete) {
+          continue; // Skip this tray - all steps are done
         }
       }
 
       // Create a task key for grouping
       const taskKey = `${action}-${recipe.variety_name}-${currentStep.step_id}`;
       const batchId = tray.batch_id ? `B-${tray.batch_id}` : 'N/A';
-      const location = 'Rack A • Shelf 1'; // TODO: Add location tracking
+      const location = tray.location || 'Not set';
 
       if (taskMap[taskKey]) {
         // Group similar tasks
@@ -200,10 +241,10 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
           trayIds: [tray.tray_id],
           recipeId: recipe.recipe_id,
           stepId: currentStep.step_id,
-          stepDescription: currentStep.step_description,
+          stepDescription: currentStep.description_name || currentStep.step_description || '',
         };
       }
-    });
+    }
 
     return Object.values(taskMap);
   } catch (error) {
@@ -214,55 +255,48 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
 
 /**
  * Mark a task as completed by updating tray_steps
+ * Uses actual schema: status='Completed', completed_date, completed_by
  */
 export const completeTask = async (task: DailyTask): Promise<boolean> => {
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return false;
 
-    if (!task.stepId) return false;
+    const { farmUuid, userId } = JSON.parse(sessionData);
+    const now = new Date().toISOString();
 
-    // Mark the step as completed for all trays in this task
-    const updates = task.trayIds.map(trayId => ({
-      tray_id: trayId,
-      step_id: task.stepId!,
-      completed: true,
-      completed_at: new Date().toISOString(),
-    }));
+    // If it's a harvest action, update the harvest_date on the trays
+    // The trigger will also handle this, but we do it explicitly too
+    if (task.action === 'Harvest') {
+      const { error: harvestError } = await supabase
+        .from('trays')
+        .update({ harvest_date: now })
+        .in('tray_id', task.trayIds)
+        .eq('farm_uuid', farmUuid);
 
-    // Check if tray_steps already exist, if not create them
-    for (const update of updates) {
-      const { data: existing } = await supabase
-        .from('tray_steps')
-        .select('id')
-        .eq('tray_id', update.tray_id)
-        .eq('step_id', update.step_id)
-        .single();
-
-      if (existing) {
-        // Update existing
-        await supabase
-          .from('tray_steps')
-          .update({
-            completed: true,
-            completed_at: update.completed_at,
-          })
-          .eq('id', existing.id);
-      } else {
-        // Insert new
-        await supabase
-          .from('tray_steps')
-          .insert([update]);
+      if (harvestError) {
+        console.error('Error updating harvest_date:', harvestError);
+        throw harvestError;
       }
     }
 
-    // If it's a harvest action, also update the harvest_date on the tray
-    if (task.action === 'Harvest') {
-      for (const trayId of task.trayIds) {
-        await supabase
-          .from('trays')
-          .update({ harvest_date: new Date().toISOString() })
-          .eq('tray_id', trayId);
+    // Update tray_steps for all tasks (including harvest)
+    // Use the actual schema: status='Completed', completed_date, completed_by
+    if (task.stepId) {
+      const { error: stepsError } = await supabase
+        .from('tray_steps')
+        .update({
+          status: 'Completed',
+          completed_date: now,
+          completed_by: userId,
+        })
+        .in('tray_id', task.trayIds)
+        .eq('step_id', task.stepId)
+        .eq('farm_uuid', farmUuid);
+
+      if (stepsError) {
+        console.error('Error updating tray_steps:', stepsError);
+        throw stepsError;
       }
     }
 

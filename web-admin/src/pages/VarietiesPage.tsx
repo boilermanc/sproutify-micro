@@ -10,7 +10,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 
 type SortField = 'name' | 'description' | 'status' | 'stock';
@@ -36,11 +35,24 @@ const VarietiesPage = () => {
 
   const fetchVarieties = async () => {
     try {
-      // Fetch all varieties (no farm filtering - varieties are global)
-      // DB columns: varietyid, name
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        setLoading(false);
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        setLoading(false);
+        return;
+      }
+
+      // Fetch varieties from varieties_view filtered by farm_uuid
+      // The view includes is_active from farm_varieties table
       const { data, error } = await supabase
-        .from('varieties')
+        .from('varieties_view')
         .select('*')
+        .eq('farm_uuid', farmUuid)
         .order('name', { ascending: true });
 
       if (error) throw error;
@@ -52,6 +64,7 @@ const VarietiesPage = () => {
         variety_name: v.name || v.variety_name || '',
         stock: v.stock ?? 0,
         stock_unit: v.stock_unit || v.stockUnit || 'g',
+        is_active: v.is_active ?? false, // From farm_varieties via view
       }));
 
       setVarieties(normalized);
@@ -104,7 +117,7 @@ const VarietiesPage = () => {
       description: variety.description || '',
       stock: variety.stock ?? 0,
       stock_unit: variety.stock_unit || variety.stockUnit || 'g',
-      is_active: variety.is_active ?? true,
+      // Note: is_active is farm-specific and shown in the table, not in edit dialog
     });
     setIsEditDialogOpen(true);
   };
@@ -116,13 +129,13 @@ const VarietiesPage = () => {
     try {
       const varietyId = editingVariety.varietyid || editingVariety.variety_id;
       
-      // Use actual DB column names
+      // Update variety details (varieties are global, so update the varieties table)
+      // Note: is_active is farm-specific and handled via farm_varieties, not here
       const payload: any = {
         name: editingVariety.variety_name,
         description: editingVariety.description || null,
         stock: editingVariety.stock ?? 0,
         stock_unit: editingVariety.stock_unit || 'g',
-        is_active: editingVariety.is_active ?? true,
       };
 
       const { error } = await supabase
@@ -145,7 +158,19 @@ const VarietiesPage = () => {
 
   const handleToggleActive = async (variety: any) => {
     try {
-      // Get the actual ID from the variety object - try both possible column names
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        alert('Session not found. Please refresh the page.');
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        alert('Farm UUID not found. Please refresh the page.');
+        return;
+      }
+
+      // Get the actual ID from the variety object
       const varietyId = variety.varietyid || variety.variety_id || variety.id;
       const newActiveStatus = !variety.is_active;
 
@@ -155,30 +180,38 @@ const VarietiesPage = () => {
         return;
       }
 
-      // Try both possible column names for the primary key
-      let error;
-      const updateData = { is_active: newActiveStatus };
-      
-      // First try varietyid
-      const result = await supabase
-        .from('varieties')
-        .update(updateData)
-        .eq('varietyid', varietyId);
-      
-      error = result.error;
-      
-      // If that fails, try variety_id
-      if (error) {
-        const result2 = await supabase
-          .from('varieties')
-          .update(updateData)
-          .eq('variety_id', varietyId);
-        error = result2.error;
+      // Check if a farm_varieties record already exists
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('farm_varieties')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .eq('variety_id', varietyId)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" error
+        throw checkError;
       }
 
-      if (error) {
-        console.error('Update error:', error);
-        throw error;
+      if (existingRecord) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from('farm_varieties')
+          .update({ is_active: newActiveStatus })
+          .eq('farm_uuid', farmUuid)
+          .eq('variety_id', varietyId);
+
+        if (updateError) throw updateError;
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase
+          .from('farm_varieties')
+          .insert({
+            farm_uuid: farmUuid,
+            variety_id: varietyId,
+            is_active: newActiveStatus,
+          });
+
+        if (insertError) throw insertError;
       }
 
       fetchVarieties();
@@ -393,19 +426,6 @@ const VarietiesPage = () => {
                         <SelectItem value="lbs">lbs</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="edit-active" className="cursor-pointer">Active Status</Label>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="edit-active"
-                      checked={editingVariety.is_active}
-                      onCheckedChange={(checked) => setEditingVariety({ ...editingVariety, is_active: checked })}
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      {editingVariety.is_active ? 'Active' : 'Inactive'}
-                    </span>
                   </div>
                 </div>
               </div>

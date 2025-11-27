@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import './onboarding.css';
 
 interface OnboardingStepProps {
   children: ReactNode;
@@ -9,13 +10,13 @@ interface OnboardingStepProps {
 
 const OnboardingStep = ({ children, title, description, isExiting }: OnboardingStepProps) => {
   return (
-    <div className={`space-y-6 ${isExiting ? 'opacity-0 transition-opacity duration-200' : 'opacity-100 transition-opacity duration-200'}`}>
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight mb-2">
+    <div className={`wizard-step ${isExiting ? 'exiting' : ''}`}>
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 700, color: '#2A3744', marginBottom: '0.5rem' }}>
           {title}
         </h2>
         {description && (
-          <p className="text-muted-foreground text-base leading-relaxed">
+          <p style={{ color: '#5A6673', fontSize: '1rem', lineHeight: 1.6 }}>
             {description}
           </p>
         )}
@@ -26,3 +27,5 @@ const OnboardingStep = ({ children, title, description, isExiting }: OnboardingS
 };
 
 export default OnboardingStep;
+
+

@@ -15,7 +15,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
-  Calendar
+  Calendar,
+  Box,
+  Calculator,
+  Repeat,
+  CheckSquare,
+  BarChart3
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,12 +43,17 @@ const Layout = ({ onLogout }: LayoutProps) => {
     { to: "/flow", icon: Calendar, label: "Daily Flow" },
     { to: "/varieties", icon: Sprout, label: "Varieties" },
     { to: "/recipes", icon: ClipboardList, label: "Recipes" },
+    { to: "/products", icon: Box, label: "Products" },
+    { to: "/mix-calculator", icon: Calculator, label: "Mix Calculator" },
     { to: "/batches", icon: Package, label: "Batches" },
     { to: "/trays", icon: ShoppingBasket, label: "Trays" },
     { to: "/orders", icon: FileText, label: "Orders" },
+    { to: "/standing-orders", icon: Repeat, label: "Standing Orders" },
+    { to: "/weekly-tasks", icon: CheckSquare, label: "Weekly Tasks" },
     { to: "/customers", icon: Building2, label: "Customers" },
     { to: "/vendors", icon: Truck, label: "Vendors" },
     { to: "/supplies", icon: ClipboardList, label: "Supplies" },
+    { to: "/reports", icon: BarChart3, label: "Reports" },
     { to: "/users", icon: Users, label: "Users" },
     { to: "/settings", icon: Settings, label: "Settings" },
   ];

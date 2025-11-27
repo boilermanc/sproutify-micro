@@ -31,3 +31,5 @@ CREATE TRIGGER trigger_set_trial_dates
 CREATE INDEX IF NOT EXISTS idx_farms_subscription_status ON farms(subscription_status);
 CREATE INDEX IF NOT EXISTS idx_farms_trial_end_date ON farms(trial_end_date);
 
+
+

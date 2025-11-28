@@ -71,21 +71,31 @@ jobs:
             DOMAIN_NAME="micro.sproutify.app"
             ADMIN_PATH=""
             
-            # Check for domain-specific paths
-            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
-              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
-              ADMIN_PATH=$HTTPDOCS_PATH/admin
-              echo "✓ Found: $HTTPDOCS_PATH"
-              echo "✓ Admin path will be: $ADMIN_PATH"
-            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+            # Check for domain-specific paths (try standalone domain first, then subdomain)
+            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
               ADMIN_PATH=$HTTPDOCS_PATH/admin
-              echo "✓ Found: $HTTPDOCS_PATH"
+              echo "✓ Found standalone domain: $HTTPDOCS_PATH"
+              echo "✓ Admin path will be: $ADMIN_PATH"
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME ]; then
+              # Check if httpdocs exists or if it's the root
+              if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+                HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+              else
+                HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME
+              fi
+              ADMIN_PATH=$HTTPDOCS_PATH/admin
+              echo "✓ Found domain directory: $HTTPDOCS_PATH"
+              echo "✓ Admin path will be: $ADMIN_PATH"
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
+              ADMIN_PATH=$HTTPDOCS_PATH/admin
+              echo "✓ Found subdomain: $HTTPDOCS_PATH"
               echo "✓ Admin path will be: $ADMIN_PATH"
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
               ADMIN_PATH=$HTTPDOCS_PATH/admin
-              echo "✓ Found: $HTTPDOCS_PATH"
+              echo "✓ Found in home directory: $HTTPDOCS_PATH"
               echo "✓ Admin path will be: $ADMIN_PATH"
             else
               echo "⚠ $DOMAIN_NAME specific path not found"
@@ -143,11 +153,13 @@ jobs:
           script: |
             DOMAIN_NAME="micro.sproutify.app"
             
-            # Use the correct path for domain-specific subdomain
-            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
-              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
-            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+            # Use the correct path - check standalone domain first, then subdomain
+            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
             elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs ]; then
@@ -180,7 +192,7 @@ jobs:
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
           uploads: |
-            ./web-admin/dist/ => /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin/
+            ./web-admin/dist/ => /var/www/vhosts/micro.sproutify.app/httpdocs/admin/
 
       - name: Set file permissions
         uses: appleboy/ssh-action@v1.2.0
@@ -192,15 +204,17 @@ jobs:
           script: |
             DOMAIN_NAME="micro.sproutify.app"
             
-            # Use the correct path for domain-specific subdomain
-            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
-              ADMIN_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin
-            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+            # Use the correct path - check standalone domain first, then subdomain
+            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs/admin ]; then
               ADMIN_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs/admin
-            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/admin ]; then
+              ADMIN_PATH=/var/www/vhosts/$DOMAIN_NAME/admin
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin ]; then
+              ADMIN_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin
+            elif [ -d ~/$DOMAIN_NAME/httpdocs/admin ]; then
               ADMIN_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)/admin
             else
-              echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
+              echo "ERROR: $DOMAIN_NAME/admin directory not found!"
               exit 1
             fi
             

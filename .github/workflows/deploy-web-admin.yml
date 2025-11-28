@@ -1,0 +1,241 @@
+name: Deploy Web Admin to IONOS
+
+on:
+  workflow_dispatch:  # manual deployment
+  push:
+    branches:
+      - main
+    paths:
+      - 'web-admin/**'
+      - '.github/workflows/deploy-web-admin.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '21'
+          cache: 'npm'
+          cache-dependency-path: 'web-admin/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ./web-admin
+        run: npm install
+
+      - name: Build Web Admin
+        working-directory: ./web-admin
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Copy .htaccess to dist
+        working-directory: ./web-admin
+        run: cp public/.htaccess dist/.htaccess || echo ".htaccess not found in public, skipping"
+
+      - name: Verify build output
+        working-directory: ./web-admin
+        run: |
+          echo "=== Build verification ==="
+          echo "Checking dist/index.html:"
+          head -15 dist/index.html
+          echo ""
+          echo "Checking dist/assets:"
+          ls -la dist/assets/ || echo "No assets directory!"
+          echo ""
+          echo "Verifying index.html references compiled JS:"
+          if grep -q "/assets/index-" dist/index.html; then
+            echo "✓ index.html correctly references compiled assets"
+          else
+            echo "✗ ERROR: index.html does not reference compiled assets!"
+            exit 1
+          fi
+
+      - name: Find httpdocs path for web admin
+        id: find_path
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          script: |
+            echo "=== Looking for micro.sproutify.app httpdocs directory ==="
+            HTTPDOCS_PATH=""
+            DOMAIN_NAME="micro.sproutify.app"
+            ADMIN_PATH=""
+            
+            # Check for domain-specific paths
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
+              ADMIN_PATH=$HTTPDOCS_PATH/admin
+              echo "✓ Found: $HTTPDOCS_PATH"
+              echo "✓ Admin path will be: $ADMIN_PATH"
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+              ADMIN_PATH=$HTTPDOCS_PATH/admin
+              echo "✓ Found: $HTTPDOCS_PATH"
+              echo "✓ Admin path will be: $ADMIN_PATH"
+            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
+              ADMIN_PATH=$HTTPDOCS_PATH/admin
+              echo "✓ Found: $HTTPDOCS_PATH"
+              echo "✓ Admin path will be: $ADMIN_PATH"
+            else
+              echo "⚠ $DOMAIN_NAME specific path not found"
+              echo ""
+              echo "Checking available vhost directories:"
+              ls -la /var/www/vhosts/ 2>/dev/null | head -20 || echo "Cannot list /var/www/vhosts/"
+              echo ""
+              echo "Checking sweetwaterurbanfarms.com subdirectories:"
+              ls -la /var/www/vhosts/sweetwaterurbanfarms.com/ 2>/dev/null | head -20 || echo "Cannot list subdirectories"
+              echo ""
+              echo "ERROR: Could not find $DOMAIN_NAME httpdocs directory!"
+              echo "Please verify the correct path in Plesk and update the workflow."
+              exit 1
+            fi
+            
+            echo "HTTPDOCS_PATH=$HTTPDOCS_PATH" >> $GITHUB_OUTPUT
+            echo "ADMIN_PATH=$ADMIN_PATH" >> $GITHUB_OUTPUT
+            echo "DOMAIN_NAME=$DOMAIN_NAME" >> $GITHUB_OUTPUT
+            echo ""
+            echo "=== Using path: $HTTPDOCS_PATH ==="
+            echo "=== Admin will deploy to: $ADMIN_PATH ==="
+            echo "Verifying root directory:"
+            ls -la "$HTTPDOCS_PATH" | head -10
+
+      - name: Clean IONOS directory (web admin only)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          script: |
+            DOMAIN_NAME="micro.sproutify.app"
+            
+            # Use the correct path for domain-specific subdomain
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
+            else
+              echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
+              echo "This prevents accidentally overwriting the wrong site."
+              exit 1
+            fi
+            
+            ADMIN_PATH="$HTTPDOCS_PATH/admin"
+            echo "Cleaning admin directory: $ADMIN_PATH"
+            echo "⚠ WARNING: This will delete all files in the /admin subdirectory only"
+            
+            # Create admin directory if it doesn't exist
+            mkdir -p "$ADMIN_PATH"
+            cd "$ADMIN_PATH"
+            
+            # Remove all files in admin directory
+            rm -rf ./*
+            rm -rf ./.* 2>/dev/null || true
+            echo "Admin directory cleaned"
+
+      - name: Deploy to IONOS via SFTP (web admin)
+        uses: Dylan700/sftp-upload-action@v1.2.3
+        with:
+          server: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          uploads: |
+            ./web-admin/dist/ => /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin/
+
+      - name: Set file permissions
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          script: |
+            DOMAIN_NAME="micro.sproutify.app"
+            
+            # Use the correct path for domain-specific subdomain
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              ADMIN_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              ADMIN_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs/admin
+            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
+              ADMIN_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)/admin
+            else
+              echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
+              exit 1
+            fi
+            
+            cd "$ADMIN_PATH"
+            
+            echo "Setting permissions in: $(pwd)"
+            chmod -R 755 .
+            find . -type f -exec chmod 644 {} \;
+            find . -type d -exec chmod 755 {} \;
+            echo "Permissions set"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          script: |
+            DOMAIN_NAME="micro.sproutify.app"
+            
+            echo "=== Looking for $DOMAIN_NAME/admin directory ==="
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin ]; then
+              cd /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin
+              echo "Using: /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs/admin ($(pwd))"
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs/admin ]; then
+              cd /var/www/vhosts/$DOMAIN_NAME/httpdocs/admin
+              echo "Using: /var/www/vhosts/$DOMAIN_NAME/httpdocs/admin ($(pwd))"
+            elif [ -d ~/$DOMAIN_NAME/httpdocs/admin ]; then
+              cd ~/$DOMAIN_NAME/httpdocs/admin
+              echo "Using: ~/$DOMAIN_NAME/httpdocs/admin ($(pwd))"
+            else
+              echo "ERROR: $DOMAIN_NAME/httpdocs/admin not found"
+              echo "Checking available paths:"
+              echo "Listing /var/www/vhosts/:"
+              ls -la /var/www/vhosts/ 2>/dev/null | head -20 || true
+              exit 1
+            fi
+            
+            echo ""
+            echo "=== Deployed files ==="
+            ls -la
+            echo ""
+            echo "=== Checking for index.html ==="
+            if [ -f index.html ]; then
+              echo "✓ index.html exists"
+              echo "First 20 lines of index.html:"
+              head -20 index.html
+            else
+              echo "ERROR: index.html not found!"
+              exit 1
+            fi
+            
+            echo ""
+            echo "=== Checking assets directory ==="
+            if [ -d assets ]; then
+              echo "✓ assets directory exists"
+              echo "Files in assets directory:"
+              ls -la assets/
+            else
+              echo "ERROR: assets directory not found!"
+              exit 1
+            fi
+

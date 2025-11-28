@@ -92,7 +92,7 @@ function App() {
   }
 
   return (
-    <Router>
+    <Router basename="/admin">
       <Routes>
         <Route path="/login" element={
           isAuthenticated ? <Navigate to="/" /> : <LoginPage onLogin={() => setIsAuthenticated(true)} />

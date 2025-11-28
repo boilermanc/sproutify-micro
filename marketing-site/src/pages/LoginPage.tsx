@@ -50,7 +50,9 @@ const LoginPage = () => {
       }));
 
       // Redirect to web-admin app
-      const targetUrl = `http://localhost:5174/`;
+      // Use relative path for production, or detect environment
+      const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const targetUrl = isDevelopment ? `http://localhost:5174/` : `/admin/`;
       window.location.assign(targetUrl);
     } catch (err: any) {
       setError(err.message || 'Invalid credentials. Please try again.');

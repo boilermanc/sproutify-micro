@@ -1,0 +1,49 @@
+# Set correct MIME types for JavaScript modules
+# Force MIME types even if mod_mime is not available
+AddType application/javascript .js
+AddType application/javascript .mjs
+AddType text/javascript .js
+AddType text/css .css
+AddType image/svg+xml .svg
+
+# Alternative method using FilesMatch
+<FilesMatch "\.(js|mjs)$">
+    ForceType application/javascript
+</FilesMatch>
+
+<FilesMatch "\.css$">
+    ForceType text/css
+</FilesMatch>
+
+<FilesMatch "\.svg$">
+    ForceType image/svg+xml
+</FilesMatch>
+
+# Enable CORS for module scripts (if needed)
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+</IfModule>
+
+# Enable compression
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css application/javascript application/json
+</IfModule>
+
+# Cache static assets
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+</IfModule>
+
+# SPA Routing - redirect all requests to index.html
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /index.html [L]
+</IfModule>
+

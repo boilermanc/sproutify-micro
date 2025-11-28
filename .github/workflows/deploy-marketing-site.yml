@@ -122,8 +122,6 @@ jobs:
               fi
             fi
             
-            echo "HTTPDOCS_PATH=$HTTPDOCS_PATH" >> $GITHUB_OUTPUT
-            echo "DOMAIN_NAME=$DOMAIN_NAME" >> $GITHUB_OUTPUT
             echo ""
             echo "=== Using path: $HTTPDOCS_PATH ==="
             echo "Verifying this is the correct directory:"
@@ -210,10 +208,19 @@ jobs:
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
           script: |
-            HTTPDOCS_PATH="${{ steps.find_path.outputs.HTTPDOCS_PATH }}"
+            DOMAIN_NAME="micro.sproutify.app"
             
-            if [ -z "$HTTPDOCS_PATH" ]; then
-              echo "ERROR: HTTPDOCS_PATH not set from previous step"
+            # Use the same path detection logic as find_path step
+            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
+            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
+            else
+              echo "ERROR: $DOMAIN_NAME httpdocs not found"
               exit 1
             fi
             

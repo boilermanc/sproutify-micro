@@ -134,9 +134,6 @@ jobs:
               fi
             fi
             
-            echo "HTTPDOCS_PATH=$HTTPDOCS_PATH" >> $GITHUB_OUTPUT
-            echo "ADMIN_PATH=$ADMIN_PATH" >> $GITHUB_OUTPUT
-            echo "DOMAIN_NAME=$DOMAIN_NAME" >> $GITHUB_OUTPUT
             echo ""
             echo "=== Using path: $HTTPDOCS_PATH ==="
             echo "=== Admin will deploy to: $ADMIN_PATH ==="

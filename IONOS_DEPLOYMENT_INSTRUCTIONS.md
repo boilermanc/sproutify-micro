@@ -62,17 +62,18 @@ You need to configure Nginx in Plesk for `micro.sproutify.app`:
 2. Go to **Domains** → **micro.sproutify.app**
 3. Click **Apache & nginx Settings**
 4. Scroll to **"Additional directives for nginx"**
-5. Paste this configuration:
+5. Paste this configuration (also available in `NGINX_CONFIG_micro.sproutify.app.txt`):
 
 ```nginx
 # CRITICAL: Serve assets directory first (before SPA routing)
+# Marketing site assets (root)
 location /assets/ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Content-Type "application/javascript" always;
 	try_files $uri =404;
 }
 
-# Serve admin assets
+# Admin assets (subdirectory)
 location /admin/assets/ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Content-Type "application/javascript" always;
@@ -121,7 +122,8 @@ location = /admin/index.html {
 ```
 
 **⚠️ IMPORTANT:** 
-- Replace `/var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs` with your actual document root path from Plesk
+- **Verify the path**: Check in Plesk → Domains → micro.sproutify.app → Hosting Settings to confirm the Document Root path
+- If your path is different (e.g., `/var/www/vhosts/micro.sproutify.app/httpdocs` for standalone domain), update all `root` directives accordingly
 - Do NOT include a `location /` block - Plesk already generates one automatically
 - If you add a `location /` block, you'll get a "duplicate location" error
 

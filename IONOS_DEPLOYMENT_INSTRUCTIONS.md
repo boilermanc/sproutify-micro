@@ -65,7 +65,16 @@ You need to configure Nginx in Plesk for `micro.sproutify.app`:
 5. Paste this configuration (also available in `NGINX_CONFIG_micro.sproutify.app.txt`):
 
 ```nginx
-# CRITICAL: Serve assets directory first (before SPA routing)
+# CRITICAL: Serve static assets FIRST (before SPA routing)
+# Order matters - more specific locations must come first
+
+# Admin assets (subdirectory) - must come before /admin location
+location /admin/assets/ {
+	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
+	add_header Content-Type "application/javascript" always;
+	try_files $uri =404;
+}
+
 # Marketing site assets (root)
 location /assets/ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
@@ -73,26 +82,21 @@ location /assets/ {
 	try_files $uri =404;
 }
 
-# Admin assets (subdirectory)
-location /admin/assets/ {
-	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
-	add_header Content-Type "application/javascript" always;
-	try_files $uri =404;
-}
-
-# Force correct MIME types for JS and CSS files
+# Force correct MIME types for JS files (must come before /admin)
 location ~* \.(js|mjs)$ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Content-Type "application/javascript" always;
 	try_files $uri =404;
 }
 
+# Force correct MIME types for CSS files (must come before /admin)
 location ~* \.css$ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Content-Type "text/css" always;
 	try_files $uri =404;
 }
 
+# Force correct MIME types for SVG files
 location ~* \.svg$ {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Content-Type "image/svg+xml" always;
@@ -100,6 +104,7 @@ location ~* \.svg$ {
 }
 
 # Admin SPA routing - serve admin/index.html for /admin routes
+# This must come AFTER asset locations
 location /admin {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	try_files $uri $uri/ /admin/index.html;

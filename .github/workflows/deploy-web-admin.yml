@@ -189,7 +189,7 @@ jobs:
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
           uploads: |
-            ./web-admin/dist/ => /var/www/vhosts/micro.sproutify.app/httpdocs/admin/
+            ./web-admin/dist/ => /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin/
 
       - name: Set file permissions
         uses: appleboy/ssh-action@v1.2.0

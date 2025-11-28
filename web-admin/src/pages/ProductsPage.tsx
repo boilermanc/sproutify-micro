@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Package, Edit, Trash2, Plus, Search, Tag, DollarSign } from 'lucide-react';
+import { Package, Edit, Trash2, Plus, Search, Tag } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -323,7 +323,7 @@ const ProductsPage = () => {
 
       {filteredProducts.length === 0 ? (
         <EmptyState
-          icon={Package}
+          icon={<Package className="h-12 w-12 text-gray-400" />}
           title="No products found"
           description={searchTerm ? "Try adjusting your search" : "Get started by creating your first product"}
           actionLabel="Add Product"

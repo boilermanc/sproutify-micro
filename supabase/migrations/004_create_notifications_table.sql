@@ -62,3 +62,5 @@ CREATE TRIGGER trigger_set_notification_read_at
     WHEN (NEW.is_read = TRUE AND OLD.is_read = FALSE)
     EXECUTE FUNCTION set_notification_read_at();
 
+
+

@@ -8,3 +8,5 @@ CREATE INDEX IF NOT EXISTS idx_varieties_stock ON varieties(stock);
 -- Add comment for documentation
 COMMENT ON COLUMN varieties.stock IS 'Current stock quantity for this variety';
 
+
+

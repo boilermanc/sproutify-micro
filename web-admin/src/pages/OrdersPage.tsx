@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
 type DateRangePreset = '7d' | '30d' | '90d' | 'month' | 'year' | 'custom';
 
@@ -34,7 +35,7 @@ const OrdersPage = () => {
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [products, setProducts] = useState<any[]>([]);
+  const [_products, setProducts] = useState<any[]>([]);
   const [newOrder, setNewOrder] = useState({
     customer_id: '',
     order_date: new Date().toISOString().split('T')[0],

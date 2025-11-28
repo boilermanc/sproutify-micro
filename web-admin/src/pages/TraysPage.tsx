@@ -124,14 +124,20 @@ const TraysPage = () => {
       if (recipeIds.length > 0) {
         const { data: allSteps } = await supabase
           .from('steps')
-          .select('recipe_id, duration, duration_unit')
-          .in('recipe_id', recipeIds)
-          .order('recipe_id, sequence_order');
+          .select('recipe_id, duration, duration_unit, step_order, sequence_order')
+          .in('recipe_id', recipeIds);
 
         // Calculate total grow time per recipe
         if (allSteps) {
+          // Sort steps by step_order or sequence_order
+          const sortedSteps = [...allSteps].sort((a: any, b: any) => {
+            const orderA = a.step_order ?? a.sequence_order ?? 0;
+            const orderB = b.step_order ?? b.sequence_order ?? 0;
+            return orderA - orderB;
+          });
+          
           const stepsByRecipe: Record<number, any[]> = {};
-          (allSteps || []).forEach((step: any) => {
+          sortedSteps.forEach((step: any) => {
             if (!stepsByRecipe[step.recipe_id]) {
               stepsByRecipe[step.recipe_id] = [];
             }
@@ -718,8 +724,14 @@ const TraysPage = () => {
       const { data: stepsData } = await supabase
         .from('steps')
         .select('*, step_descriptions!left(description_name, description_details)')
-        .eq('recipe_id', trayData.recipes.recipe_id)
-        .order('sequence_order', { ascending: true });
+        .eq('recipe_id', trayData.recipes.recipe_id);
+      
+      // Sort steps by step_order or sequence_order
+      const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
+        const orderA = a.step_order ?? a.sequence_order ?? 0;
+        const orderB = b.step_order ?? b.sequence_order ?? 0;
+        return orderA - orderB;
+      }) : null;
 
       // Fetch tray_steps to see which steps are completed
       const { data: trayStepsData } = await supabase
@@ -744,7 +756,7 @@ const TraysPage = () => {
 
       setTrayDetails({
         ...trayData,
-        steps: stepsData || [],
+        steps: sortedStepsData || [],
         traySteps: trayStepsData || [],
         batch: batchDetails,
       });

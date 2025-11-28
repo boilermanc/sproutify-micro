@@ -240,7 +240,8 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                   value={step.description_id?.toString() || ''}
                   onValueChange={(value) => {
                     const selectedDesc = stepDescriptions.find(sd => sd.description_id.toString() === value);
-                    updateStep(index, 'description_id', selectedDesc ? parseInt(value) : null);
+                    const descId = selectedDesc ? parseInt(value, 10) : null;
+                    updateStep(index, 'description_id', descId !== null && !isNaN(descId) ? descId : 0);
                     updateStep(index, 'description_name', selectedDesc?.description_name || '');
                   }}
                 >

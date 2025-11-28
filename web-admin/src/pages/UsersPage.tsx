@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Edit, Trash2, UserPlus, Eye, EyeOff, Mail, Lock, User as UserIcon, Shield } from 'lucide-react';
+import { Edit, Trash2, UserPlus, Eye, EyeOff, Mail, Lock, User as UserIcon } from 'lucide-react';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';

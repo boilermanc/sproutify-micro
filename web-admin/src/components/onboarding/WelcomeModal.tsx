@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { useOnboarding } from '../../hooks/useOnboarding';
+import { useState } from 'react';
 import './onboarding.css';
 
 interface WelcomeModalProps {

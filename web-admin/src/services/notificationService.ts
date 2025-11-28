@@ -261,12 +261,14 @@ export const checkHarvestReminders = async () => {
       const { data: steps } = await supabase
         .from('steps')
         .select('*')
-        .eq('recipe_id', tray.recipe_id)
-        .order('step_order');
+        .eq('recipe_id', tray.recipe_id);
+      
+      // Sort by step_order in JavaScript (fallback if ordering fails)
+      const sortedSteps = steps ? [...steps].sort((a, b) => (a.step_order || 0) - (b.step_order || 0)) : null;
 
-      if (steps && steps.length > 0) {
+      if (sortedSteps && sortedSteps.length > 0) {
         const sowDate = new Date(tray.sow_date);
-        const totalDays = steps.reduce((sum, step) => sum + (step.duration_days || 0), 0);
+        const totalDays = sortedSteps.reduce((sum, step) => sum + (step.duration_days || 0), 0);
         const harvestDate = new Date(sowDate);
         harvestDate.setDate(harvestDate.getDate() + totalDays);
 

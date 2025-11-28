@@ -74,7 +74,7 @@ export const calculateMixRequirements = async (
       variety_name: mapping.variety_name,
       recipe_id: mapping.recipe_id,
       recipe_name: mapping.recipe_name,
-      trays_needed,
+      trays_needed: traysNeeded,
       total_yield: requiredYield,
       sow_date: sowDate,
       ratio: normalizedRatio,
@@ -87,7 +87,7 @@ export const calculateMixRequirements = async (
 /**
  * Get recipe total days and average yield
  */
-export const getRecipeDetails = async (recipeId: number): Promise<{ total_days: number; average_yield: number }> => {
+export const getRecipeDetails = async (_recipeId: number): Promise<{ total_days: number; average_yield: number }> => {
   // This would typically fetch from database
   // For now, return defaults - should be enhanced to fetch actual data
   return {

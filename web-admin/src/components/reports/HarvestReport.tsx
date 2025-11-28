@@ -34,7 +34,8 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      // Fetch harvested trays with product and variant information
+      // Fetch harvested trays with recipe and variety information
+      // Note: order_items is not directly linked to trays, so we use recipe/variety data
       const { data: traysData, error } = await supabase
         .from('trays')
         .select(`
@@ -44,10 +45,6 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
             recipe_name,
             variety_name,
             varieties!inner(varietyid, name)
-          ),
-          order_items(
-            products(product_name),
-            product_variants(variant_name, size, unit)
           )
         `)
         .eq('farm_uuid', farmUuid)
@@ -58,23 +55,24 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
 
       if (error) throw error;
 
-      // Group and aggregate data
+      // Group and aggregate data by variety
       const harvestMap = new Map<string, HarvestData>();
 
       (traysData || []).forEach((tray: any) => {
-        const product = tray.order_items?.[0]?.products?.product_name || 'Unknown Product';
-        const variant = tray.order_items?.[0]?.product_variants;
         const variety = tray.recipes?.varieties?.name || tray.recipes?.variety_name || 'Unknown';
-        const key = `${product}-${variant?.variant_name || 'default'}-${variety}`;
+        const recipeName = tray.recipes?.recipe_name || 'Unknown Recipe';
+        // Use recipe name as product name since we don't have direct product link
+        const product = recipeName;
+        const key = `${product}-${variety}`;
 
         if (!harvestMap.has(key)) {
           harvestMap.set(key, {
             product_name: product,
-            variant_name: variant?.variant_name || 'Standard',
-            size: variant?.size || null,
+            variant_name: 'Standard',
+            size: null,
             variety_name: variety,
             total_yield: 0,
-            unit: variant?.unit || 'oz',
+            unit: 'oz',
             harvest_date: tray.harvest_date,
           });
         }

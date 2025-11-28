@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '../../hooks/useOnboarding';
 import './onboarding.css';

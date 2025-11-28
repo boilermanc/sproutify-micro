@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Repeat, Calendar, Plus, Edit, Trash2, Search, Package } from 'lucide-react';
+import { Repeat, Plus, Edit, Trash2, Search, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -55,6 +55,14 @@ const StandingOrdersPage = () => {
     notes: '',
   });
   const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
+  const [productVariants, setProductVariants] = useState<any[]>([]);
+  const [newItem, setNewItem] = useState({
+    product_id: '',
+    variant_id: '',
+    quantity: '1',
+    notes: '',
+  });
 
   useEffect(() => {
     fetchStandingOrders();
@@ -151,6 +159,65 @@ const StandingOrdersPage = () => {
     } catch (error) {
       console.error('Error fetching products:', error);
     }
+  };
+
+  const fetchProductVariants = async (productId: number) => {
+    try {
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select('variant_id, variant_name, size, price, unit')
+        .eq('product_id', productId)
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+
+      if (error) throw error;
+      setProductVariants(data || []);
+    } catch (error) {
+      console.error('Error fetching product variants:', error);
+      setProductVariants([]);
+    }
+  };
+
+  const handleProductChange = (productId: string) => {
+    setNewItem({ ...newItem, product_id: productId, variant_id: '' });
+    if (productId) {
+      fetchProductVariants(parseInt(productId));
+    } else {
+      setProductVariants([]);
+    }
+  };
+
+  const handleAddItem = () => {
+    if (!newItem.product_id || !newItem.quantity) {
+      alert('Please select a product and enter a quantity');
+      return;
+    }
+
+    const selectedProduct = products.find(p => p.product_id.toString() === newItem.product_id);
+    const selectedVariant = productVariants.find(v => v.variant_id.toString() === newItem.variant_id);
+
+    const item = {
+      product_id: parseInt(newItem.product_id),
+      variant_id: newItem.variant_id ? parseInt(newItem.variant_id) : null,
+      quantity: parseFloat(newItem.quantity),
+      product_name: selectedProduct?.product_name || 'Unknown',
+      variant_name: selectedVariant?.variant_name || null,
+      notes: newItem.notes || null,
+    };
+
+    setOrderItems([...orderItems, item]);
+    setNewItem({
+      product_id: '',
+      variant_id: '',
+      quantity: '1',
+      notes: '',
+    });
+    setProductVariants([]);
+    setIsAddItemDialogOpen(false);
+  };
+
+  const handleRemoveItem = (index: number) => {
+    setOrderItems(orderItems.filter((_, i) => i !== index));
   };
 
   const handleAddStandingOrder = async () => {
@@ -328,7 +395,22 @@ const StandingOrdersPage = () => {
           <h1 className="text-3xl font-bold text-gray-900">Standing Orders</h1>
           <p className="text-gray-600 mt-1">Manage recurring customer orders</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+          setIsAddDialogOpen(open);
+          if (!open) {
+            // Reset form when dialog closes
+            setOrderItems([]);
+            setNewOrder({
+              order_name: '',
+              customer_id: '',
+              frequency: 'weekly',
+              delivery_days: [],
+              start_date: new Date().toISOString().split('T')[0],
+              end_date: '',
+              notes: '',
+            });
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -440,23 +522,127 @@ const StandingOrdersPage = () => {
               <div className="border-t pt-4">
                 <div className="flex justify-between items-center mb-2">
                   <Label>Order Items</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => alert('Order item management coming soon')}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Item
-                  </Button>
+                  <Dialog open={isAddItemDialogOpen} onOpenChange={setIsAddItemDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Item
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Add Order Item</DialogTitle>
+                        <DialogDescription>
+                          Select a product and variant to add to this standing order
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div>
+                          <Label htmlFor="item_product">Product *</Label>
+                          <Select
+                            value={newItem.product_id}
+                            onValueChange={handleProductChange}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select product" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {products.map((product) => (
+                                <SelectItem key={product.product_id} value={product.product_id.toString()}>
+                                  {product.product_name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {newItem.product_id && (
+                          <div>
+                            <Label htmlFor="item_variant">Variant (Optional)</Label>
+                            {productVariants.length > 0 ? (
+                              <Select
+                                value={newItem.variant_id}
+                                onValueChange={(value) => setNewItem({ ...newItem, variant_id: value })}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select variant (optional)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="">No variant</SelectItem>
+                                  {productVariants.map((variant) => (
+                                    <SelectItem key={variant.variant_id} value={variant.variant_id.toString()}>
+                                      {variant.variant_name} {variant.size ? `(${variant.size}${variant.unit || ''})` : ''}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No items</p>
+                            )}
+                          </div>
+                        )}
+
+                        <div>
+                          <Label htmlFor="item_quantity">Quantity *</Label>
+                          <Input
+                            id="item_quantity"
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={newItem.quantity}
+                            onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
+                            placeholder="1.0"
+                          />
+                        </div>
+
+                        <div>
+                          <Label htmlFor="item_notes">Notes (Optional)</Label>
+                          <Textarea
+                            id="item_notes"
+                            value={newItem.notes}
+                            onChange={(e) => setNewItem({ ...newItem, notes: e.target.value })}
+                            rows={2}
+                            placeholder="Additional notes for this item"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddItemDialogOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button onClick={handleAddItem}>
+                          Add Item
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 {orderItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No items added yet</p>
+                  <p className="text-sm text-muted-foreground">No items</p>
                 ) : (
                   <div className="space-y-2">
                     {orderItems.map((item, index) => (
                       <div key={index} className="flex justify-between items-center p-2 bg-muted rounded">
-                        <span className="text-sm">{item.product_name} - Qty: {item.quantity}</span>
+                        <div className="flex-1">
+                          <span className="text-sm font-medium">{item.product_name}</span>
+                          {item.variant_name && (
+                            <span className="text-sm text-muted-foreground ml-2">- {item.variant_name}</span>
+                          )}
+                          <span className="text-sm text-muted-foreground ml-2">Qty: {item.quantity}</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveItem(index)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -489,7 +675,7 @@ const StandingOrdersPage = () => {
 
       {filteredOrders.length === 0 ? (
         <EmptyState
-          icon={Repeat}
+          icon={<Repeat className="h-12 w-12 text-gray-400" />}
           title="No standing orders found"
           description={searchTerm ? "Try adjusting your search" : "Get started by creating your first standing order"}
           actionLabel="Add Standing Order"

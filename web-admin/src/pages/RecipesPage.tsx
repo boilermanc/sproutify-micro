@@ -68,11 +68,17 @@ const RecipesPage = () => {
           const { data: steps } = await supabase
             .from('steps')
             .select('*')
-            .eq('recipe_id', recipe.recipe_id)
-            .order('sequence_order', { ascending: true });
+            .eq('recipe_id', recipe.recipe_id);
+          
+          // Sort steps by step_order or sequence_order
+          const sortedSteps = steps ? [...steps].sort((a, b) => {
+            const orderA = a.step_order ?? a.sequence_order ?? 0;
+            const orderB = b.step_order ?? b.sequence_order ?? 0;
+            return orderA - orderB;
+          }) : null;
 
           // Calculate total days, accounting for duration_unit
-          const totalDays = steps?.reduce((sum, step) => {
+          const totalDays = sortedSteps?.reduce((sum, step) => {
             const duration = step.duration || 0;
             const unit = (step.duration_unit || 'Days').toUpperCase();
             
@@ -96,7 +102,7 @@ const RecipesPage = () => {
             variety_name: varietyName,
             type: recipe.type || 'Standard', // Default to 'Standard' if type is null/undefined
             harvestDays: totalDays,
-            stepCount: steps?.length || 0,
+            stepCount: sortedSteps?.length || 0,
           };
         })
       );
@@ -176,10 +182,16 @@ const RecipesPage = () => {
         *,
         step_descriptions(description_name, description_details)
       `)
-      .eq('recipe_id', recipe.recipe_id)
-      .order('sequence_order', { ascending: true });
+      .eq('recipe_id', recipe.recipe_id);
     
-    setRecipeSteps(steps || []);
+    // Sort steps by step_order or sequence_order
+    const sortedSteps = steps ? [...steps].sort((a, b) => {
+      const orderA = a.step_order ?? a.sequence_order ?? 0;
+      const orderB = b.step_order ?? b.sequence_order ?? 0;
+      return orderA - orderB;
+    }) : [];
+    
+    setRecipeSteps(sortedSteps);
   };
 
   const handleEditRecipe = async (recipe: any) => {
@@ -193,13 +205,19 @@ const RecipesPage = () => {
         *,
         step_descriptions(description_name, description_details)
       `)
-      .eq('recipe_id', recipe.recipe_id)
-      .order('sequence_order', { ascending: true });
+      .eq('recipe_id', recipe.recipe_id);
     
-    setRecipeSteps(steps || []);
+    // Sort steps by step_order or sequence_order
+    const sortedSteps = steps ? [...steps].sort((a, b) => {
+      const orderA = a.step_order ?? a.sequence_order ?? 0;
+      const orderB = b.step_order ?? b.sequence_order ?? 0;
+      return orderA - orderB;
+    }) : [];
+    
+    setRecipeSteps(sortedSteps);
     
     // Initialize editable steps with current step data
-    const editable = (steps || []).map((step: any) => {
+    const editable = sortedSteps.map((step: any) => {
       const stepDescription = Array.isArray(step.step_descriptions)
         ? step.step_descriptions[0]
         : step.step_descriptions;

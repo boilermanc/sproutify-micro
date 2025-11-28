@@ -1,14 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 
-interface RecipeStep {
-  step_id: number;
-  recipe_id: number;
-  step_order: number;
-  step_description: string;
-  duration_days: number;
-}
-
-interface WeeklyTask {
+export interface WeeklyTask {
   task_id?: number;
   task_type: 'soaking' | 'sowing' | 'uncovering' | 'harvesting';
   recipe_id: number;
@@ -65,8 +57,14 @@ export const generateWeeklyTasks = async (
     const { data: steps, error: stepsError } = await supabase
       .from('steps')
       .select('*')
-      .in('recipe_id', recipeIds)
-      .order('recipe_id, step_order', { ascending: true });
+      .in('recipe_id', recipeIds);
+    
+    // Sort steps by step_order or sequence_order
+    const sortedSteps = steps ? [...steps].sort((a, b) => {
+      const orderA = a.step_order ?? a.sequence_order ?? 0;
+      const orderB = b.step_order ?? b.sequence_order ?? 0;
+      return orderA - orderB;
+    }) : null;
 
     if (stepsError) throw stepsError;
 
@@ -91,7 +89,7 @@ export const generateWeeklyTasks = async (
 
     // Generate tasks for each recipe
     for (const recipe of recipes || []) {
-      const recipeSteps = (steps || []).filter(s => s.recipe_id === recipe.recipe_id);
+      const recipeSteps = (sortedSteps || []).filter(s => s.recipe_id === recipe.recipe_id);
       const recipeTrays = traysByRecipe.get(recipe.recipe_id) || [];
 
       // For each tray, calculate task dates

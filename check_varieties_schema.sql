@@ -9,3 +9,5 @@ WHERE table_schema = 'public'
   AND table_name = 'varieties'
 ORDER BY ordinal_position;
 
+
+

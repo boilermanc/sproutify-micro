@@ -45,7 +45,8 @@ const VarietyStep = ({ onNext, onDataCreated }: VarietyStepProps) => {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) throw new Error('No session found');
 
-      const { farmUuid } = JSON.parse(sessionData);
+      // farmUuid not needed for varieties (they're global)
+      // const { farmUuid } = JSON.parse(sessionData);
 
       // Use actual DB column names: name (not variety_name), no farm_uuid
       const payload = {

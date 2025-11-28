@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calculator, Package, Calendar, TrendingUp } from 'lucide-react';
+import { Calculator } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -71,21 +71,41 @@ const MixCalculatorPage = () => {
   const fetchProducts = async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        console.warn('No session data found');
+        setLoading(false);
+        setProducts([]);
+        return;
+      }
 
       const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        console.warn('No farmUuid in session data');
+        setLoading(false);
+        setProducts([]);
+        return;
+      }
 
+      console.log('Fetching products for farm:', farmUuid);
+
+      // Don't filter by is_active - let users see all products (matching ProductsPage behavior)
       const { data, error } = await supabase
         .from('products')
         .select('product_id, product_name, product_type')
         .eq('farm_uuid', farmUuid)
-        .eq('is_active', true)
         .order('product_name', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching products:', error);
+        setProducts([]);
+        return;
+      }
+
+      console.log('Products fetched:', data?.length || 0, data);
       setProducts(data || []);
     } catch (error) {
       console.error('Error fetching products:', error);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -94,9 +114,16 @@ const MixCalculatorPage = () => {
   const fetchRecipes = async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        setRecipes([]);
+        return;
+      }
 
       const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        setRecipes([]);
+        return;
+      }
 
       // Fetch recipes with steps to calculate total days
       const { data: recipesData, error: recipesError } = await supabase
@@ -105,33 +132,82 @@ const MixCalculatorPage = () => {
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
 
-      if (recipesError) throw recipesError;
+      if (recipesError) {
+        console.error('Error fetching recipes:', recipesError);
+        setRecipes([]);
+        return;
+      }
 
       // Fetch steps for each recipe to calculate total days
       const recipesWithDetails: Recipe[] = [];
       for (const recipe of recipesData || []) {
-        const { data: stepsData, error: stepsError } = await supabase
-          .from('steps')
-          .select('duration_days')
-          .eq('recipe_id', recipe.recipe_id)
-          .order('step_order', { ascending: true });
+        try {
+          // Fetch steps using actual schema (step_order, duration_days)
+          const { data: stepsData, error: stepsError } = await supabase
+            .from('steps')
+            .select('duration_days, duration, duration_unit, step_order, sequence_order')
+            .eq('recipe_id', recipe.recipe_id);
+          
+          // Sort steps by step_order or sequence_order
+          const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const orderA = (a as any).step_order ?? (a as any).sequence_order ?? 0;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const orderB = (b as any).step_order ?? (b as any).sequence_order ?? 0;
+            return orderA - orderB;
+          }) : null;
 
-        if (stepsError) continue;
+          if (stepsError) {
+            console.warn(`Error fetching steps for recipe ${recipe.recipe_id}:`, stepsError);
+            // Still add the recipe with default days
+            recipesWithDetails.push({
+              recipe_id: recipe.recipe_id,
+              recipe_name: recipe.recipe_name,
+              variety_name: recipe.variety_name || '',
+              total_days: 10, // Default to 10 if steps can't be fetched
+              average_yield: 4.0,
+            });
+            continue;
+          }
 
-        const totalDays = (stepsData || []).reduce((sum, step) => sum + (step.duration_days || 0), 0);
+          // Calculate total days, accounting for duration_unit
+          const totalDays = (sortedStepsData || []).reduce((sum: number, step: { duration?: number; duration_days?: number; duration_unit?: string }) => {
+            const duration = step.duration || step.duration_days || 0;
+            const unit = (step.duration_unit || 'Days').toUpperCase();
+            
+            if (unit === 'DAYS') {
+              return sum + duration;
+            } else if (unit === 'HOURS') {
+              // Hours >= 12 counts as 1 day, otherwise 0
+              return sum + (duration >= 12 ? 1 : 0);
+            }
+            return sum + duration; // default: treat as days
+          }, 0);
 
-        recipesWithDetails.push({
-          recipe_id: recipe.recipe_id,
-          recipe_name: recipe.recipe_name,
-          variety_name: recipe.variety_name || '',
-          total_days: totalDays || 10, // Default to 10 if no steps
-          average_yield: 4.0, // Default yield, should be configurable per recipe
-        });
+          recipesWithDetails.push({
+            recipe_id: recipe.recipe_id,
+            recipe_name: recipe.recipe_name,
+            variety_name: recipe.variety_name || '',
+            total_days: totalDays || 10, // Default to 10 if no steps
+            average_yield: 4.0, // Default yield, should be configurable per recipe
+          });
+        } catch (stepError) {
+          console.warn(`Error processing steps for recipe ${recipe.recipe_id}:`, stepError);
+          // Still add the recipe with default days
+          recipesWithDetails.push({
+            recipe_id: recipe.recipe_id,
+            recipe_name: recipe.recipe_name,
+            variety_name: recipe.variety_name || '',
+            total_days: 10,
+            average_yield: 4.0,
+          });
+        }
       }
 
       setRecipes(recipesWithDetails);
     } catch (error) {
       console.error('Error fetching recipes:', error);
+      setRecipes([]);
     }
   };
 
@@ -148,7 +224,7 @@ const MixCalculatorPage = () => {
 
       if (error) throw error;
 
-      const normalizedMappings: MixMapping[] = (data || []).map((m: any) => ({
+      const normalizedMappings: MixMapping[] = (data || []).map((m: { recipe_id: number; variety_id: number; ratio?: number; recipes?: { recipe_name?: string }; varieties?: { variety_name?: string } }) => ({
         recipe_id: m.recipe_id,
         variety_id: m.variety_id,
         ratio: m.ratio || 1.0,
@@ -221,38 +297,49 @@ const MixCalculatorPage = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
+        <Card className="flex flex-col max-h-[calc(100vh-12rem)]">
+          <CardHeader className="flex-shrink-0">
             <CardTitle>Order Details</CardTitle>
             <CardDescription>Enter order information to calculate requirements</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 overflow-y-auto flex-1 min-h-0">
             <div>
               <Label htmlFor="product">Product *</Label>
               <Select value={selectedProductId} onValueChange={setSelectedProductId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a product" />
+                  <SelectValue placeholder={products.length === 0 ? "No products available" : "Select a product"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {products.map((product) => (
-                    <SelectItem key={product.product_id} value={product.product_id.toString()}>
-                      {product.product_name}
-                    </SelectItem>
-                  ))}
+                  {products.length === 0 ? (
+                    <SelectItem value="none" disabled>No products found. Create products in the Products page.</SelectItem>
+                  ) : (
+                    products.map((product) => (
+                      <SelectItem key={product.product_id} value={product.product_id.toString()}>
+                        {product.product_name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
+              {products.length === 0 && !loading && (
+                <p className="text-sm text-amber-600 mt-1">
+                  No products found. Go to the <a href="/products" className="underline">Products page</a> to create products.
+                </p>
+              )}
             </div>
 
             {selectedProduct && productMix.length > 0 && (
               <div className="p-3 bg-blue-50 rounded-lg">
                 <p className="text-sm font-medium text-blue-900">Product Mix:</p>
-                <ul className="mt-2 text-sm text-blue-700 list-disc list-inside">
-                  {productMix.map((mapping, index) => (
-                    <li key={index}>
-                      {mapping.variety_name} ({mapping.recipe_name}) - Ratio: {mapping.ratio}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-2 max-h-48 overflow-y-auto">
+                  <ul className="text-sm text-blue-700 list-disc list-inside">
+                    {productMix.map((mapping, index) => (
+                      <li key={index}>
+                        {mapping.variety_name} ({mapping.recipe_name}) - Ratio: {mapping.ratio}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
 

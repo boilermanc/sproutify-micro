@@ -208,12 +208,14 @@ const BatchesPage = () => {
       const vendorsResult = await fetchVendors();
       
       // Try to fetch varieties, but don't fail if it doesn't work
-      let varietiesResult = { data: null, error: null };
+      let varietiesResult: { data: any[] | null; error: any } = { data: null, error: null };
       try {
-        varietiesResult = await fetchVarieties();
-        if (varietiesResult.error) {
-          console.warn('Could not fetch varieties, continuing without them:', varietiesResult.error);
+        const result = await fetchVarieties();
+        if (result.error) {
+          console.warn('Could not fetch varieties, continuing without them:', result.error);
           varietiesResult = { data: [], error: null }; // Set empty array so page still works
+        } else {
+          varietiesResult = result;
         }
       } catch (err) {
         console.warn('Error fetching varieties, continuing without them:', err);
@@ -267,9 +269,9 @@ const BatchesPage = () => {
       if (!sessionData) return;
       const { farmUuid } = JSON.parse(sessionData);
 
-      const selectedVariety = varieties.find(v => 
-        (v.variety_id ?? v.varietyid)?.toString() === newBatch.variety_id
-      );
+      // const selectedVariety = varieties.find(v => 
+      //   (v.variety_id ?? v.varietyid)?.toString() === newBatch.variety_id
+      // );
 
       // Map to actual DB column names: varietyid, vendorid, purchasedate
       const payload: any = {
@@ -461,16 +463,21 @@ const BatchesPage = () => {
                   <Select 
                     value={newBatch.vendor_id} 
                     onValueChange={(value) => setNewBatch({ ...newBatch, vendor_id: value })}
+                    disabled={vendors.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select vendor" />
+                      <SelectValue placeholder={vendors.length === 0 ? "No vendors" : "Select vendor"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {vendors.map((vendor) => (
-                        <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
-                          {vendor.vendor_name}
-                        </SelectItem>
-                      ))}
+                      {vendors.length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">No vendors</div>
+                      ) : (
+                        vendors.map((vendor) => (
+                          <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
+                            {vendor.vendor_name}
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

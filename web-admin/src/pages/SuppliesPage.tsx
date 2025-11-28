@@ -21,13 +21,46 @@ interface Supply {
   low_stock_threshold?: number | string;
   status?: string;
   notes?: string;
+  color?: string;
+  vendor_id?: number | null;
+  vendor_name?: string | null;
   farm_uuid?: string;
   is_active?: boolean;
   created_at?: string;
 }
 
+interface SupplyTemplate {
+  template_id: number;
+  template_name: string;
+  category: string;
+  unit: string;
+  color?: string | null;
+  default_low_stock_threshold: number;
+  description?: string | null;
+  is_global: boolean;
+}
+
+interface Vendor {
+  vendor_id: number;
+  vendor_name: string;
+  name?: string;
+}
+
+// Common tray colors
+const TRAY_COLORS = ['Black', 'White', 'Green', 'Blue', 'Red', 'Yellow', 'Clear', 'Other'];
+
+const getPresetsForCategory = (category: string, templates: SupplyTemplate[]) => {
+  // Filter templates by category
+  const categoryTemplates = templates.filter(t => t.category === category);
+  
+  // If no templates for this category, return empty array (user can type custom)
+  return categoryTemplates;
+};
+
 const SuppliesPage = () => {
   const [supplies, setSupplies] = useState<Supply[]>([]);
+  const [templates, setTemplates] = useState<SupplyTemplate[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -40,11 +73,13 @@ const SuppliesPage = () => {
   const [adjusting, setAdjusting] = useState(false);
   const [newSupply, setNewSupply] = useState({
     supply_name: '',
-    category: 'Equipment',
+    category: 'Growing Supplies',
     stock: '',
     unit: 'pcs',
     low_stock_threshold: '',
     notes: '',
+    color: '',
+    vendor_id: '',
   });
   const [stockAdjustment, setStockAdjustment] = useState({
     adjustment_type: 'add', // 'add' or 'remove'
@@ -59,10 +94,14 @@ const SuppliesPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      // Actual DB columns: supply_id, supply_name, category, stock, unit, low_stock_threshold
+      // Fetch supplies with vendor information
+      // Try both vendorid and vendor_id column names
       const { data, error } = await supabase
         .from('supplies')
-        .select('*')
+        .select(`
+          *,
+          vendors:vendor_id (*)
+        `)
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
 
@@ -79,7 +118,7 @@ const SuppliesPage = () => {
         throw error;
       } else if (data) {
         // Calculate status based on stock levels
-        const formattedSupplies = data.map((supply: Supply) => {
+        const formattedSupplies = data.map((supply: Supply & { vendors?: { vendorid?: number; vendor_id?: number; name?: string; vendor_name?: string } }) => {
           const stock = Number(supply.stock || 0);
           const threshold = Number(supply.low_stock_threshold || 10);
           let status = 'In Stock';
@@ -88,11 +127,17 @@ const SuppliesPage = () => {
           } else if (stock <= threshold) {
             status = 'Low Stock';
           }
+          
+          // Extract vendor name if vendor relationship exists
+          // Handle both vendorid and vendor_id column names, and name/vendor_name
+          const vendorName = supply.vendors?.name || supply.vendors?.vendor_name || null;
+          
           return {
             ...supply,
             supply_name: supply.supply_name || supply.name || '',
             stock: stock,
             status,
+            vendor_name: vendorName,
           };
         }).sort((a: Supply, b: Supply) => {
           const nameA = (a.supply_name || '').toLowerCase();
@@ -119,8 +164,72 @@ const SuppliesPage = () => {
     }
   };
 
+  const fetchTemplates = async () => {
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+
+      const { farmUuid } = JSON.parse(sessionData);
+
+      // Fetch global templates (Sproutify-managed) and farm-specific templates
+      const { data, error } = await supabase
+        .from('supply_templates')
+        .select('*')
+        .eq('is_active', true)
+        .or(`is_global.eq.true,farm_uuid.eq.${farmUuid}`)
+        .order('is_global', { ascending: false }) // Global templates first
+        .order('template_name', { ascending: true });
+
+      if (error) {
+        console.warn('Error fetching supply templates:', error);
+        // Fallback to empty array if table doesn't exist yet
+        setTemplates([]);
+        return;
+      }
+
+      setTemplates((data || []) as SupplyTemplate[]);
+    } catch (error) {
+      console.error('Error fetching templates:', error);
+      setTemplates([]);
+    }
+  };
+
+  const fetchVendors = async () => {
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+
+      const { farmUuid } = JSON.parse(sessionData);
+
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('vendorid, name')
+        .eq('farm_uuid', farmUuid)
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.warn('Error fetching vendors:', error);
+        setVendors([]);
+        return;
+      }
+
+      // Normalize vendor data
+      const normalized = (data || []).map((v: { vendorid?: number; vendor_id?: number; name?: string; vendor_name?: string }) => ({
+        vendor_id: v.vendorid || v.vendor_id || 0,
+        vendor_name: v.name || v.vendor_name || '',
+      }));
+
+      setVendors(normalized);
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+      setVendors([]);
+    }
+  };
+
   useEffect(() => {
     fetchSupplies();
+    fetchTemplates();
+    fetchVendors();
   }, []);
 
   const handleAddSupply = async () => {
@@ -139,6 +248,8 @@ const SuppliesPage = () => {
         unit: newSupply.unit || 'pcs',
         low_stock_threshold: newSupply.low_stock_threshold ? parseFloat(newSupply.low_stock_threshold) : 10,
         notes: newSupply.notes || null,
+        color: newSupply.color || null,
+        vendor_id: newSupply.vendor_id ? parseInt(newSupply.vendor_id) : null,
         farm_uuid: farmUuid,
         is_active: true,
       };
@@ -158,11 +269,13 @@ const SuppliesPage = () => {
 
       setNewSupply({
         supply_name: '',
-        category: 'Equipment',
+        category: 'Growing Supplies',
         stock: '',
         unit: 'pcs',
         low_stock_threshold: '',
         notes: '',
+        color: '',
+        vendor_id: '',
       });
       setIsAddDialogOpen(false);
       fetchSupplies();
@@ -310,7 +423,7 @@ const SuppliesPage = () => {
             <DialogHeader>
               <DialogTitle>Add New Supply</DialogTitle>
               <DialogDescription>
-                Track inventory items and supplies.
+                Track inventory items including growing supplies (trays, domes), growing media (soil, coco coir), and packaging (containers, lids).
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -318,10 +431,43 @@ const SuppliesPage = () => {
                 <Label htmlFor="name">Item Name</Label>
                 <Input
                   id="name"
-                  placeholder="e.g., 1020 Trays (No Holes)"
+                  placeholder="e.g., 1020 Trays (No Holes), 2oz Containers, Coco Coir"
                   value={newSupply.supply_name}
                   onChange={(e) => setNewSupply({ ...newSupply, supply_name: e.target.value })}
                 />
+                <div className="text-xs text-muted-foreground mt-1">
+                  <p className="font-medium mb-1">Quick Add from Templates:</p>
+                  {getPresetsForCategory(newSupply.category, templates).length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {getPresetsForCategory(newSupply.category, templates).map((template) => (
+                        <Button
+                          key={template.template_id}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            setNewSupply({
+                              ...newSupply,
+                              supply_name: template.template_name,
+                              category: template.category,
+                              unit: template.unit,
+                              color: template.color || '',
+                              low_stock_threshold: template.default_low_stock_threshold.toString(),
+                            });
+                          }}
+                        >
+                          {template.template_name}
+                          {template.is_global && (
+                            <span className="ml-1 text-[10px] opacity-60">(Sproutify)</span>
+                          )}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs italic">No templates for this category. You can add a custom supply.</p>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -334,10 +480,11 @@ const SuppliesPage = () => {
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Equipment">Equipment</SelectItem>
+                      <SelectItem value="Growing Supplies">Growing Supplies</SelectItem>
                       <SelectItem value="Growing Media">Growing Media</SelectItem>
+                      <SelectItem value="Trays">Trays</SelectItem>
+                      <SelectItem value="Packaging">Packaging</SelectItem>
                       <SelectItem value="Seeds">Seeds</SelectItem>
-                      <SelectItem value="Supplies">Supplies</SelectItem>
                       <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -352,16 +499,57 @@ const SuppliesPage = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pcs">pcs</SelectItem>
-                      <SelectItem value="lbs">lbs</SelectItem>
-                      <SelectItem value="oz">oz</SelectItem>
-                      <SelectItem value="kg">kg</SelectItem>
-                      <SelectItem value="g">g</SelectItem>
+                      <SelectItem value="pcs">pcs (pieces)</SelectItem>
+                      <SelectItem value="lbs">lbs (pounds)</SelectItem>
+                      <SelectItem value="oz">oz (ounces)</SelectItem>
+                      <SelectItem value="kg">kg (kilograms)</SelectItem>
+                      <SelectItem value="g">g (grams)</SelectItem>
                       <SelectItem value="bricks">bricks</SelectItem>
                       <SelectItem value="bags">bags</SelectItem>
+                      <SelectItem value="cubic ft">cubic ft</SelectItem>
+                      <SelectItem value="cases">cases</SelectItem>
+                      <SelectItem value="packs">packs</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              {(newSupply.category === 'Trays' || newSupply.category === 'Packaging') && (
+                <div className="grid gap-2">
+                  <Label htmlFor="color">Color (Optional)</Label>
+                  <Select 
+                    value={newSupply.color || ''} 
+                    onValueChange={(value) => setNewSupply({ ...newSupply, color: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select color" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Color / N/A</SelectItem>
+                      {TRAY_COLORS.map((color) => (
+                        <SelectItem key={color} value={color}>{color}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="grid gap-2">
+                <Label htmlFor="vendor">Vendor (Optional)</Label>
+                <Select 
+                  value={newSupply.vendor_id || ''} 
+                  onValueChange={(value) => setNewSupply({ ...newSupply, vendor_id: value === 'none' ? '' : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select vendor (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Vendor</SelectItem>
+                    {vendors.map((vendor) => (
+                      <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
+                        {vendor.vendor_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -563,6 +751,8 @@ const SuppliesPage = () => {
             <TableRow>
               <TableHead>Item Name</TableHead>
               <TableHead>Category</TableHead>
+              <TableHead>Color</TableHead>
+              <TableHead>Vendor</TableHead>
               <TableHead>Current Stock</TableHead>
               <TableHead>Threshold</TableHead>
               <TableHead>Status</TableHead>
@@ -572,7 +762,7 @@ const SuppliesPage = () => {
           <TableBody>
             {filteredSupplies.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center">
+                <TableCell colSpan={8} className="h-32 text-center">
                   <div className="flex flex-col items-center justify-center text-muted-foreground">
                     <Package className="h-8 w-8 mb-2 opacity-50" />
                     <p>No supplies found.</p>
@@ -597,11 +787,27 @@ const SuppliesPage = () => {
                       <div className="flex items-center gap-2">
                         {isOutOfStock && <span className="text-red-500">⚠️</span>}
                         {isLowStock && !isOutOfStock && <span className="text-yellow-500">⚠️</span>}
-                        {supply.supply_name || supply.name}
+                        <span>{supply.supply_name || supply.name}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{supply.category || 'Uncategorized'}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {supply.color ? (
+                        <Badge variant="secondary" className="capitalize">
+                          {supply.color}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {supply.vendor_name ? (
+                        <span className="text-sm">{supply.vendor_name}</span>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">

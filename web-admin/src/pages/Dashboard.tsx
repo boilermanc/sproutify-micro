@@ -134,10 +134,23 @@ const Dashboard = () => {
           .eq('farm_uuid', farmUuid)
           .is('harvest_date', null);
 
-        // Fetch varieties count (varieties are global, no farm_uuid or is_active filter)
-        const { count: totalVarieties } = await supabase
-          .from('varieties')
-          .select('*', { count: 'exact', head: true });
+        // Fetch varieties count - match what VarietiesPage shows (filtered by farm_uuid)
+        let totalVarieties = 0;
+        try {
+          // Try to use varieties_view (same as VarietiesPage)
+          const { count: varietiesCount } = await supabase
+            .from('varieties_view')
+            .select('*', { count: 'exact', head: true })
+            .eq('farm_uuid', farmUuid);
+          totalVarieties = varietiesCount || 0;
+        } catch (e) {
+          // Fallback: if varieties_view doesn't exist, count all varieties
+          // This matches the old behavior but may not be accurate
+          const { count: varietiesCount } = await supabase
+            .from('varieties')
+            .select('*', { count: 'exact', head: true });
+          totalVarieties = varietiesCount || 0;
+        }
 
         // Fetch recent harvests (last 7 days)
         const sevenDaysAgo = new Date();
@@ -641,7 +654,7 @@ const Dashboard = () => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {varietyData.map((entry, index) => (
+                  {varietyData.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>

@@ -7,7 +7,7 @@ type ProgressIndicatorProps = {
   onRestart?: () => void;
 };
 
-const ProgressIndicator = ({ onStartStep, onRestart }: ProgressIndicatorProps) => {
+const ProgressIndicator = ({ onStartStep }: ProgressIndicatorProps) => {
   const { state } = useOnboarding();
 
   const items = [

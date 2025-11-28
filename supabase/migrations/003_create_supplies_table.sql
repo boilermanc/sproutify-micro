@@ -46,3 +46,5 @@ CREATE TRIGGER trigger_update_supplies_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_supplies_updated_at();
 
+
+

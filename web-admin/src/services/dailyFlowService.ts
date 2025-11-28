@@ -38,7 +38,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         sow_date,
         batch_id,
         location,
-        recipes!inner(
+        recipes(
           recipe_id,
           recipe_name,
           variety_name
@@ -51,17 +51,22 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
     if (traysError) throw traysError;
     if (!trays || trays.length === 0) return [];
 
+    // Filter out trays without recipes
+    const traysWithRecipes = trays.filter((t: any) => t.recipes && t.recipe_id);
+    if (traysWithRecipes.length === 0) return [];
+
     // Fetch all recipe steps for the recipes we have
-    const recipeIds = [...new Set(trays.map((t: any) => t.recipe_id))];
+    const recipeIds = [...new Set(traysWithRecipes.map((t: any) => t.recipe_id).filter(Boolean))];
+    if (recipeIds.length === 0) return [];
+    
     const { data: allSteps, error: stepsError } = await supabase
       .from('steps')
       .select('*')
-      .in('recipe_id', recipeIds)
-      .order('recipe_id, sequence_order');
+      .in('recipe_id', recipeIds);
 
     if (stepsError) throw stepsError;
 
-    // Group steps by recipe_id
+    // Group steps by recipe_id and sort by step_order
     const stepsByRecipe: Record<number, any[]> = {};
     (allSteps || []).forEach((step: any) => {
       if (!stepsByRecipe[step.recipe_id]) {
@@ -69,9 +74,18 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       }
       stepsByRecipe[step.recipe_id].push(step);
     });
+    
+    // Sort steps by step_order or sequence_order within each recipe
+    Object.keys(stepsByRecipe).forEach((recipeId) => {
+      stepsByRecipe[Number(recipeId)].sort((a, b) => {
+        const orderA = a.step_order ?? a.sequence_order ?? 0;
+        const orderB = b.step_order ?? b.sequence_order ?? 0;
+        return orderA - orderB;
+      });
+    });
 
     // Fetch tray_steps to see which steps are completed
-    const trayIds = trays.map((t: any) => t.tray_id);
+    const trayIds = traysWithRecipes.map((t: any) => t.tray_id);
     const { data: traySteps, error: trayStepsError } = await supabase
       .from('tray_steps')
       .select('*')
@@ -80,10 +94,10 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
     if (trayStepsError) throw trayStepsError;
 
     // Create a map of completed steps per tray
-    // Use 'status' = 'Completed' instead of 'completed' boolean
+    // Use 'completed' boolean and 'completed_at' timestamp
     const completedStepsMap: Record<number, Set<number>> = {};
     (traySteps || []).forEach((ts: any) => {
-      if (ts.status === 'Completed' || ts.completed_date) {
+      if (ts.completed || ts.completed_at) {
         if (!completedStepsMap[ts.tray_id]) {
           completedStepsMap[ts.tray_id] = new Set();
         }
@@ -91,29 +105,30 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       }
     });
 
-    // Fetch batches for batch IDs
-    const batchIds = [...new Set(trays.map((t: any) => t.batch_id).filter(Boolean))];
-    let batchesMap: Record<number, any> = {};
-    if (batchIds.length > 0) {
-      const { data: batches } = await supabase
-        .from('seedbatches')
-        .select('batchid')
-        .in('batchid', batchIds);
-      
-      batchesMap = (batches || []).reduce((acc, b) => {
-        acc[b.batchid] = b;
-        return acc;
-      }, {} as Record<number, any>);
-    }
+    // Fetch batches for batch IDs (commented out - not currently used)
+    // const batchIds = [...new Set(traysWithRecipes.map((t: any) => t.batch_id).filter(Boolean))];
+    // let batchesMap: Record<number, any> = {};
+    // if (batchIds.length > 0) {
+    //   const { data: batches } = await supabase
+    //     .from('seedbatches')
+    //     .select('batchid')
+    //     .in('batchid', batchIds);
+    //   
+    //   batchesMap = (batches || []).reduce((acc, b) => {
+    //     acc[b.batchid] = b;
+    //     return acc;
+    //   }, {} as Record<number, any>);
+    // }
 
     // Transform trays into tasks
-    const tasks: DailyTask[] = [];
     const taskMap: Record<string, DailyTask> = {};
 
-    for (const tray of trays) {
-      const recipe = tray.recipes;
-      const steps = stepsByRecipe[recipe.recipe_id] || [];
-      if (steps.length === 0) return;
+    for (const tray of traysWithRecipes) {
+      const recipe = tray.recipes as any;
+      if (!recipe || !recipe.recipe_id) continue; // Skip trays without valid recipes
+      const recipeId = recipe.recipe_id;
+      const steps = stepsByRecipe[recipeId] || [];
+      if (steps.length === 0) continue; // Skip trays without steps
 
       const sowDate = new Date(tray.sow_date);
       sowDate.setHours(0, 0, 0, 0); // Normalize sow date to midnight for accurate day calculation
@@ -219,7 +234,8 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       }
 
       // Create a task key for grouping
-      const taskKey = `${action}-${recipe.variety_name}-${currentStep.step_id}`;
+      const varietyName = (recipe as any).variety_name || recipe.recipe_name || 'Unknown';
+      const taskKey = `${action}-${varietyName}-${currentStep.step_id}`;
       const batchId = tray.batch_id ? `B-${tray.batch_id}` : 'N/A';
       const location = tray.location || 'Not set';
 
@@ -231,7 +247,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         taskMap[taskKey] = {
           id: taskKey,
           action,
-          crop: recipe.variety_name,
+          crop: (recipe as any).variety_name || recipe.recipe_name || 'Unknown',
           batchId,
           location,
           dayCurrent,
@@ -239,7 +255,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
           trays: 1,
           status: action === 'Harvest' || dayCurrent >= totalDays - 1 ? 'urgent' : 'pending',
           trayIds: [tray.tray_id],
-          recipeId: recipe.recipe_id,
+          recipeId: recipeId,
           stepId: currentStep.step_id,
           stepDescription: currentStep.description_name || currentStep.step_description || '',
         };
@@ -262,7 +278,7 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return false;
 
-    const { farmUuid, userId } = JSON.parse(sessionData);
+    const { farmUuid } = JSON.parse(sessionData);
     const now = new Date().toISOString();
 
     // If it's a harvest action, update the harvest_date on the trays
@@ -281,22 +297,53 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
     }
 
     // Update tray_steps for all tasks (including harvest)
-    // Use the actual schema: status='Completed', completed_date, completed_by
+    // Use the actual schema: completed (boolean), completed_at (timestamp)
     if (task.stepId) {
-      const { error: stepsError } = await supabase
-        .from('tray_steps')
-        .update({
-          status: 'Completed',
-          completed_date: now,
-          completed_by: userId,
-        })
-        .in('tray_id', task.trayIds)
-        .eq('step_id', task.stepId)
-        .eq('farm_uuid', farmUuid);
-
-      if (stepsError) {
-        console.error('Error updating tray_steps:', stepsError);
-        throw stepsError;
+      // First, ensure tray_steps records exist for all tray/step combinations
+      for (const trayId of task.trayIds) {
+        // Check if record exists
+        const { data: existing, error: checkError } = await supabase
+          .from('tray_steps')
+          .select('id')
+          .eq('tray_id', trayId)
+          .eq('step_id', task.stepId)
+          .maybeSingle();
+        
+        if (checkError) {
+          console.error('Error checking tray_steps:', checkError);
+          throw checkError;
+        }
+        
+        if (!existing) {
+          // Insert if doesn't exist
+          const { error: insertError } = await supabase
+            .from('tray_steps')
+            .insert({
+              tray_id: trayId,
+              step_id: task.stepId,
+              completed: true,
+              completed_at: now,
+            });
+          
+          if (insertError) {
+            console.error('Error inserting tray_steps:', insertError);
+            throw insertError;
+          }
+        } else {
+          // Update if exists
+          const { error: updateError } = await supabase
+            .from('tray_steps')
+            .update({
+              completed: true,
+              completed_at: now,
+            })
+            .eq('id', existing.id);
+          
+          if (updateError) {
+            console.error('Error updating tray_steps:', updateError);
+            throw updateError;
+          }
+        }
       }
     }
 

@@ -31,7 +31,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
           .single();
         
         if (data) {
-          setVarietyName(data.name || data.variety_name || '');
+          setVarietyName(data.name || (data as any).variety_name || '');
         }
       };
       fetchVariety();

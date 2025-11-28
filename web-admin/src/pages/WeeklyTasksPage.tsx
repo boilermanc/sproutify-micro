@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Calendar, CheckCircle2, Circle, Clock, Play, Filter, RefreshCw } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,27 +9,23 @@ import {
   generateWeeklyTasks, 
   fetchWeeklyTasks, 
   saveWeeklyTasks, 
-  updateTaskStatus 
+  updateTaskStatus,
+  type WeeklyTask
 } from '../services/taskGeneratorService';
 
-interface WeeklyTask {
-  task_id?: number;
-  task_type: 'soaking' | 'sowing' | 'uncovering' | 'harvesting';
-  recipe_id: number;
-  recipe_name: string;
-  week_start_date: Date;
-  week_number: number;
-  task_date: Date;
-  quantity: number;
-  status: 'pending' | 'in-progress' | 'completed' | 'skipped';
-  notes?: string;
-}
+// Move function declaration before use
+const getWeekStartDate = (date: Date): Date => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  return new Date(d.setDate(diff));
+};
 
 const WeeklyTasksPage = () => {
   const [tasks, setTasks] = useState<WeeklyTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedWeek, setSelectedWeek] = useState<string>(
+  const [selectedWeek, setSelectedWeek] = useState<string>(() => 
     getWeekStartDate(new Date()).toISOString().split('T')[0]
   );
   const [taskTypeFilter, setTaskTypeFilter] = useState<string>('all');
@@ -39,13 +34,6 @@ const WeeklyTasksPage = () => {
   useEffect(() => {
     loadTasks();
   }, [selectedWeek]);
-
-  const getWeekStartDate = (date: Date): Date => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
-    return new Date(d.setDate(diff));
-  };
 
   const loadTasks = async () => {
     try {
@@ -110,15 +98,6 @@ const WeeklyTasksPage = () => {
     }
   };
 
-  const getTaskTypeColor = (type: string) => {
-    switch (type) {
-      case 'soaking': return 'bg-blue-100 text-blue-800';
-      case 'sowing': return 'bg-green-100 text-green-800';
-      case 'uncovering': return 'bg-yellow-100 text-yellow-800';
-      case 'harvesting': return 'bg-purple-100 text-purple-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {

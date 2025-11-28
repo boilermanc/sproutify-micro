@@ -96,9 +96,32 @@ jobs:
               echo "Checking sweetwaterurbanfarms.com subdirectories:"
               ls -la /var/www/vhosts/sweetwaterurbanfarms.com/ 2>/dev/null | head -20 || echo "Cannot list subdirectories"
               echo ""
-              echo "ERROR: Could not find $DOMAIN_NAME httpdocs directory!"
-              echo "Please verify the correct path in Plesk and update the workflow."
-              exit 1
+              echo "⚠ Domain not found. Attempting to use parent domain or create subdomain directory..."
+              
+              # Try to use parent domain's httpdocs or create subdomain directory
+              PARENT_HTTPDOCS="/var/www/vhosts/sweetwaterurbanfarms.com/httpdocs"
+              SUBDOMAIN_HTTPDOCS="/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs"
+              
+              if [ -d "$PARENT_HTTPDOCS" ]; then
+                echo "✓ Found parent domain httpdocs: $PARENT_HTTPDOCS"
+                echo "⚠ Using parent domain httpdocs. If this is incorrect, create the subdomain in Plesk first."
+                HTTPDOCS_PATH="$PARENT_HTTPDOCS"
+                ADMIN_PATH="$HTTPDOCS_PATH/admin"
+              elif [ -d "/var/www/vhosts/sweetwaterurbanfarms.com" ]; then
+                echo "✓ Found parent domain directory, creating subdomain structure..."
+                mkdir -p "$SUBDOMAIN_HTTPDOCS"
+                HTTPDOCS_PATH="$SUBDOMAIN_HTTPDOCS"
+                ADMIN_PATH="$HTTPDOCS_PATH/admin"
+                echo "✓ Created: $HTTPDOCS_PATH"
+                echo "✓ Admin path will be: $ADMIN_PATH"
+              else
+                echo "ERROR: Could not find or create $DOMAIN_NAME httpdocs directory!"
+                echo ""
+                echo "Please do one of the following:"
+                echo "1. Create the subdomain 'micro.sproutify.app' in Plesk, OR"
+                echo "2. Update the workflow to use the correct path"
+                exit 1
+              fi
             fi
             
             echo "HTTPDOCS_PATH=$HTTPDOCS_PATH" >> $GITHUB_OUTPUT
@@ -127,6 +150,9 @@ jobs:
               HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs ]; then
+              echo "⚠ Using parent domain httpdocs (subdomain not found)"
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/httpdocs
             else
               echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
               echo "This prevents accidentally overwriting the wrong site."

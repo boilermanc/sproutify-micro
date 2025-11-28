@@ -89,9 +89,29 @@ jobs:
               echo "Checking sweetwaterurbanfarms.com subdirectories:"
               ls -la /var/www/vhosts/sweetwaterurbanfarms.com/ 2>/dev/null | head -20 || echo "Cannot list subdirectories"
               echo ""
-              echo "ERROR: Could not find $DOMAIN_NAME httpdocs directory!"
-              echo "Please verify the correct path in Plesk and update the workflow."
-              exit 1
+              echo "⚠ Domain not found. Attempting to use parent domain or create subdomain directory..."
+              
+              # Try to use parent domain's httpdocs or create subdomain directory
+              PARENT_HTTPDOCS="/var/www/vhosts/sweetwaterurbanfarms.com/httpdocs"
+              SUBDOMAIN_HTTPDOCS="/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs"
+              
+              if [ -d "$PARENT_HTTPDOCS" ]; then
+                echo "✓ Found parent domain httpdocs: $PARENT_HTTPDOCS"
+                echo "⚠ Using parent domain httpdocs. If this is incorrect, create the subdomain in Plesk first."
+                HTTPDOCS_PATH="$PARENT_HTTPDOCS"
+              elif [ -d "/var/www/vhosts/sweetwaterurbanfarms.com" ]; then
+                echo "✓ Found parent domain directory, creating subdomain structure..."
+                mkdir -p "$SUBDOMAIN_HTTPDOCS"
+                HTTPDOCS_PATH="$SUBDOMAIN_HTTPDOCS"
+                echo "✓ Created: $HTTPDOCS_PATH"
+              else
+                echo "ERROR: Could not find or create $DOMAIN_NAME httpdocs directory!"
+                echo ""
+                echo "Please do one of the following:"
+                echo "1. Create the subdomain 'micro.sproutify.app' in Plesk, OR"
+                echo "2. Update the workflow to use the correct path"
+                exit 1
+              fi
             fi
             
             echo "HTTPDOCS_PATH=$HTTPDOCS_PATH" >> $GITHUB_OUTPUT
@@ -118,6 +138,9 @@ jobs:
               cd /var/www/vhosts/$DOMAIN_NAME/httpdocs
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               cd ~/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs ]; then
+              echo "⚠ Using parent domain httpdocs (subdomain not found)"
+              cd /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs
             else
               echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
               echo "This prevents accidentally overwriting the wrong site."
@@ -177,23 +200,19 @@ jobs:
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
           script: |
-            DOMAIN_NAME="micro.sproutify.app"
+            HTTPDOCS_PATH="${{ steps.find_path.outputs.HTTPDOCS_PATH }}"
             
-            echo "=== Looking for $DOMAIN_NAME directory ==="
-            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
-              cd /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
-              echo "Using: /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ($(pwd))"
-            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
-              cd /var/www/vhosts/$DOMAIN_NAME/httpdocs
-              echo "Using: /var/www/vhosts/$DOMAIN_NAME/httpdocs ($(pwd))"
-            elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
-              cd ~/$DOMAIN_NAME/httpdocs
-              echo "Using: ~/$DOMAIN_NAME/httpdocs ($(pwd))"
+            if [ -z "$HTTPDOCS_PATH" ]; then
+              echo "ERROR: HTTPDOCS_PATH not set from previous step"
+              exit 1
+            fi
+            
+            echo "=== Verifying deployment in: $HTTPDOCS_PATH ==="
+            if [ -d "$HTTPDOCS_PATH" ]; then
+              cd "$HTTPDOCS_PATH"
+              echo "Using: $HTTPDOCS_PATH ($(pwd))"
             else
-              echo "ERROR: $DOMAIN_NAME httpdocs not found"
-              echo "Checking available paths:"
-              echo "Listing /var/www/vhosts/:"
-              ls -la /var/www/vhosts/ 2>/dev/null | head -20 || true
+              echo "ERROR: $HTTPDOCS_PATH not found"
               exit 1
             fi
             

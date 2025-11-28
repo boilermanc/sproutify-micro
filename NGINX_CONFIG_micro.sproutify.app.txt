@@ -46,12 +46,19 @@ location /admin {
 	try_files $uri $uri/ /admin/index.html;
 }
 
+# Serve index.html for root requests
+location = / {
+	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
+	try_files /index.html =404;
+}
+
 # Optional: Cache control for index.html files
 location = /index.html {
 	root /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs;
 	add_header Cache-Control "no-cache, no-store, must-revalidate" always;
 	add_header Pragma "no-cache" always;
 	add_header Expires 0 always;
+	try_files $uri =404;
 }
 
 location = /admin/index.html {

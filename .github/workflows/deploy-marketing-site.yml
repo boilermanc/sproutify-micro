@@ -195,9 +195,19 @@ jobs:
             fi
             
             echo "Setting permissions in: $(pwd)"
-            chmod -R 755 .
-            find . -type f -exec chmod 644 {} \;
+            # Set directory permissions first
             find . -type d -exec chmod 755 {} \;
+            # Set file permissions
+            find . -type f -exec chmod 644 {} \;
+            # Ensure index.html is readable
+            if [ -f index.html ]; then
+              chmod 644 index.html
+              echo "✓ index.html permissions set"
+            else
+              echo "⚠ WARNING: index.html not found!"
+            fi
+            # Ensure httpdocs directory is readable
+            chmod 755 .
             echo "Permissions set"
 
       - name: Verify deployment
@@ -240,10 +250,23 @@ jobs:
             echo "=== Checking for index.html ==="
             if [ -f index.html ]; then
               echo "✓ index.html exists"
+              echo "File permissions:"
+              ls -la index.html
               echo "First 20 lines of index.html:"
               head -20 index.html
+              echo ""
+              echo "=== Verifying index.html is readable ==="
+              if [ -r index.html ]; then
+                echo "✓ index.html is readable"
+              else
+                echo "✗ ERROR: index.html is not readable!"
+                chmod 644 index.html
+                echo "Fixed permissions on index.html"
+              fi
             else
               echo "ERROR: index.html not found!"
+              echo "Current directory contents:"
+              ls -la
               exit 1
             fi
             

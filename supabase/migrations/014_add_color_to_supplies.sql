@@ -8,3 +8,4 @@ CREATE INDEX IF NOT EXISTS idx_supplies_color ON supplies(color);
 COMMENT ON COLUMN supplies.color IS 'Color of the supply item (e.g., Black, White, Green for trays)';
 
 
+

@@ -70,23 +70,27 @@ jobs:
             HTTPDOCS_PATH=""
             DOMAIN_NAME="micro.sproutify.app"
             
-            # Check for domain-specific paths (try multiple common locations)
-            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
-              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
-              echo "✓ Found standalone domain: $HTTPDOCS_PATH"
+            # Check for domain-specific paths (try /web first, then /httpdocs as fallback)
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/web ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/web
+              echo "✓ Found subdomain with /web: $HTTPDOCS_PATH"
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/web ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/web
+              echo "✓ Found standalone domain with /web: $HTTPDOCS_PATH"
             elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=/var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
-              echo "✓ Found subdomain: $HTTPDOCS_PATH"
+              echo "✓ Found subdomain with /httpdocs: $HTTPDOCS_PATH"
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
+              echo "✓ Found standalone domain with /httpdocs: $HTTPDOCS_PATH"
+            elif [ -d ~/$DOMAIN_NAME/web ]; then
+              HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/web && pwd)
+              echo "✓ Found in home directory with /web: $HTTPDOCS_PATH"
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               HTTPDOCS_PATH=$(cd ~/$DOMAIN_NAME/httpdocs && pwd)
-              echo "✓ Found in home directory: $HTTPDOCS_PATH"
+              echo "✓ Found in home directory with /httpdocs: $HTTPDOCS_PATH"
             elif [ -d /var/www/vhosts/$DOMAIN_NAME ]; then
-              # Check if httpdocs exists or if it's the root
-              if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
-                HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME/httpdocs
-              else
-                HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME
-              fi
+              HTTPDOCS_PATH=/var/www/vhosts/$DOMAIN_NAME
               echo "✓ Found domain directory: $HTTPDOCS_PATH"
             else
               echo "⚠ $DOMAIN_NAME specific path not found"
@@ -137,20 +141,27 @@ jobs:
           script: |
             DOMAIN_NAME="micro.sproutify.app"
             
-            # Use the correct path - check standalone domain first, then subdomain
-            if [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
-              cd /var/www/vhosts/$DOMAIN_NAME/httpdocs
-            elif [ -d /var/www/vhosts/$DOMAIN_NAME ]; then
-              cd /var/www/vhosts/$DOMAIN_NAME
+            # Use the correct path - check /web first, then /httpdocs
+            if [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/web ]; then
+              cd /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/web
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/web ]; then
+              cd /var/www/vhosts/$DOMAIN_NAME/web
             elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs ]; then
               cd /var/www/vhosts/sweetwaterurbanfarms.com/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/$DOMAIN_NAME/httpdocs ]; then
+              cd /var/www/vhosts/$DOMAIN_NAME/httpdocs
+            elif [ -d ~/$DOMAIN_NAME/web ]; then
+              cd ~/$DOMAIN_NAME/web
             elif [ -d ~/$DOMAIN_NAME/httpdocs ]; then
               cd ~/$DOMAIN_NAME/httpdocs
+            elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/web ]; then
+              echo "⚠ Using parent domain /web (subdomain not found)"
+              cd /var/www/vhosts/sweetwaterurbanfarms.com/web
             elif [ -d /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs ]; then
-              echo "⚠ Using parent domain httpdocs (subdomain not found)"
+              echo "⚠ Using parent domain /httpdocs (subdomain not found)"
               cd /var/www/vhosts/sweetwaterurbanfarms.com/httpdocs
             else
-              echo "ERROR: $DOMAIN_NAME httpdocs directory not found!"
+              echo "ERROR: $DOMAIN_NAME web/httpdocs directory not found!"
               echo "This prevents accidentally overwriting the wrong site."
               exit 1
             fi

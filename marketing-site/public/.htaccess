@@ -47,3 +47,4 @@ AddType image/svg+xml .svg
     RewriteRule . /index.html [L]
 </IfModule>
 
+

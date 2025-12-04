@@ -118,7 +118,17 @@ export const generateWeeklyTasks = async (
             }
           }
 
-          daysFromSow += step.duration_days || 0;
+          // Calculate days from step, accounting for duration_unit
+          const duration = step.duration || step.duration_days || 0;
+          const unit = (step.duration_unit || 'Days').toUpperCase();
+          if (unit === 'DAYS') {
+            daysFromSow += duration;
+          } else if (unit === 'HOURS') {
+            // Hours >= 12 counts as 1 day, otherwise 0
+            daysFromSow += (duration >= 12 ? 1 : 0);
+          } else {
+            daysFromSow += duration; // default: treat as days
+          }
         }
       }
     }

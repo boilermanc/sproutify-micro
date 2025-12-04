@@ -268,7 +268,19 @@ export const checkHarvestReminders = async () => {
 
       if (sortedSteps && sortedSteps.length > 0) {
         const sowDate = new Date(tray.sow_date);
-        const totalDays = sortedSteps.reduce((sum, step) => sum + (step.duration_days || 0), 0);
+        // Calculate total days, accounting for duration_unit
+        const totalDays = sortedSteps.reduce((sum: number, step: { duration?: number; duration_days?: number; duration_unit?: string }) => {
+          const duration = step.duration || step.duration_days || 0;
+          const unit = (step.duration_unit || 'Days').toUpperCase();
+          
+          if (unit === 'DAYS') {
+            return sum + duration;
+          } else if (unit === 'HOURS') {
+            // Hours >= 12 counts as 1 day, otherwise 0
+            return sum + (duration >= 12 ? 1 : 0);
+          }
+          return sum + duration; // default: treat as days
+        }, 0);
         const harvestDate = new Date(sowDate);
         harvestDate.setDate(harvestDate.getDate() + totalDays);
 

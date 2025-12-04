@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
 import VarietiesPage from './pages/VarietiesPage';
 import RecipesPage from './pages/RecipesPage';
+import GlobalRecipesPage from './pages/GlobalRecipesPage';
 import ProductsPage from './pages/ProductsPage';
 import MixCalculatorPage from './pages/MixCalculatorPage';
 import BatchesPage from './pages/BatchesPage';
@@ -87,6 +88,15 @@ function App() {
     };
   }, []);
 
+  // Update document title based on authentication state
+  useEffect(() => {
+    if (isAuthenticated) {
+      document.title = 'Sproutify Micro';
+    } else {
+      document.title = 'Login - Sproutify Micro';
+    }
+  }, [isAuthenticated]);
+
   if (isLoading) {
     return <div className="loading">Loading...</div>;
   }
@@ -109,6 +119,7 @@ function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="varieties" element={<VarietiesPage />} />
           <Route path="recipes" element={<RecipesPage />} />
+          <Route path="global-recipes" element={<GlobalRecipesPage />} />
           <Route path="products" element={<ProductsPage />} />
           <Route path="mix-calculator" element={<MixCalculatorPage />} />
           <Route path="batches" element={<BatchesPage />} />

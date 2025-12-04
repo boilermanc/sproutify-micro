@@ -1,16 +1,16 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useState } from 'react';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Sprout, 
-  ClipboardList, 
-  Package, 
-  ShoppingBasket, 
-  FileText, 
-  Building2, 
-  Truck, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Users,
+  Sprout,
+  ClipboardList,
+  Package,
+  ShoppingBasket,
+  FileText,
+  Building2,
+  Truck,
+  Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -20,7 +20,8 @@ import {
   Calculator,
   Repeat,
   CheckSquare,
-  BarChart3
+  BarChart3,
+  Globe
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -41,12 +42,13 @@ const Layout = ({ onLogout }: LayoutProps) => {
   const navItems = [
     { to: "/", icon: LayoutDashboard, label: "Dashboard", end: true },
     { to: "/flow", icon: Calendar, label: "Daily Flow" },
+    { to: "/trays", icon: ShoppingBasket, label: "Trays" },
     { to: "/varieties", icon: Sprout, label: "Varieties" },
     { to: "/recipes", icon: ClipboardList, label: "Recipes" },
+    { to: "/global-recipes", icon: Globe, label: "Global Recipes" },
     { to: "/products", icon: Box, label: "Products" },
     { to: "/mix-calculator", icon: Calculator, label: "Mix Calculator" },
     { to: "/batches", icon: Package, label: "Batches" },
-    { to: "/trays", icon: ShoppingBasket, label: "Trays" },
     { to: "/orders", icon: FileText, label: "Orders" },
     { to: "/standing-orders", icon: Repeat, label: "Standing Orders" },
     { to: "/weekly-tasks", icon: CheckSquare, label: "Weekly Tasks" },

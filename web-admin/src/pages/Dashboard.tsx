@@ -15,7 +15,7 @@ import {
   Cell,
   Legend
 } from 'recharts';
-import { Sprout, Scissors, Package, User, ClipboardList, ShoppingBasket } from 'lucide-react';
+import { Sprout, Scissors, Package, User, ClipboardList, ShoppingBasket, X } from 'lucide-react';
 import { useOnboarding } from '../hooks/useOnboarding';
 import WelcomeModal from '../components/onboarding/WelcomeModal';
 import OnboardingWizard from '../components/onboarding/OnboardingWizard';
@@ -27,7 +27,7 @@ import { Badge } from "@/components/ui/badge";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { state, startWizard, startWizardAtStep, completeOnboarding } = useOnboarding();
+  const { state, startWizard, startWizardAtStep, completeOnboarding, dismissSetupSteps } = useOnboarding();
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [trialEndDate, setTrialEndDate] = useState<string | null>(null);
@@ -462,46 +462,59 @@ const Dashboard = () => {
       </div>
 
       {/* Setup Progress Section */}
-      <Card className="mb-8 border-l-4 border-l-blue-500 shadow-sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg font-semibold text-gray-800">Setup Progress</CardTitle>
-              <CardDescription>
-                {state.onboarding_completed 
-                  ? "Your onboarding is complete. You can restart the setup wizard anytime."
-                  : "Complete these steps to get your farm fully set up."}
-              </CardDescription>
+      {!state.setup_steps_dismissed && (
+        <Card className="mb-8 border-l-4 border-l-blue-500 shadow-sm">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <CardTitle className="text-lg font-semibold text-gray-800">Setup Progress</CardTitle>
+                <CardDescription>
+                  {state.onboarding_completed 
+                    ? "Your onboarding is complete. You can restart the setup wizard anytime."
+                    : "Complete these steps to get your farm fully set up."}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {state.onboarding_completed && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowWelcomeModal(false);
+                      startWizardAtStep(0);
+                      setShowWizard(true);
+                    }}
+                  >
+                    Restart Setup Wizard
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={dismissSetupSteps}
+                  className="h-8 w-8"
+                  title="Don't show this anymore"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-            {state.onboarding_completed && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowWelcomeModal(false);
-                  startWizardAtStep(0);
-                  setShowWizard(true);
-                }}
-              >
-                Restart Setup Wizard
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          <ProgressIndicator
-            onStartStep={(stepIndex) => {
-              setShowWelcomeModal(false);
-              startWizardAtStep(stepIndex ?? 0);
-              setShowWizard(true);
-            }}
-            onRestart={() => {
-              setShowWelcomeModal(false);
-              startWizardAtStep(0);
-              setShowWizard(true);
-            }}
-          />
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent>
+            <ProgressIndicator
+              onStartStep={(stepIndex) => {
+                setShowWelcomeModal(false);
+                startWizardAtStep(stepIndex ?? 0);
+                setShowWizard(true);
+              }}
+              onRestart={() => {
+                setShowWelcomeModal(false);
+                startWizardAtStep(0);
+                setShowWizard(true);
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {shouldShowTrialBanner && <TrialBanner trialEndDate={trialEndDate} />}
 

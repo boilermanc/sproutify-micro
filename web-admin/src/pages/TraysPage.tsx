@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { notifyNewOrder, checkHarvestReminders } from '../services/notificationService';
-import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout } from 'lucide-react';
+import { markTraysAsLost, LOSS_REASONS, LossReason } from '../services/dailyFlowService';
+import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { Textarea } from '@/components/ui/textarea';
 
 const TraysPage = () => {
   const [trays, setTrays] = useState<any[]>([]);
@@ -33,6 +36,14 @@ const TraysPage = () => {
     location: '',
   });
   const [availableBatches, setAvailableBatches] = useState<any[]>([]);
+  const [batchWarning, setBatchWarning] = useState<string>('');
+
+  // Lost Tray Dialog state
+  const [isLostDialogOpen, setIsLostDialogOpen] = useState(false);
+  const [lostTray, setLostTray] = useState<any>(null);
+  const [lossReason, setLossReason] = useState<LossReason | ''>('');
+  const [lossNotes, setLossNotes] = useState('');
+  const [markingAsLost, setMarkingAsLost] = useState(false);
 
   const fetchTrays = async () => {
     try {
@@ -122,10 +133,14 @@ const TraysPage = () => {
       let recipeGrowTimes: Record<number, number> = {};
       
       if (recipeIds.length > 0) {
-        const { data: allSteps } = await supabase
+        const { data: allSteps, error: stepsError } = await supabase
           .from('steps')
-          .select('recipe_id, duration, duration_unit, step_order, sequence_order')
+          .select('*')
           .in('recipe_id', recipeIds);
+
+        if (stepsError) {
+          console.error('Error fetching steps:', stepsError);
+        }
 
         // Calculate total grow time per recipe
         if (allSteps) {
@@ -149,7 +164,10 @@ const TraysPage = () => {
             const recipeId = parseInt(recipeIdStr);
             const steps = stepsByRecipe[recipeId];
             const totalDays = steps.reduce((sum: number, step: any) => {
-              const duration = step.duration || 0;
+              // Handle both schema versions:
+              // New schema: duration + duration_unit (preferred)
+              // Old schema: duration_days (fallback for backwards compatibility)
+              const duration = step.duration || step.duration_days || 0;
               const unit = (step.duration_unit || 'Days').toUpperCase();
               if (unit === 'DAYS') {
                 return sum + duration;
@@ -180,6 +198,14 @@ const TraysPage = () => {
           }
         }
         
+        // Determine status based on tray.status field (new) or legacy logic
+        let status = 'Growing';
+        if (tray.status === 'lost') {
+          status = 'Lost';
+        } else if (tray.status === 'harvested' || tray.harvest_date) {
+          status = 'Harvested';
+        }
+
         return {
           id: tray.tray_id,
           trayId: tray.tray_unique_id || tray.tray_id,
@@ -189,7 +215,8 @@ const TraysPage = () => {
           customer: customerName || 'Unassigned',
           customer_id: tray.customer_id || null,
           location: tray.location || 'Not set',
-          status: tray.harvest_date ? 'Harvested' : 'Growing',
+          status,
+          loss_reason: tray.loss_reason || null,
           harvest_date: tray.harvest_date ? new Date(tray.harvest_date).toLocaleDateString() : projectedHarvestDate,
           created_at: new Date(tray.created_at).toLocaleDateString()
         };
@@ -209,8 +236,8 @@ const TraysPage = () => {
       if (!sessionData) return;
       const { farmUuid } = JSON.parse(sessionData);
 
-      // Fetch all recipes
-      const { data: allRecipesData, error: recipesError } = await supabase
+      // Fetch farm's own recipes
+      const { data: farmRecipesData, error: recipesError } = await supabase
         .from('recipes')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -221,6 +248,48 @@ const TraysPage = () => {
         console.error('Error fetching recipes:', recipesError);
         return;
       }
+
+      // Fetch enabled global recipes for this farm
+      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+        .from('farm_global_recipes')
+        .select(`
+          global_recipe_id,
+          global_recipes!inner(
+            global_recipe_id,
+            recipe_name,
+            variety_name,
+            description,
+            notes,
+            is_active,
+            global_steps(*)
+          )
+        `)
+        .eq('farm_uuid', farmUuid)
+        .eq('is_active', true);
+
+      if (globalError) {
+        console.error('Error fetching enabled global recipes:', globalError);
+      }
+
+      // Transform global recipes to match farm recipe format for dropdown
+      const globalRecipesForDropdown = (enabledGlobalRecipes || [])
+        .filter((item: any) => item.global_recipes?.is_active)
+        .map((item: any) => ({
+          recipe_id: `global_${item.global_recipe_id}`, // Prefix to distinguish from farm recipes
+          recipe_name: item.global_recipes.recipe_name,
+          variety_name: item.global_recipes.variety_name,
+          description: item.global_recipes.description,
+          notes: item.global_recipes.notes,
+          is_global: true, // Flag to identify global recipes
+          global_recipe_id: item.global_recipe_id,
+          global_steps: item.global_recipes.global_steps || [],
+        }));
+
+      // Combine farm recipes and enabled global recipes
+      const allRecipesData = [
+        ...(farmRecipesData || []).map((r: any) => ({ ...r, is_global: false })),
+        ...globalRecipesForDropdown
+      ];
 
       if (!allRecipesData || allRecipesData.length === 0) {
         console.log('No recipes found for farm:', farmUuid);
@@ -408,13 +477,16 @@ const TraysPage = () => {
   // Update available batches when recipe is selected
   useEffect(() => {
     const updateAvailableBatches = () => {
+      setBatchWarning('');
+
       if (!newTray.recipe_id) {
         setAvailableBatches([]);
         return;
       }
 
+      // Handle both regular recipe IDs (numbers) and global recipe IDs (strings like "global_1")
       const selectedRecipe = recipes.find(
-        (r) => r.recipe_id === parseInt(newTray.recipe_id)
+        (r) => r.recipe_id.toString() === newTray.recipe_id
       );
 
       if (!selectedRecipe) {
@@ -422,31 +494,52 @@ const TraysPage = () => {
         return;
       }
 
+      // For global recipes, we need to match by variety_name since they don't have variety_id
       const varietyId = selectedRecipe.variety_id || selectedRecipe.varieties?.varietyid;
       const seedQuantityNeeded = selectedRecipe.varieties?.seed_quantity_grams || 0;
+      const varietyName = selectedRecipe.varieties?.name || selectedRecipe.variety_name || 'this variety';
 
-      if (!varietyId || !seedQuantityNeeded) {
+      // For global recipes without variety_id, show all batches for now
+      // (they'll need to select a batch that matches the variety name)
+      if (selectedRecipe.is_global && !varietyId) {
+        // For global recipes, filter batches by variety_name match
+        const globalVarietyName = selectedRecipe.variety_name?.toLowerCase() || '';
+        const filtered = batches.filter((batch: any) => {
+          const batchVarietyName = batch.variety_name?.toLowerCase() || '';
+          return batchVarietyName.includes(globalVarietyName) || globalVarietyName.includes(batchVarietyName);
+        });
+        if (filtered.length === 0) {
+          setBatchWarning(`No seed batches found matching "${selectedRecipe.variety_name}". You may need to add a batch for this variety first.`);
+        }
+        setAvailableBatches(filtered.length > 0 ? filtered : batches);
+        return;
+      }
+
+      if (!varietyId) {
+        setBatchWarning('This recipe is not linked to a variety. Please edit the recipe to assign a variety.');
+        setAvailableBatches([]);
+        return;
+      }
+
+      if (!seedQuantityNeeded) {
+        setBatchWarning(`The variety "${varietyName}" doesn't have a seed quantity defined. Please update the variety settings.`);
+        setAvailableBatches([]);
+        return;
+      }
+
+      // Find batches for this variety (regardless of quantity) to give helpful messages
+      const batchesForVariety = batches.filter((batch: any) => batch.varietyid === varietyId);
+
+      if (batchesForVariety.length === 0) {
+        setBatchWarning(`No seed batches found for "${varietyName}". Please add a batch first.`);
         setAvailableBatches([]);
         return;
       }
 
       // Filter batches for this variety with sufficient quantity
-      const filtered = batches.filter((batch: any) => {
-        const batchVarietyId = batch.varietyid;
-        const batchQuantity = batch.quantity || 0;
-        const matches = batchVarietyId === varietyId && batchQuantity >= seedQuantityNeeded;
-        
-        if (!matches) {
-          console.log('Batch filtered out:', {
-            batchid: batch.batchid || batch.batch_id,
-            batchVarietyId,
-            targetVarietyId: varietyId,
-            batchQuantity,
-            neededQuantity: seedQuantityNeeded
-          });
-        }
-        
-        return matches;
+      const filtered = batchesForVariety.filter((batch: any) => {
+        const batchQuantity = parseFloat(batch.quantity) || 0;
+        return batchQuantity >= seedQuantityNeeded;
       });
 
       console.log('Available batches for recipe:', {
@@ -454,12 +547,22 @@ const TraysPage = () => {
         recipe_name: selectedRecipe.recipe_name,
         varietyId,
         seedQuantityNeeded,
+        batchesForVariety: batchesForVariety.length,
         availableBatches: filtered.length,
         batches: filtered.map(b => ({ batchid: b.batchid || b.batch_id, quantity: b.quantity }))
       });
 
+      // If we have batches for this variety but none with sufficient quantity, show a helpful message
+      if (filtered.length === 0 && batchesForVariety.length > 0) {
+        const maxAvailable = Math.max(...batchesForVariety.map((b: any) => parseFloat(b.quantity) || 0));
+        setBatchWarning(
+          `Insufficient seed inventory. Recipe requires ${seedQuantityNeeded}g but your largest batch only has ${maxAvailable}g. ` +
+          `Please add more seeds to a batch or reduce the seed quantity requirement for "${varietyName}".`
+        );
+      }
+
       setAvailableBatches(filtered);
-      
+
       // Clear batch selection if current selection is not available
       if (newTray.batch_id && !filtered.some(b => (b.batch_id || b.batchid)?.toString() === newTray.batch_id)) {
         setNewTray(prev => ({ ...prev, batch_id: '' }));
@@ -487,12 +590,41 @@ const TraysPage = () => {
       const { farmUuid, userId } = JSON.parse(sessionData);
 
       // Find the selected recipe to get recipe_name and variety_name
-      const selectedRecipe = recipes.find(
-        (r) => r.recipe_id === parseInt(newTray.recipe_id)
+      const isGlobalRecipe = newTray.recipe_id.startsWith('global_');
+      let selectedRecipe = recipes.find(
+        (r) => r.recipe_id.toString() === newTray.recipe_id
       );
 
       if (!selectedRecipe) {
         throw new Error('Selected recipe not found');
+      }
+
+      // If it's a global recipe, auto-copy it to create a farm recipe first
+      let actualRecipeId: number;
+      let recipeName: string;
+
+      if (isGlobalRecipe && selectedRecipe.global_recipe_id) {
+        // Copy the global recipe to create a farm recipe
+        const { data: newRecipeId, error: copyError } = await supabase.rpc('copy_global_recipe_to_farm', {
+          p_global_recipe_id: selectedRecipe.global_recipe_id,
+          p_farm_uuid: farmUuid,
+          p_created_by: userId,
+          p_new_recipe_name: selectedRecipe.recipe_name // Keep the same name for auto-copy
+        });
+
+        if (copyError) {
+          console.error('Error copying global recipe:', copyError);
+          throw new Error('Failed to copy global recipe: ' + copyError.message);
+        }
+
+        actualRecipeId = newRecipeId;
+        recipeName = selectedRecipe.recipe_name;
+
+        // Refresh form data to include the new recipe
+        fetchFormData();
+      } else {
+        actualRecipeId = parseInt(newTray.recipe_id);
+        recipeName = selectedRecipe.recipe_name;
       }
 
       // Get variety name from join or fallback to text field
@@ -504,7 +636,7 @@ const TraysPage = () => {
         .insert({
           customer_name: null,
           variety_name: varietyName,
-          recipe_name: selectedRecipe.recipe_name,
+          recipe_name: recipeName,
           farm_uuid: farmUuid,
           user_id: userId,
           requested_at: new Date().toISOString(),
@@ -515,14 +647,14 @@ const TraysPage = () => {
       if (newTray.customer_id || newTray.location) {
         // Wait a bit for the trigger to create the tray
         await new Promise(resolve => setTimeout(resolve, 500));
-        
+
         // Find the newly created tray and update it
         const { data: createdTray } = await supabase
           .from('trays')
           .select('tray_id')
           .eq('farm_uuid', farmUuid)
           .eq('created_by', userId)
-          .eq('recipe_id', parseInt(newTray.recipe_id))
+          .eq('recipe_id', actualRecipeId)
           .eq('batch_id', parseInt(newTray.batch_id))
           .order('created_at', { ascending: false })
           .limit(1)
@@ -555,7 +687,7 @@ const TraysPage = () => {
         .select('*')
         .eq('farm_uuid', farmUuid)
         .eq('created_by', userId)
-        .eq('recipe_id', parseInt(newTray.recipe_id));
+        .eq('recipe_id', actualRecipeId);
 
       // Add batch_id filter
       const batchId = parseInt(newTray.batch_id);
@@ -721,11 +853,29 @@ const TraysPage = () => {
       }
 
       // Fetch steps for the recipe
-      const { data: stepsData } = await supabase
+      // Try with step_descriptions join first, fall back to simple query if it fails
+      let stepsData: any[] | null = null;
+      const { data: stepsWithDescriptions, error: stepsJoinError } = await supabase
         .from('steps')
         .select('*, step_descriptions!left(description_name, description_details)')
         .eq('recipe_id', trayData.recipes.recipe_id);
-      
+
+      if (stepsJoinError) {
+        console.warn('Could not join step_descriptions, falling back to simple query:', stepsJoinError);
+        // Fall back to simple query without join
+        const { data: simpleSteps, error: simpleStepsError } = await supabase
+          .from('steps')
+          .select('*')
+          .eq('recipe_id', trayData.recipes.recipe_id);
+
+        if (simpleStepsError) {
+          console.error('Error fetching steps:', simpleStepsError);
+        }
+        stepsData = simpleSteps;
+      } else {
+        stepsData = stepsWithDescriptions;
+      }
+
       // Sort steps by step_order or sequence_order
       const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
         const orderA = a.step_order ?? a.sequence_order ?? 0;
@@ -734,11 +884,15 @@ const TraysPage = () => {
       }) : null;
 
       // Fetch tray_steps to see which steps are completed
-      const { data: trayStepsData } = await supabase
+      const { data: trayStepsData, error: trayStepsError } = await supabase
         .from('tray_steps')
         .select('*')
         .eq('tray_id', tray.id)
         .order('scheduled_date', { ascending: true });
+
+      if (trayStepsError) {
+        console.error('Error fetching tray_steps:', trayStepsError);
+      }
 
       // Fetch batch details if batch_id exists
       let batchDetails = null;
@@ -765,7 +919,39 @@ const TraysPage = () => {
     }
   };
 
-  const filteredTrays = trays.filter(tray => 
+  // Handle opening lost tray dialog
+  const handleMarkAsLost = (tray: any) => {
+    setLostTray(tray);
+    setLossReason('');
+    setLossNotes('');
+    setIsLostDialogOpen(true);
+  };
+
+  // Handle confirming the lost tray
+  const handleLostConfirm = async () => {
+    if (!lostTray || !lossReason) return;
+
+    setMarkingAsLost(true);
+    try {
+      const success = await markTraysAsLost([lostTray.id], lossReason, lossNotes || undefined);
+      if (success) {
+        setIsLostDialogOpen(false);
+        setLostTray(null);
+        setLossReason('');
+        setLossNotes('');
+        fetchTrays(); // Refresh the list
+      } else {
+        alert('Failed to mark tray as lost');
+      }
+    } catch (error) {
+      console.error('Error marking tray as lost:', error);
+      alert('Failed to mark tray as lost');
+    } finally {
+      setMarkingAsLost(false);
+    }
+  };
+
+  const filteredTrays = trays.filter(tray =>
     tray.variety.toLowerCase().includes(searchTerm.toLowerCase()) ||
     tray.trayId.toString().toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -824,14 +1010,19 @@ const TraysPage = () => {
                   <SelectContent>
                     {recipes.length === 0 ? (
                       <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                        No recipes available. {recipes.length === 0 ? 'Please create a recipe first or ensure recipes have available seed inventory.' : ''}
+                        No recipes available. Please create a recipe first, enable global recipes, or ensure recipes have available seed inventory.
                       </div>
                     ) : (
                       recipes.map((recipe) => {
                         const varietyName = recipe.varieties?.name || recipe.variety_name || 'N/A';
+                        const isGlobal = recipe.is_global;
                         return (
                           <SelectItem key={recipe.recipe_id} value={recipe.recipe_id.toString()}>
-                            {recipe.recipe_name} ({varietyName})
+                            <span className="flex items-center gap-2">
+                              {isGlobal && <Globe className="h-3 w-3 text-blue-500" />}
+                              {recipe.recipe_name} ({varietyName})
+                              {isGlobal && <span className="text-xs text-blue-500 ml-1">Global</span>}
+                            </span>
                           </SelectItem>
                         );
                       })
@@ -842,12 +1033,16 @@ const TraysPage = () => {
               {newTray.recipe_id && (
                 <div className="grid gap-2">
                   <Label htmlFor="batch">Seed Batch *</Label>
-                  {availableBatches.length === 0 ? (
-                    <div className="text-sm text-muted-foreground p-2 border rounded">
-                      No batches available with sufficient inventory for this variety. 
-                      Please add a seed batch first.
+                  {batchWarning && (
+                    <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">
+                      {batchWarning}
                     </div>
-                  ) : (
+                  )}
+                  {availableBatches.length === 0 && !batchWarning ? (
+                    <div className="text-sm text-muted-foreground p-2 border rounded">
+                      No batches available for this variety. Please add a seed batch first.
+                    </div>
+                  ) : availableBatches.length === 0 ? null : (
                     <Select 
                       value={newTray.batch_id} 
                       onValueChange={(value) => setNewTray({ ...newTray, batch_id: value })}
@@ -980,21 +1175,39 @@ const TraysPage = () => {
                   <TableCell>{tray.customer}</TableCell>
                   <TableCell>{tray.harvest_date}</TableCell>
                   <TableCell>
-                    <Badge variant={tray.status.toLowerCase() === 'growing' ? 'default' : 'secondary'} className={tray.status.toLowerCase() === 'growing' ? 'bg-green-500 hover:bg-green-600' : ''}>
+                    <Badge
+                      variant={tray.status === 'Growing' ? 'default' : tray.status === 'Lost' ? 'destructive' : 'secondary'}
+                      className={tray.status === 'Growing' ? 'bg-green-500 hover:bg-green-600' : ''}
+                    >
                       {tray.status}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleEditTray(tray)}
-                        type="button"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditTray(tray)}>
+                          <Edit className="mr-2 h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
+                        {tray.status === 'Growing' && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleMarkAsLost(tray)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Mark as Lost
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))
@@ -1024,7 +1237,10 @@ const TraysPage = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold text-muted-foreground">Status</Label>
-                  <Badge variant={viewingTray.status.toLowerCase() === 'growing' ? 'default' : 'secondary'} className={viewingTray.status.toLowerCase() === 'growing' ? 'bg-green-500 hover:bg-green-600' : ''}>
+                  <Badge
+                    variant={viewingTray.status === 'Growing' ? 'default' : viewingTray.status === 'Lost' ? 'destructive' : 'secondary'}
+                    className={viewingTray.status === 'Growing' ? 'bg-green-500 hover:bg-green-600' : ''}
+                  >
                     {viewingTray.status}
                   </Badge>
                 </div>
@@ -1229,6 +1445,77 @@ const TraysPage = () => {
             </Button>
             <Button onClick={handleUpdateTray} disabled={updating}>
               {updating ? 'Updating...' : 'Update Tray'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lost Tray Dialog */}
+      <Dialog open={isLostDialogOpen} onOpenChange={setIsLostDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <XCircle className="h-5 w-5" />
+              Mark Tray as Lost
+            </DialogTitle>
+            <DialogDescription>
+              {lostTray && (
+                <>
+                  Recording loss for tray <strong>{lostTray.trayId}</strong> ({lostTray.variety})
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Reason for Loss *</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {LOSS_REASONS.map((reason) => (
+                  <button
+                    key={reason.value}
+                    type="button"
+                    onClick={() => setLossReason(reason.value)}
+                    className={`p-3 text-left rounded-lg border transition-all ${
+                      lossReason === reason.value
+                        ? 'border-red-500 bg-red-50 text-red-900'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{reason.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{reason.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="loss-notes">Notes (Optional)</Label>
+              <Textarea
+                id="loss-notes"
+                placeholder="Add any additional details about the loss..."
+                value={lossNotes}
+                onChange={(e) => setLossNotes(e.target.value)}
+                className="min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsLostDialogOpen(false);
+                setLostTray(null);
+                setLossReason('');
+                setLossNotes('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleLostConfirm}
+              disabled={!lossReason || markingAsLost}
+            >
+              {markingAsLost ? 'Saving...' : 'Confirm Loss'}
             </Button>
           </DialogFooter>
         </DialogContent>

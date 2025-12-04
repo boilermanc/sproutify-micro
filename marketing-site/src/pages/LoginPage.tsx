@@ -14,6 +14,12 @@ const LoginPage = () => {
     setError('');
     setLoading(true);
 
+    if (!supabase) {
+      setError('Supabase is not configured. Please contact support.');
+      setLoading(false);
+      return;
+    }
+
     try {
       // Authenticate with Supabase
       const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
@@ -54,8 +60,9 @@ const LoginPage = () => {
       const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const targetUrl = isDevelopment ? `http://localhost:5174/` : `/admin/`;
       window.location.assign(targetUrl);
-    } catch (err: any) {
-      setError(err.message || 'Invalid credentials. Please try again.');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Invalid credentials. Please try again.';
+      setError(errorMessage);
       setLoading(false);
     }
   };

@@ -1,7 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import './LoginPage.css';
+
+// Extend Window interface for Turnstile
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (selectorOrElement: string | HTMLElement, options: {
+        sitekey: string;
+        callback?: (token: string) => void;
+        'error-callback'?: () => void;
+      }) => string;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId: string) => void;
+    };
+  }
+}
 
 const SignUpPage = () => {
   const [formData, setFormData] = useState({
@@ -15,6 +30,139 @@ const SignUpPage = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+
+  // Cloudflare Turnstile site key
+  const TURNSTILE_SITE_KEY_RAW = import.meta.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY || '0x4AAAAAACE0X9epZQxNOlPg';
+  const TURNSTILE_SITE_KEY = typeof TURNSTILE_SITE_KEY_RAW === 'string' ? TURNSTILE_SITE_KEY_RAW.trim() : String(TURNSTILE_SITE_KEY_RAW).trim();
+
+  // Global flag to prevent multiple script loads
+  const turnstileScriptLoaded = typeof window !== 'undefined' && (window as { __turnstileScriptLoaded?: boolean }).__turnstileScriptLoaded;
+
+  // Load Cloudflare Turnstile script and initialize widget
+  useEffect(() => {
+    // Skip if no site key
+    if (!TURNSTILE_SITE_KEY) {
+      return;
+    }
+
+    let isMounted = true;
+    let widgetId: string | null = null;
+
+    const initializeTurnstile = () => {
+      // Final checks before rendering - verify element exists by ID
+      const container = document.getElementById('turnstile-container-signup');
+      if (!isMounted || !container || widgetId || !window.turnstile) {
+        return;
+      }
+
+      // Check if widget already exists in DOM
+      if (container.querySelector('.cf-turnstile-widget') || 
+          container.querySelector('iframe[src*="challenges.cloudflare.com"]')) {
+        return;
+      }
+
+      try {
+        // Ensure sitekey is definitely a string
+        const sitekey = String(TURNSTILE_SITE_KEY);
+        
+        if (!sitekey || sitekey.length === 0) {
+          console.warn('Turnstile sitekey is invalid, disabling Turnstile');
+          return;
+        }
+
+        // Use CSS selector string instead of ref element to avoid React ref proxy issues
+        widgetId = window.turnstile.render('#turnstile-container-signup', {
+          sitekey,
+          callback: (token: string) => {
+            if (isMounted) {
+              setTurnstileToken(token);
+              setError('');
+            }
+          },
+          'error-callback': () => {
+            if (isMounted) {
+              setTurnstileToken(null);
+            }
+          },
+        });
+
+        if (isMounted && widgetId) {
+          turnstileWidgetIdRef.current = widgetId;
+          setTurnstileEnabled(true);
+        }
+      } catch (error) {
+        console.error('Turnstile initialization failed:', error);
+        // Don't show error to user, just disable Turnstile
+        setTurnstileEnabled(false);
+      }
+    };
+
+    // Check if Turnstile is already available
+    if (window.turnstile) {
+      initializeTurnstile();
+    } else {
+      // Check if script is already being loaded
+      if (!turnstileScriptLoaded && !document.querySelector('script[src*="turnstile"]')) {
+        if (typeof window !== 'undefined') {
+          (window as { __turnstileScriptLoaded?: boolean }).__turnstileScriptLoaded = true;
+        }
+        
+        const script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+          if (isMounted) {
+            // Wait a bit for Turnstile API to be fully ready
+            setTimeout(initializeTurnstile, 50);
+          }
+        };
+        script.onerror = () => {
+          console.error('Failed to load Turnstile script');
+          setTurnstileEnabled(false);
+        };
+        document.body.appendChild(script);
+      } else {
+        // Script is loading, wait for it
+        const checkTurnstile = setInterval(() => {
+          if (window.turnstile) {
+            clearInterval(checkTurnstile);
+            if (isMounted) {
+              initializeTurnstile();
+            }
+          }
+        }, 100);
+
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          clearInterval(checkTurnstile);
+          if (!window.turnstile) {
+            console.warn('Turnstile failed to load, continuing without it');
+            setTurnstileEnabled(false);
+          }
+        }, 5000);
+      }
+    }
+
+    // Cleanup
+    return () => {
+      isMounted = false;
+      if (widgetId && window.turnstile) {
+        try {
+          window.turnstile.remove(widgetId);
+        } catch {
+          // Ignore cleanup errors
+        }
+        widgetId = null;
+        turnstileWidgetIdRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [TURNSTILE_SITE_KEY]);
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -42,6 +190,12 @@ const SignUpPage = () => {
       return;
     }
 
+    // Check Cloudflare Turnstile (if enabled)
+    if (turnstileEnabled && !turnstileToken) {
+      setError('Please complete the verification.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -61,6 +215,7 @@ const SignUpPage = () => {
           password: formData.password,
           name: formData.name,
           farmName: formData.farmName,
+          turnstile_token: turnstileToken, // Include for verification on backend if needed
         }),
       });
 
@@ -72,6 +227,10 @@ const SignUpPage = () => {
       }
 
       // Sign in the user automatically
+      if (!supabase) {
+        throw new Error('Supabase is not configured. Please contact support.');
+      }
+
       const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
@@ -96,9 +255,10 @@ const SignUpPage = () => {
       targetUrl.searchParams.set('email', user.email ?? formData.email);
 
       window.location.assign(targetUrl.toString());
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Signup error details:', err);
-      setError(err.message || 'Failed to create account. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create account. Please try again.';
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -213,7 +373,13 @@ const SignUpPage = () => {
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" disabled={loading}>
+            {turnstileEnabled && (
+              <div className="form-group">
+                <div id="turnstile-container-signup" ref={turnstileRef} />
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary" disabled={loading || (turnstileEnabled && !turnstileToken)}>
               {loading ? 'Creating Account...' : 'Start Free Trial'}
             </button>
             

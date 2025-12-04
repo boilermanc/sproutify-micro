@@ -14,6 +14,15 @@ export interface DailyTask {
   recipeId: number;
   stepId?: number;
   stepDescription?: string;
+  missedSteps?: MissedStep[];
+}
+
+export interface MissedStep {
+  stepId: number;
+  stepName: string;
+  description: string;
+  expectedDay: number;
+  trayIds: number[];
 }
 
 /**
@@ -93,15 +102,22 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
 
     if (trayStepsError) throw trayStepsError;
 
-    // Create a map of completed steps per tray
-    // Use 'completed' boolean and 'completed_at' timestamp
+    // Create a map of completed/skipped steps per tray
+    // Use 'completed' boolean and 'completed_at' timestamp, or 'skipped' boolean
     const completedStepsMap: Record<number, Set<number>> = {};
+    const skippedStepsMap: Record<number, Set<number>> = {};
     (traySteps || []).forEach((ts: any) => {
       if (ts.completed || ts.completed_at) {
         if (!completedStepsMap[ts.tray_id]) {
           completedStepsMap[ts.tray_id] = new Set();
         }
         completedStepsMap[ts.tray_id].add(ts.step_id);
+      }
+      if (ts.skipped) {
+        if (!skippedStepsMap[ts.tray_id]) {
+          skippedStepsMap[ts.tray_id] = new Set();
+        }
+        skippedStepsMap[ts.tray_id].add(ts.step_id);
       }
     });
 
@@ -198,18 +214,54 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         action = 'Blackout';
       }
 
-      // Check if step is completed
+      // Check if step is completed or skipped
       const completedSteps = completedStepsMap[tray.tray_id] || new Set();
+      const skippedSteps = skippedStepsMap[tray.tray_id] || new Set();
       const isStepCompleted = completedSteps.has(currentStep.step_id);
+      const isStepSkipped = skippedSteps.has(currentStep.step_id);
 
-      // If current step is completed, try to find next incomplete step
-      if (isStepCompleted) {
+      // Identify missed steps (steps before current day that weren't completed or skipped)
+      const missedSteps: MissedStep[] = [];
+      let daysAccumulated = 0;
+
+      for (const step of steps) {
+        const duration = step.duration || 0;
+        const unit = (step.duration_unit || 'Days').toUpperCase();
+        let stepDurationDays = 0;
+        if (unit === 'DAYS') {
+          stepDurationDays = duration;
+        } else if (unit === 'HOURS') {
+          stepDurationDays = duration >= 12 ? 1 : 0;
+        } else {
+          stepDurationDays = duration;
+        }
+
+        const stepDay = daysAccumulated + 1;
+        daysAccumulated += stepDurationDays;
+
+        // If this step's day has passed and it's not completed or skipped, it's missed
+        if (stepDay < daysSinceSow &&
+            !completedSteps.has(step.step_id) &&
+            !skippedSteps.has(step.step_id) &&
+            step.step_id !== currentStep.step_id) {
+          missedSteps.push({
+            stepId: step.step_id,
+            stepName: step.step_name || step.description_name || 'Step',
+            description: step.description_name || step.step_description || '',
+            expectedDay: stepDay,
+            trayIds: [tray.tray_id],
+          });
+        }
+      }
+
+      // If current step is completed or skipped, try to find next incomplete step
+      if (isStepCompleted || isStepSkipped) {
         let foundNextIncomplete = false;
         const stepIndex = steps.findIndex((s: any) => s.step_id === currentStep.step_id);
-        
+
         // Look for next incomplete step
         for (let i = stepIndex + 1; i < steps.length; i++) {
-          if (!completedSteps.has(steps[i].step_id)) {
+          if (!completedSteps.has(steps[i].step_id) && !skippedSteps.has(steps[i].step_id)) {
             currentStep = steps[i];
             foundNextIncomplete = true;
             const nextStepDesc = (currentStep.description_name || currentStep.step_description || '').toLowerCase();
@@ -225,7 +277,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
             break;
           }
         }
-        
+
         // If all remaining steps are completed (including harvest), skip this tray
         // The tray should be harvested and will be filtered out by harvest_date check
         if (!foundNextIncomplete) {
@@ -243,6 +295,17 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         // Group similar tasks
         taskMap[taskKey].trays += 1;
         taskMap[taskKey].trayIds.push(tray.tray_id);
+        // Merge missed steps
+        if (missedSteps.length > 0 && taskMap[taskKey].missedSteps) {
+          for (const missed of missedSteps) {
+            const existing = taskMap[taskKey].missedSteps!.find(m => m.stepId === missed.stepId);
+            if (existing) {
+              existing.trayIds.push(...missed.trayIds);
+            } else {
+              taskMap[taskKey].missedSteps!.push(missed);
+            }
+          }
+        }
       } else {
         taskMap[taskKey] = {
           id: taskKey,
@@ -258,6 +321,7 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
           recipeId: recipeId,
           stepId: currentStep.step_id,
           stepDescription: currentStep.description_name || currentStep.step_description || '',
+          missedSteps: missedSteps.length > 0 ? missedSteps : undefined,
         };
       }
     }
@@ -272,8 +336,9 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
 /**
  * Mark a task as completed by updating tray_steps
  * Uses actual schema: status='Completed', completed_date, completed_by
+ * For harvest tasks, optionally records the yield
  */
-export const completeTask = async (task: DailyTask): Promise<boolean> => {
+export const completeTask = async (task: DailyTask, yieldValue?: number): Promise<boolean> => {
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return false;
@@ -281,12 +346,19 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
     const { farmUuid } = JSON.parse(sessionData);
     const now = new Date().toISOString();
 
-    // If it's a harvest action, update the harvest_date on the trays
-    // The trigger will also handle this, but we do it explicitly too
+    // If it's a harvest action, update the harvest_date and yield on the trays
     if (task.action === 'Harvest') {
+      // Calculate yield per tray if provided
+      const yieldPerTray = yieldValue && task.trays > 0 ? yieldValue / task.trays : undefined;
+
+      const updateData: Record<string, any> = { harvest_date: now };
+      if (yieldPerTray !== undefined) {
+        updateData.yield = yieldPerTray;
+      }
+
       const { error: harvestError } = await supabase
         .from('trays')
-        .update({ harvest_date: now })
+        .update(updateData)
         .in('tray_id', task.trayIds)
         .eq('farm_uuid', farmUuid);
 
@@ -301,19 +373,19 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
     if (task.stepId) {
       // First, ensure tray_steps records exist for all tray/step combinations
       for (const trayId of task.trayIds) {
-        // Check if record exists
+        // Check if record exists using composite key (tray_id, step_id)
         const { data: existing, error: checkError } = await supabase
           .from('tray_steps')
-          .select('id')
+          .select('tray_id, step_id')
           .eq('tray_id', trayId)
           .eq('step_id', task.stepId)
           .maybeSingle();
-        
+
         if (checkError) {
           console.error('Error checking tray_steps:', checkError);
           throw checkError;
         }
-        
+
         if (!existing) {
           // Insert if doesn't exist
           const { error: insertError } = await supabase
@@ -324,21 +396,22 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
               completed: true,
               completed_at: now,
             });
-          
+
           if (insertError) {
             console.error('Error inserting tray_steps:', insertError);
             throw insertError;
           }
         } else {
-          // Update if exists
+          // Update using composite key
           const { error: updateError } = await supabase
             .from('tray_steps')
             .update({
               completed: true,
               completed_at: now,
             })
-            .eq('id', existing.id);
-          
+            .eq('tray_id', trayId)
+            .eq('step_id', task.stepId);
+
           if (updateError) {
             console.error('Error updating tray_steps:', updateError);
             throw updateError;
@@ -350,6 +423,195 @@ export const completeTask = async (task: DailyTask): Promise<boolean> => {
     return true;
   } catch (error) {
     console.error('Error completing task:', error);
+    return false;
+  }
+};
+
+/**
+ * Skip a task/step - mark it as skipped so it doesn't show up anymore
+ */
+export const skipTask = async (task: DailyTask): Promise<boolean> => {
+  try {
+    const now = new Date().toISOString();
+
+    if (!task.stepId) return false;
+
+    // Mark the step as skipped for all affected trays
+    for (const trayId of task.trayIds) {
+      // Check if record exists using composite key (tray_id, step_id)
+      const { data: existing, error: checkError } = await supabase
+        .from('tray_steps')
+        .select('tray_id, step_id')
+        .eq('tray_id', trayId)
+        .eq('step_id', task.stepId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking tray_steps:', checkError);
+        throw checkError;
+      }
+
+      if (!existing) {
+        // Insert if doesn't exist
+        const { error: insertError } = await supabase
+          .from('tray_steps')
+          .insert({
+            tray_id: trayId,
+            step_id: task.stepId,
+            skipped: true,
+            skipped_at: now,
+          });
+
+        if (insertError) {
+          console.error('Error inserting tray_steps:', insertError);
+          throw insertError;
+        }
+      } else {
+        // Update using composite key
+        const { error: updateError } = await supabase
+          .from('tray_steps')
+          .update({
+            skipped: true,
+            skipped_at: now,
+          })
+          .eq('tray_id', trayId)
+          .eq('step_id', task.stepId);
+
+        if (updateError) {
+          console.error('Error updating tray_steps:', updateError);
+          throw updateError;
+        }
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error skipping task:', error);
+    return false;
+  }
+};
+
+/**
+ * Skip a missed step
+ */
+export const skipMissedStep = async (missedStep: MissedStep): Promise<boolean> => {
+  try {
+    const now = new Date().toISOString();
+
+    for (const trayId of missedStep.trayIds) {
+      // Check if record exists using composite key (tray_id, step_id)
+      const { data: existing, error: checkError } = await supabase
+        .from('tray_steps')
+        .select('tray_id, step_id')
+        .eq('tray_id', trayId)
+        .eq('step_id', missedStep.stepId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking tray_steps:', checkError);
+        throw checkError;
+      }
+
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from('tray_steps')
+          .insert({
+            tray_id: trayId,
+            step_id: missedStep.stepId,
+            skipped: true,
+            skipped_at: now,
+          });
+
+        if (insertError) throw insertError;
+      } else {
+        // Update using composite key
+        const { error: updateError } = await supabase
+          .from('tray_steps')
+          .update({
+            skipped: true,
+            skipped_at: now,
+          })
+          .eq('tray_id', trayId)
+          .eq('step_id', missedStep.stepId);
+
+        if (updateError) throw updateError;
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error skipping missed step:', error);
+    return false;
+  }
+};
+
+/**
+ * Mark a missed step as completed (catch up)
+ */
+export const completeMissedStep = async (missedStep: MissedStep): Promise<boolean> => {
+  try {
+    const now = new Date().toISOString();
+
+    for (const trayId of missedStep.trayIds) {
+      // Check if record exists using composite key (tray_id, step_id)
+      const { data: existing, error: checkError } = await supabase
+        .from('tray_steps')
+        .select('tray_id, step_id')
+        .eq('tray_id', trayId)
+        .eq('step_id', missedStep.stepId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking tray_steps:', checkError);
+        throw checkError;
+      }
+
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from('tray_steps')
+          .insert({
+            tray_id: trayId,
+            step_id: missedStep.stepId,
+            completed: true,
+            completed_at: now,
+          });
+
+        if (insertError) throw insertError;
+      } else {
+        // Update using composite key
+        const { error: updateError } = await supabase
+          .from('tray_steps')
+          .update({
+            completed: true,
+            completed_at: now,
+            skipped: false,
+            skipped_at: null,
+          })
+          .eq('tray_id', trayId)
+          .eq('step_id', missedStep.stepId);
+
+        if (updateError) throw updateError;
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error completing missed step:', error);
+    return false;
+  }
+};
+
+/**
+ * Bulk skip all missed steps for a task
+ */
+export const skipAllMissedSteps = async (missedSteps: MissedStep[]): Promise<boolean> => {
+  try {
+    for (const step of missedSteps) {
+      await skipMissedStep(step);
+    }
+    return true;
+  } catch (error) {
+    console.error('Error bulk skipping missed steps:', error);
     return false;
   }
 };
@@ -375,6 +637,61 @@ export const getActiveTraysCount = async (): Promise<number> => {
   } catch (error) {
     console.error('Error fetching active trays count:', error);
     return 0;
+  }
+};
+
+/**
+ * Loss reasons for failed trays
+ */
+export const LOSS_REASONS = [
+  { value: 'disease', label: 'Disease', description: 'Fungal, bacterial, or viral infection' },
+  { value: 'dried_out', label: 'Dried Out', description: 'Not watered / dehydration' },
+  { value: 'bad_seed', label: 'Bad Seed', description: 'Poor germination or seed quality' },
+  { value: 'mold', label: 'Mold', description: 'Mold growth on seeds or greens' },
+  { value: 'pest', label: 'Pest Damage', description: 'Insects, gnats, or other pests' },
+  { value: 'contamination', label: 'Contamination', description: 'Soil, water, or environmental contamination' },
+  { value: 'overwatered', label: 'Overwatered', description: 'Root rot from excess water' },
+  { value: 'temperature', label: 'Temperature Issue', description: 'Too hot or too cold' },
+  { value: 'other', label: 'Other', description: 'Other reason (specify in notes)' },
+] as const;
+
+export type LossReason = typeof LOSS_REASONS[number]['value'];
+
+/**
+ * Mark trays as lost/failed
+ */
+export const markTraysAsLost = async (
+  trayIds: number[],
+  reason: LossReason,
+  notes?: string
+): Promise<boolean> => {
+  try {
+    const sessionData = localStorage.getItem('sproutify_session');
+    if (!sessionData) return false;
+
+    const { farmUuid } = JSON.parse(sessionData);
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('trays')
+      .update({
+        status: 'lost',
+        loss_reason: reason,
+        lost_at: now,
+        loss_notes: notes || null,
+      })
+      .in('tray_id', trayIds)
+      .eq('farm_uuid', farmUuid);
+
+    if (error) {
+      console.error('Error marking trays as lost:', error);
+      throw error;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error marking trays as lost:', error);
+    return false;
   }
 };
 

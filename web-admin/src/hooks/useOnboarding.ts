@@ -6,6 +6,7 @@ export interface OnboardingState {
   onboarding_steps_completed: string[];
   sample_data_loaded: boolean;
   tooltips_dismissed: string[];
+  setup_steps_dismissed: boolean;
   current_step: number;
   wizard_started: boolean;
 }
@@ -16,6 +17,7 @@ const DEFAULT_STATE: OnboardingState = {
   onboarding_steps_completed: [],
   sample_data_loaded: false,
   tooltips_dismissed: [],
+  setup_steps_dismissed: false,
   current_step: 0,
   wizard_started: false,
 };
@@ -121,6 +123,10 @@ export const useOnboarding = () => {
     updateState({ sample_data_loaded: loaded });
   }, [updateState]);
 
+  const dismissSetupSteps = useCallback(() => {
+    updateState({ setup_steps_dismissed: true });
+  }, [updateState]);
+
   const resetOnboarding = useCallback(() => {
     const resetState = DEFAULT_STATE;
     try {
@@ -140,6 +146,7 @@ export const useOnboarding = () => {
     setCurrentStep,
     dismissTooltip,
     setSampleDataLoaded,
+    dismissSetupSteps,
     resetOnboarding,
     updateState,
   };

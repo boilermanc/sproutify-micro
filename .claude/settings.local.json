@@ -4,7 +4,19 @@
       "Bash(npm create:*)",
       "Bash(npm install)",
       "Bash(npm install:*)",
-      "Bash(npx create-expo-app:*)"
+      "Bash(npx create-expo-app:*)",
+      "Bash(git submodule status:*)",
+      "Bash(dir:*)",
+      "Bash(adb devices:*)",
+      "Bash(\"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb.exe\" devices)",
+      "Bash(cmd /c \"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb.exe devices\")",
+      "Bash(cmd /c \"C:\\Users\\clint\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe devices\")",
+      "Bash(cmd /c \"dir C:\\Users\\clint\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe 2>nul && C:\\Users\\clint\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe devices\")",
+      "Bash(powershell:*)",
+      "Bash(npx expo start --android)",
+      "Bash(timeout:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx tailwindcss:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Calculator } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -142,18 +143,19 @@ const MixCalculatorPage = () => {
       const recipesWithDetails: Recipe[] = [];
       for (const recipe of recipesData || []) {
         try {
-          // Fetch steps using actual schema (step_order, duration_days)
+          // Fetch steps using actual schema (duration, duration_unit, sequence_order)
+          // Note: sequence_order is used for newer recipes, step_order for older ones
           const { data: stepsData, error: stepsError } = await supabase
             .from('steps')
-            .select('duration_days, duration, duration_unit, step_order, sequence_order')
+            .select('duration, duration_unit, sequence_order')
             .eq('recipe_id', recipe.recipe_id);
           
-          // Sort steps by step_order or sequence_order
+          // Sort steps by sequence_order (fallback to step_order for backwards compatibility)
           const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const orderA = (a as any).step_order ?? (a as any).sequence_order ?? 0;
+            const orderA = (a as any).sequence_order ?? (a as any).step_order ?? 0;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const orderB = (b as any).step_order ?? (b as any).sequence_order ?? 0;
+            const orderB = (b as any).sequence_order ?? (b as any).step_order ?? 0;
             return orderA - orderB;
           }) : null;
 
@@ -323,7 +325,7 @@ const MixCalculatorPage = () => {
               </Select>
               {products.length === 0 && !loading && (
                 <p className="text-sm text-amber-600 mt-1">
-                  No products found. Go to the <a href="/products" className="underline">Products page</a> to create products.
+                  No products found. Go to the <Link to="/products" className="underline">Products page</Link> to create products.
                 </p>
               )}
             </div>

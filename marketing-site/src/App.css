@@ -10,8 +10,10 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #F7F9FA;
+  background-color: #0f172a; /* slate-950 to match dark theme */
   color: #2A3744;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 #root {

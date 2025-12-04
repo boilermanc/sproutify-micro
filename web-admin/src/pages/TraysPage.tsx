@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { notifyNewOrder, checkHarvestReminders } from '../services/notificationService';
-import { markTraysAsLost, LOSS_REASONS, LossReason } from '../services/dailyFlowService';
+import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
 import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';

@@ -36,19 +36,21 @@ jobs:
           VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY }}
         run: npm run build
 
-      - name: Deploy to IONOS via SFTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.IONOS_HOST }}
-          username: ${{ secrets.IONOS_USERNAME }}
-          password: ${{ secrets.IONOS_PASSWORD }}
-          local-dir: ./marketing-site/dist/
-          server-dir: /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
-            **/.DS_Store
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Deploy to IONOS via SFTP/SSH
+        run: |
+          export SSHPASS="$IONOS_PASSWORD"
+          sshpass -e rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no -p ${IONOS_PORT:-22}" \
+            ./marketing-site/dist/ \
+            $IONOS_USERNAME@$IONOS_HOST:/var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/
+        env:
+          IONOS_HOST: ${{ secrets.IONOS_HOST }}
+          IONOS_USERNAME: ${{ secrets.IONOS_USERNAME }}
+          IONOS_PASSWORD: ${{ secrets.IONOS_PASSWORD }}
+          IONOS_PORT: ${{ secrets.IONOS_PORT || '22' }}
 
       - name: Deployment complete
         run: echo "Marketing site deployed successfully to micro.sproutify.app"

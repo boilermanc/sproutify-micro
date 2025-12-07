@@ -48,6 +48,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .sage-header-content {
@@ -97,6 +98,7 @@
   overflow-y: auto;
   padding: 1rem;
   background: #F7F9FA;
+  min-height: 0;
 }
 
 .message {
@@ -138,6 +140,8 @@
   border-top: 1px solid #D8DFE5;
   display: flex;
   gap: 0.5rem;
+  flex-shrink: 0;
+  min-height: fit-content;
 }
 
 .sage-chat-input input {

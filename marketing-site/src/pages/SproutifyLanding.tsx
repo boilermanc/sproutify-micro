@@ -274,17 +274,17 @@ const SproutifyLanding = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-white overflow-hidden">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-slate-500 selection:text-white overflow-hidden">
       {/* --- NAVBAR --- */}
-      <nav className="fixed top-0 w-full z-50 bg-slate-950/80 backdrop-blur-md border-b border-white/10" aria-label="Main navigation">
+      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-slate-200" aria-label="Main navigation">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-400 font-bold text-xl" aria-label="Sproutify Micro Logo">
-            <Sprout size={24} aria-hidden="true" />
-            <span>Sproutify<span className="text-white">Micro</span></span>
+          <div className="flex items-center gap-2 text-slate-600 font-bold text-xl" aria-label="Sproutify Micro Logo">
+            <Sprout size={24} aria-hidden="true" strokeWidth={1.5} />
+            <span>Sproutify<span className="text-slate-900">Micro</span></span>
           </div>
           <button
             onClick={() => document.getElementById('waitlist')?.scrollIntoView({ behavior: 'smooth' })}
-            className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-all"
+            className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-full transition-all text-slate-700"
             aria-label="Scroll to waitlist form"
           >
             Get Early Access
@@ -296,19 +296,19 @@ const SproutifyLanding = () => {
 
       {/* --- HERO SECTION --- */}
       <section className="relative pt-32 pb-20 px-6 max-w-7xl mx-auto flex flex-col items-center text-center" aria-labelledby="hero-heading">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-emerald-500/20 rounded-full blur-[120px] -z-10" aria-hidden="true" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-slate-200/50 rounded-full blur-[120px] -z-10" aria-hidden="true" />
 
         <motion.div
           initial="hidden"
           animate="visible"
           variants={fadeInUp}
-          className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium mb-6"
+          className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-600 text-sm font-medium mb-6 shadow-sm"
           role="status"
           aria-live="polite"
         >
           <span className="relative flex h-2 w-2" aria-hidden="true">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-500"></span>
           </span>
           Accepting Beta Testers
         </motion.div>
@@ -318,17 +318,17 @@ const SproutifyLanding = () => {
           initial="hidden"
           animate="visible"
           variants={fadeInUp}
-          className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 bg-gradient-to-br from-white to-slate-400 bg-clip-text text-transparent"
+          className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 text-slate-900"
         >
           The Operating System for <br className="hidden md:block" />
-          <span className="text-emerald-400">Your Microgreens Farm</span>
+          <span className="text-slate-700">Your Microgreens Farm</span>
         </motion.h1>
 
         <motion.p
           initial="hidden"
           animate="visible"
           variants={fadeInUp}
-          className="text-lg md:text-xl text-slate-400 max-w-2xl mb-10 leading-relaxed"
+          className="text-lg md:text-xl text-slate-600 max-w-2xl mb-10 leading-relaxed"
         >
           Stop growing in the dark. Manage your trays, optimize your seed inventory, and deliver perfect orders with the first intelligent platform for microgreen farmers.
         </motion.p>
@@ -349,7 +349,7 @@ const SproutifyLanding = () => {
                 type="text"
                 name="firstName"
                 placeholder="First name..."
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-white placeholder:text-slate-500"
+                className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-300 transition-all text-slate-900 placeholder:text-slate-400"
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
                 disabled={isSubmitting}
@@ -364,7 +364,7 @@ const SproutifyLanding = () => {
                   type="email"
                   name="email"
                   placeholder="Enter your email..."
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-white placeholder:text-slate-500"
+                  className="flex-1 bg-white border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-300 transition-all text-slate-900 placeholder:text-slate-400"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isSubmitting}
@@ -374,25 +374,25 @@ const SproutifyLanding = () => {
                 />
                 <button
                   type="submit"
-                  className="bg-emerald-500 hover:bg-emerald-600 text-emerald-950 font-bold px-6 py-3 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-6 py-3 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isSubmitting || (turnstileEnabled && !turnstileToken)}
                   aria-label="Submit waitlist registration"
                 >
-                  {isSubmitting ? '...' : 'Join'} <ChevronRight size={18} aria-hidden="true" />
+                  {isSubmitting ? '...' : 'Join'} <ChevronRight size={18} aria-hidden="true" strokeWidth={1.5} />
                 </button>
               </div>
               <div style={{ display: turnstileEnabled ? 'block' : 'none' }} className="flex justify-center" aria-label="Security verification">
                 <div id="turnstile-container" ref={turnstileRef} />
               </div>
               {errorMessage && (
-                <div className="bg-red-500/20 border border-red-500/30 text-red-300 px-4 py-2 rounded-lg text-sm" role="alert" aria-live="polite">
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm" role="alert" aria-live="polite">
                   {errorMessage}
                 </div>
               )}
             </form>
           ) : (
-            <div className="bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-6 py-3 rounded-lg flex items-center justify-center gap-2" role="status" aria-live="polite">
-              <CheckCircle2 size={20} aria-hidden="true" /> <span>Thanks! You're on the list.</span>
+            <div className="bg-slate-50 border border-slate-200 text-slate-700 px-6 py-3 rounded-lg flex items-center justify-center gap-2" role="status" aria-live="polite">
+              <CheckCircle2 size={20} aria-hidden="true" strokeWidth={1.5} /> <span>Thanks! You're on the list.</span>
             </div>
           )}
           <p className="mt-4 text-xs text-slate-500">Join growers waiting for launch.</p>
@@ -400,11 +400,11 @@ const SproutifyLanding = () => {
       </section>
 
       {/* --- HOW IT WORKS (FLOW) --- */}
-      <section className="py-20 bg-slate-900/50 border-y border-white/5" aria-labelledby="how-it-works-heading">
+      <section className="py-20 bg-white border-y border-slate-200" aria-labelledby="how-it-works-heading">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 id="how-it-works-heading" className="text-3xl font-bold mb-4">Streamline Your Grow</h2>
-            <p className="text-slate-400">Automated logic replaces your spreadsheets.</p>
+            <h2 id="how-it-works-heading" className="text-3xl font-bold mb-4 text-slate-900">Streamline Your Grow</h2>
+            <p className="text-slate-600">Automated logic replaces your spreadsheets.</p>
           </div>
 
           <motion.div
@@ -414,7 +414,7 @@ const SproutifyLanding = () => {
             viewport={{ once: true }}
             className="grid grid-cols-1 md:grid-cols-4 gap-8 relative"
           >
-            <div className="hidden md:block absolute top-12 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500/0 via-emerald-500/20 to-emerald-500/0" />
+            <div className="hidden md:block absolute top-12 left-0 w-full h-0.5 bg-gradient-to-r from-slate-200/0 via-slate-300 to-slate-200/0" />
 
             {[
               { icon: Sprout, title: "Sow", desc: "Use the Mix Calculator to sow the exact amount needed." },
@@ -423,11 +423,11 @@ const SproutifyLanding = () => {
               { icon: TrendingUp, title: "Sell", desc: "Manage orders and recurring deliveries." }
             ].map((step, idx) => (
               <motion.article key={idx} variants={fadeInUp} className="relative flex flex-col items-center text-center z-10">
-                <div className="w-24 h-24 rounded-2xl bg-slate-800 border border-white/10 flex items-center justify-center mb-6 shadow-xl shadow-black/50" aria-hidden="true">
-                  <step.icon size={32} className="text-emerald-400" />
+                <div className="w-24 h-24 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mb-6 shadow-sm hover:shadow-md hover:border-slate-300 transition-all" aria-hidden="true">
+                  <step.icon size={32} className="text-slate-500" strokeWidth={1.5} />
                 </div>
-                <h3 className="text-xl font-bold mb-2">{step.title}</h3>
-                <p className="text-sm text-slate-400">{step.desc}</p>
+                <h3 className="text-xl font-bold mb-2 text-slate-900">{step.title}</h3>
+                <p className="text-sm text-slate-600">{step.desc}</p>
               </motion.article>
             ))}
           </motion.div>
@@ -437,8 +437,8 @@ const SproutifyLanding = () => {
       {/* --- BENTO GRID FEATURES --- */}
       <section className="py-24 max-w-7xl mx-auto px-6" aria-labelledby="features-heading">
         <div className="mb-16">
-          <h2 id="features-heading" className="text-3xl md:text-4xl font-bold mb-4">Everything you need to grow.</h2>
-          <p className="text-slate-400 text-lg">Powerful features wrapped in a simple interface.</p>
+          <h2 id="features-heading" className="text-3xl md:text-4xl font-bold mb-4 text-slate-900">Everything you need to grow.</h2>
+          <p className="text-slate-600 text-lg">Powerful features wrapped in a simple interface.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -448,28 +448,28 @@ const SproutifyLanding = () => {
             initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            className="md:col-span-2 bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-3xl p-8 overflow-hidden relative group"
+            className="md:col-span-2 bg-white border border-slate-200 rounded-3xl p-8 overflow-hidden relative group hover:border-slate-300 hover:shadow-md transition-all"
           >
             <div className="relative z-10">
-              <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-4 text-emerald-400" aria-hidden="true">
-                <ClipboardList />
+              <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mb-4 text-slate-500 shadow-sm" aria-hidden="true">
+                <ClipboardList strokeWidth={1.5} />
               </div>
-              <h3 className="text-2xl font-bold mb-2">Smart Daily Task Flow</h3>
-              <p className="text-slate-400 max-w-md">Wake up to a clear checklist. See exactly what needs watering, unstacking, or harvesting. Miss a day? Use the "Catch Up" logic to get back on track.</p>
+              <h3 className="text-2xl font-bold mb-2 text-slate-900">Smart Daily Task Flow</h3>
+              <p className="text-slate-600 max-w-md">Wake up to a clear checklist. See exactly what needs watering, unstacking, or harvesting. Miss a day? Use the "Catch Up" logic to get back on track.</p>
             </div>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-12 opacity-50 group-hover:opacity-100 transition-opacity duration-500 hidden md:block">
-               <div className="w-64 bg-slate-950 rounded-l-xl p-4 border-l border-y border-white/10 space-y-3">
+               <div className="w-64 bg-white rounded-l-xl p-4 border-l border-y border-slate-200 space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full border border-slate-600" />
-                    <div className="h-2 w-24 bg-slate-700 rounded-full" />
+                    <div className="w-4 h-4 rounded-full border border-slate-300" />
+                    <div className="h-2 w-24 bg-slate-200 rounded-full" />
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full border border-emerald-500 bg-emerald-500/20" />
-                    <div className="h-2 w-32 bg-slate-700 rounded-full" />
+                    <div className="w-4 h-4 rounded-full border border-slate-500 bg-slate-50" />
+                    <div className="h-2 w-32 bg-slate-200 rounded-full" />
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full border border-slate-600" />
-                    <div className="h-2 w-20 bg-slate-700 rounded-full" />
+                    <div className="w-4 h-4 rounded-full border border-slate-300" />
+                    <div className="h-2 w-20 bg-slate-200 rounded-full" />
                   </div>
                </div>
             </div>
@@ -481,11 +481,13 @@ const SproutifyLanding = () => {
              whileInView={{ opacity: 1, scale: 1 }}
              viewport={{ once: true }}
              transition={{ delay: 0.1 }}
-             className="bg-slate-900 border border-white/10 rounded-3xl p-8 hover:border-emerald-500/30 transition-colors"
+             className="bg-white border border-slate-200 rounded-3xl p-8 hover:border-slate-300 hover:shadow-md transition-all"
           >
-            <Calendar className="text-emerald-400 mb-4" size={32} aria-hidden="true" />
-            <h3 className="text-xl font-bold mb-2">Recipe Management</h3>
-            <p className="text-slate-400 text-sm">50+ pre-built recipes included. Customize timelines and cloning to match your environment.</p>
+            <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mb-4 text-slate-500 shadow-sm">
+              <Calendar size={32} aria-hidden="true" strokeWidth={1.5} />
+            </div>
+            <h3 className="text-xl font-bold mb-2 text-slate-900">Recipe Management</h3>
+            <p className="text-slate-600 text-sm">50+ pre-built recipes included. Customize timelines and cloning to match your environment.</p>
           </motion.article>
 
           {/* Feature 3: Mix Calculator */}
@@ -494,11 +496,13 @@ const SproutifyLanding = () => {
              whileInView={{ opacity: 1, scale: 1 }}
              viewport={{ once: true }}
              transition={{ delay: 0.2 }}
-             className="bg-slate-900 border border-white/10 rounded-3xl p-8 hover:border-emerald-500/30 transition-colors"
+             className="bg-white border border-slate-200 rounded-3xl p-8 hover:border-slate-300 hover:shadow-md transition-all"
           >
-            <Calculator className="text-emerald-400 mb-4" size={32} aria-hidden="true" />
-            <h3 className="text-xl font-bold mb-2">Mix Calculator</h3>
-            <p className="text-slate-400 text-sm">Calculate trays needed based on order weight, projected yield, and delivery dates instantly.</p>
+            <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mb-4 text-slate-500 shadow-sm">
+              <Calculator size={32} aria-hidden="true" strokeWidth={1.5} />
+            </div>
+            <h3 className="text-xl font-bold mb-2 text-slate-900">Mix Calculator</h3>
+            <p className="text-slate-600 text-sm">Calculate trays needed based on order weight, projected yield, and delivery dates instantly.</p>
           </motion.article>
 
           {/* Feature 4: Orders & Sales (Large) */}
@@ -506,22 +510,22 @@ const SproutifyLanding = () => {
             initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            className="md:col-span-2 bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-3xl p-8 overflow-hidden group"
+            className="md:col-span-2 bg-white border border-slate-200 rounded-3xl p-8 overflow-hidden group hover:border-slate-300 hover:shadow-md transition-all"
           >
-            <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4 text-blue-400" aria-hidden="true">
-              <ShoppingCart />
+            <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mb-4 text-slate-500 shadow-sm" aria-hidden="true">
+              <ShoppingCart strokeWidth={1.5} />
             </div>
-            <h3 className="text-2xl font-bold mb-2">Orders & Sales Management</h3>
-            <p className="text-slate-400 max-w-lg">Handle one-time purchases or recurring restaurant standing orders. We track fulfillment from the moment an order is placed until delivery.</p>
+            <h3 className="text-2xl font-bold mb-2 text-slate-900">Orders & Sales Management</h3>
+            <p className="text-slate-600 max-w-lg">Handle one-time purchases or recurring restaurant standing orders. We track fulfillment from the moment an order is placed until delivery.</p>
           </motion.article>
         </div>
       </section>
 
       {/* --- SAGE AI SECTION --- */}
-      <section className="py-24 relative overflow-hidden" aria-labelledby="sage-heading">
-        <div className="absolute inset-0 bg-slate-950" aria-hidden="true">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-900/20 rounded-full blur-[120px]" />
-          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-[80px]" />
+      <section className="py-24 relative overflow-hidden bg-slate-50" aria-labelledby="sage-heading">
+        <div className="absolute inset-0 bg-slate-50" aria-hidden="true">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-slate-200/30 rounded-full blur-[120px]" />
+          <div className="absolute top-0 right-0 w-96 h-96 bg-slate-200/20 rounded-full blur-[80px]" />
         </div>
 
         <div className="max-w-7xl mx-auto px-6 relative z-10">
@@ -533,18 +537,18 @@ const SproutifyLanding = () => {
                 initial={{ opacity: 0, x: -20 }}
                 whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: true }}
-                className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-bold mb-6"
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-600 text-xs font-bold mb-6 shadow-sm"
                 role="status"
               >
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" aria-hidden="true" />
+                <div className="w-2 h-2 rounded-full bg-slate-500 animate-pulse" aria-hidden="true" />
                 INTELLIGENCE LAYER
               </motion.div>
 
-              <h2 id="sage-heading" className="text-4xl md:text-5xl font-bold mb-6 leading-tight">
-                Meet <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-indigo-400">Sage</span>. <br />
+              <h2 id="sage-heading" className="text-4xl md:text-5xl font-bold mb-6 leading-tight text-slate-900">
+                Meet <span className="text-slate-700">Sage</span>. <br />
                 Your 24/7 Operations Manager.
               </h2>
-              <p className="text-slate-400 text-lg mb-8 leading-relaxed">
+              <p className="text-slate-600 text-lg mb-8 leading-relaxed">
                 Stop growing in the dark. Sage acts as your farm's brain, connecting your inventory, task lists, and order data to give you daily strategy, not just data.
               </p>
 
@@ -574,12 +578,12 @@ const SproutifyLanding = () => {
                     transition={{ delay: i * 0.1 }}
                     className="flex gap-4 group"
                   >
-                    <div className="w-12 h-12 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center shrink-0 group-hover:border-indigo-500/50 group-hover:bg-indigo-500/10 transition-all">
-                       <item.icon size={20} className="text-indigo-400 group-hover:text-indigo-300" />
+                    <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center shrink-0 group-hover:border-slate-300 group-hover:bg-slate-50 transition-all shadow-sm">
+                       <item.icon size={20} className="text-slate-500 group-hover:text-slate-700" strokeWidth={1.5} />
                     </div>
                     <div>
-                      <h4 className="font-bold text-white group-hover:text-indigo-300 transition-colors">{item.title}</h4>
-                      <p className="text-sm text-slate-500">{item.desc}</p>
+                      <h4 className="font-bold text-slate-900 group-hover:text-slate-700 transition-colors">{item.title}</h4>
+                      <p className="text-sm text-slate-600">{item.desc}</p>
                     </div>
                   </motion.div>
                 ))}
@@ -590,22 +594,22 @@ const SproutifyLanding = () => {
             <div className="flex-1 w-full flex justify-center order-1 md:order-2">
               <div className="relative w-full max-w-md">
 
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-gradient-to-tr from-indigo-500/20 to-emerald-500/20 rounded-full blur-[60px] animate-pulse" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-slate-200/30 rounded-full blur-[60px] animate-pulse" />
 
                 <motion.div
                   initial={{ y: 20, opacity: 0 }}
                   whileInView={{ y: 0, opacity: 1 }}
                   transition={{ duration: 0.8 }}
-                  className="relative bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl"
+                  className="relative bg-white backdrop-blur-xl border border-slate-200 rounded-2xl p-6 shadow-xl"
                 >
-                    <div className="flex items-center gap-3 border-b border-white/5 pb-4 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20" aria-hidden="true">
-                      <Sprout size={20} className="text-white" />
+                    <div className="flex items-center gap-3 border-b border-slate-200 pb-4 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm" aria-hidden="true">
+                      <Sprout size={20} className="text-slate-500" strokeWidth={1.5} />
                     </div>
                     <div>
-                      <div className="font-bold text-sm">Sage AI</div>
-                      <div className="text-xs text-emerald-400 flex items-center gap-1" aria-label="Sage AI is online">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true"/> Connected to Inventory
+                      <div className="font-bold text-sm text-slate-900">Sage AI</div>
+                      <div className="text-xs text-slate-500 flex items-center gap-1" aria-label="Sage AI is online">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" aria-hidden="true"/> Connected to Inventory
                       </div>
                     </div>
                   </div>
@@ -613,7 +617,7 @@ const SproutifyLanding = () => {
                   <div className="space-y-4">
                     {/* User Message */}
                     <div className="flex gap-3 justify-end">
-                      <div className="bg-slate-800 text-slate-200 text-sm px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] leading-relaxed">
+                      <div className="bg-slate-100 text-slate-700 text-sm px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] leading-relaxed border border-slate-200">
                         Do I have enough sunflower seed for the Fresh Foods order next week?
                       </div>
                     </div>
@@ -625,30 +629,30 @@ const SproutifyLanding = () => {
                        transition={{ delay: 1, duration: 0.5 }}
                        className="flex gap-3"
                     >
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-emerald-500 flex-shrink-0 flex items-center justify-center">
-                         <Sprout size={14} className="text-white" />
+                      <div className="w-8 h-8 rounded-full bg-white border border-slate-200 flex-shrink-0 flex items-center justify-center shadow-sm">
+                         <Sprout size={14} className="text-slate-500" strokeWidth={1.5} />
                       </div>
-                      <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-100 text-sm px-4 py-3 rounded-2xl rounded-tl-sm max-w-[95%]">
-                        <p className="mb-2 text-xs text-indigo-300 font-mono uppercase tracking-wide">Checking Recipes & Stock...</p>
+                      <div className="bg-slate-50 border border-slate-200 text-slate-700 text-sm px-4 py-3 rounded-2xl rounded-tl-sm max-w-[95%]">
+                        <p className="mb-2 text-xs text-slate-500 font-mono uppercase tracking-wide">Checking Recipes & Stock...</p>
                         
                         <div className="flex items-start gap-2 mb-2">
-                          <span className="text-amber-400 font-bold">⚠️ Potential Shortfall</span>
+                          <span className="text-amber-600 font-bold">⚠️ Potential Shortfall</span>
                         </div>
 
-                        <ul className="space-y-1 text-slate-300 mb-3 text-xs">
+                        <ul className="space-y-1 text-slate-600 mb-3 text-xs">
                           <li className="flex justify-between">
                             <span>Required for Order:</span>
-                            <span className="font-bold text-white">4.5 lbs</span>
+                            <span className="font-bold text-slate-900">4.5 lbs</span>
                           </li>
                           <li className="flex justify-between">
                             <span>Current Stock:</span>
-                            <span className="font-bold text-amber-300">4.25 lbs</span>
+                            <span className="font-bold text-amber-600">4.25 lbs</span>
                           </li>
                         </ul>
                         
-                        <p className="text-slate-200 text-xs border-t border-indigo-500/20 pt-2 mt-2">
+                        <p className="text-slate-700 text-xs border-t border-slate-200 pt-2 mt-2">
                           You are short <strong>0.25 lbs</strong>. <br/>
-                          <span className="text-emerald-400">Recommendation:</span> You can supplement from your backup stock or order a small amount to cover the gap.
+                          <span className="text-slate-600">Recommendation:</span> You can supplement from your backup stock or order a small amount to cover the gap.
                         </p>
                       </div>
                     </motion.div>
@@ -658,10 +662,10 @@ const SproutifyLanding = () => {
                   <motion.div
                     animate={{ y: [0, -5, 0] }}
                     transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                    className="absolute -right-8 -bottom-4 bg-slate-800 border border-white/10 p-3 rounded-lg shadow-xl flex items-center gap-2"
+                    className="absolute -right-8 -bottom-4 bg-white border border-slate-200 p-3 rounded-lg shadow-xl flex items-center gap-2"
                   >
-                    <div className="w-2 h-2 bg-amber-400 rounded-full" />
-                    <span className="text-xs font-bold text-slate-300">Inventory Alert</span>
+                    <div className="w-2 h-2 bg-amber-500 rounded-full" />
+                    <span className="text-xs font-bold text-slate-700">Inventory Alert</span>
                   </motion.div>
 
                 </motion.div>
@@ -673,24 +677,24 @@ const SproutifyLanding = () => {
       </section>
 
       {/* --- PLATFORM & AUDIENCE --- */}
-      <section className="py-20 bg-slate-900/30" aria-labelledby="audience-heading">
+      <section className="py-20 bg-white" aria-labelledby="audience-heading">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
 
           <div>
-            <h2 id="audience-heading" className="text-3xl font-bold mb-8">Built for growers of all sizes</h2>
+            <h2 id="audience-heading" className="text-3xl font-bold mb-8 text-slate-900">Built for growers of all sizes</h2>
             <div className="space-y-4">
               {[
                 { label: "Home Growers", desc: "Scaling from 2 to 20 trays a week." },
                 { label: "Market Farmers", desc: "Selling efficiently at weekend markets." },
                 { label: "Wholesale Ops", desc: "Supplying restaurants with recurring orders." }
               ].map((item, i) => (
-                <article key={i} className="flex items-start gap-4 p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                  <div className="bg-emerald-500/20 p-2 rounded-lg text-emerald-400" aria-hidden="true">
-                    <Users size={20} />
+                <article key={i} className="flex items-start gap-4 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm">
+                  <div className="bg-white border border-slate-200 p-2 rounded-lg text-slate-500 shadow-sm" aria-hidden="true">
+                    <Users size={20} strokeWidth={1.5} />
                   </div>
                   <div>
-                    <h3 className="font-bold">{item.label}</h3>
-                    <p className="text-sm text-slate-400">{item.desc}</p>
+                    <h3 className="font-bold text-slate-900">{item.label}</h3>
+                    <p className="text-sm text-slate-600">{item.desc}</p>
                   </div>
                 </article>
               ))}
@@ -698,23 +702,27 @@ const SproutifyLanding = () => {
           </div>
 
           <div className="relative">
-            <div className="absolute inset-0 bg-emerald-500/20 blur-[100px] -z-10" aria-hidden="true" />
-            <article className="bg-slate-950 border border-white/10 rounded-2xl p-8 shadow-2xl">
-              <div className="flex gap-6 mb-8 border-b border-white/10 pb-8">
+            <div className="absolute inset-0 bg-slate-200/30 blur-[100px] -z-10" aria-hidden="true" />
+            <article className="bg-white border border-slate-200 rounded-2xl p-8 shadow-xl">
+              <div className="flex gap-6 mb-8 border-b border-slate-200 pb-8">
                 <div className="text-center flex-1">
-                  <Smartphone className="mx-auto mb-2 text-emerald-400" size={32} aria-hidden="true" />
-                  <h3 className="font-bold">In The Field</h3>
-                  <p className="text-xs text-slate-500 mt-1">Check off tasks, log harvests, and view recipes on your phone.</p>
+                  <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mx-auto mb-2 text-slate-500 shadow-sm">
+                    <Smartphone size={24} aria-hidden="true" strokeWidth={1.5} />
+                  </div>
+                  <h3 className="font-bold text-slate-900">In The Field</h3>
+                  <p className="text-xs text-slate-600 mt-1">Check off tasks, log harvests, and view recipes on your phone.</p>
                 </div>
-                <div className="w-px bg-white/10" aria-hidden="true" />
+                <div className="w-px bg-slate-200" aria-hidden="true" />
                 <div className="text-center flex-1">
-                  <Monitor className="mx-auto mb-2 text-blue-400" size={32} aria-hidden="true" />
-                  <h3 className="font-bold">In The Office</h3>
-                  <p className="text-xs text-slate-500 mt-1">Plan production, manage orders, and analyze yield data.</p>
+                  <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mx-auto mb-2 text-slate-500 shadow-sm">
+                    <Monitor size={24} aria-hidden="true" strokeWidth={1.5} />
+                  </div>
+                  <h3 className="font-bold text-slate-900">In The Office</h3>
+                  <p className="text-xs text-slate-600 mt-1">Plan production, manage orders, and analyze yield data.</p>
                 </div>
               </div>
               <div className="text-center">
-                <p className="text-sm font-medium text-slate-300">Syncs instantly across all devices.</p>
+                <p className="text-sm font-medium text-slate-700">Syncs instantly across all devices.</p>
               </div>
             </article>
           </div>
@@ -723,26 +731,26 @@ const SproutifyLanding = () => {
       </section>
 
       {/* --- CTA / FOOTER --- */}
-      <section className="py-32 px-6 text-center" aria-labelledby="cta-heading">
+      <section className="py-32 px-6 text-center bg-slate-50" aria-labelledby="cta-heading">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           className="max-w-3xl mx-auto"
         >
-          <h2 id="cta-heading" className="text-4xl md:text-5xl font-bold mb-6">Ready to optimize your farm?</h2>
-          <p className="text-xl text-slate-400 mb-8">
+          <h2 id="cta-heading" className="text-4xl md:text-5xl font-bold mb-6 text-slate-900">Ready to optimize your farm?</h2>
+          <p className="text-xl text-slate-600 mb-8">
             Join the waitlist today. Free trial available at launch.
           </p>
           <button
              onClick={() => document.getElementById('waitlist')?.scrollIntoView({ behavior: 'smooth' })}
-             className="bg-emerald-500 hover:bg-emerald-600 text-emerald-950 text-lg font-bold px-8 py-4 rounded-full transition-transform hover:scale-105 shadow-lg shadow-emerald-500/25"
+             className="bg-slate-700 hover:bg-slate-800 text-white text-lg font-bold px-8 py-4 rounded-full transition-all hover:shadow-lg"
              aria-label="Join the waitlist for Sproutify Micro"
           >
             Join the Waitlist
           </button>
         </motion.div>
 
-        <footer className="mt-24 pt-8 border-t border-white/10 text-slate-600 text-sm" role="contentinfo">
+        <footer className="mt-24 pt-8 border-t border-slate-200 text-slate-500 text-sm" role="contentinfo">
           <p>&copy; {new Date().getFullYear()} Sproutify Micro. All rights reserved.</p>
         </footer>
       </section>

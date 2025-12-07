@@ -71,6 +71,11 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
       localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
 
+      // Dispatch custom event to notify Dashboard that session is ready
+      window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
+        detail: { farmUuid: sessionPayload.farmUuid } 
+      }));
+
       onLogin();
       navigate('/', { replace: true });
     } catch (error) {
@@ -110,6 +115,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
               userId: profile.id,
             });
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+            
+            // Dispatch custom event to notify Dashboard that session is ready
+            window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
+              detail: { farmUuid: sessionPayload.farmUuid } 
+            }));
+            
             onLogin();
             navigate('/');
             return;
@@ -130,6 +141,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             userId: user.id,
           });
           localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+          
+          // Dispatch custom event to notify Dashboard that session is ready
+          window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
+            detail: { farmUuid: sessionPayload.farmUuid } 
+          }));
+          
           onLogin();
           navigate('/');
           return;
@@ -216,6 +233,11 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
       // Store session
       localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+
+      // Dispatch custom event to notify Dashboard that session is ready
+      window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
+        detail: { farmUuid: sessionPayload.farmUuid } 
+      }));
 
       onLogin();
       navigate('/');

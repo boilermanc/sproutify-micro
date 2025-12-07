@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import {
   LayoutDashboard,
@@ -21,7 +21,8 @@ import {
   Repeat,
   CheckSquare,
   BarChart3,
-  Globe
+  Globe,
+  Plus
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ interface LayoutProps {
 
 const Layout = ({ onLogout }: LayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const navigate = useNavigate();
 
   const handleLogout = () => {
     localStorage.removeItem('sproutify_session');
@@ -131,6 +133,30 @@ const Layout = ({ onLogout }: LayoutProps) => {
               )}
             </NavLink>
           ))}
+          
+          {/* New Tray Button */}
+          <button
+            onClick={() => navigate('/trays')}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group w-full text-slate-400 hover:bg-slate-800 hover:text-slate-100 bg-transparent border-0 cursor-pointer text-left appearance-none outline-none focus:outline-none",
+              !sidebarOpen && "md:justify-center md:px-2"
+            )}
+            title={!sidebarOpen ? "New Tray" : undefined}
+          >
+            <Plus className={cn("h-5 w-5 min-w-5", !sidebarOpen && "md:h-6 md:w-6")} />
+            <span className={cn("font-medium whitespace-nowrap transition-all duration-300", 
+              !sidebarOpen && "md:hidden"
+            )}>
+              New Tray
+            </span>
+            
+            {/* Tooltip for collapsed state */}
+            {!sidebarOpen && (
+              <div className="absolute left-16 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap z-50 hidden md:block border border-slate-700 shadow-lg">
+                New Tray
+              </div>
+            )}
+          </button>
         </div>
 
         <div className="p-4 border-t border-slate-800">

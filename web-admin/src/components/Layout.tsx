@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Menu,
   Calendar,
+  CalendarDays,
   Box,
   Calculator,
   Repeat,
@@ -27,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import NotificationBell from "./NotificationBell";
+import logoImage from '../assets/sproutify micro.png';
 
 interface LayoutProps {
   onLogout: () => void;
@@ -45,6 +47,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
     { to: "/", icon: LayoutDashboard, label: "Dashboard", end: true },
     { to: "/flow", icon: Calendar, label: "Daily Flow" },
     { to: "/trays", icon: ShoppingBasket, label: "Trays" },
+    { to: "/planting-schedule", icon: CalendarDays, label: "Planting Schedule" },
     { to: "/varieties", icon: Sprout, label: "Varieties" },
     { to: "/recipes", icon: ClipboardList, label: "Recipes" },
     { to: "/global-recipes", icon: Globe, label: "Global Recipes" },
@@ -102,9 +105,9 @@ const Layout = ({ onLogout }: LayoutProps) => {
         </div>
 
         <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
-          {navItems.map((item) => (
+          {navItems.map((item, index) => (
             <NavLink
-              key={item.to}
+              key={`nav-${item.to}-${index}`}
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
@@ -196,7 +199,11 @@ const Layout = ({ onLogout }: LayoutProps) => {
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
               <Menu className="h-6 w-6 text-slate-700" />
             </Button>
-            <h1 className="ml-4 md:ml-0 text-lg font-bold text-slate-800">Sproutify Micro</h1>
+            <img 
+              src={logoImage} 
+              alt="Sproutify Micro" 
+              className="ml-4 md:ml-0 h-8 object-contain"
+            />
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell />

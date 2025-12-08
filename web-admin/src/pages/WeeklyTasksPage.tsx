@@ -69,13 +69,17 @@ const WeeklyTasksPage = () => {
       const saved = await saveWeeklyTasks(generatedTasks, farmUuid);
       if (saved) {
         await loadTasks();
-        alert(`Generated ${generatedTasks.length} tasks for the week`);
+        if (generatedTasks.length === 0) {
+          alert('No tasks generated. You need active trays with sow dates to generate weekly tasks. Create some trays first!');
+        } else {
+          alert(`Successfully generated ${generatedTasks.length} task${generatedTasks.length === 1 ? '' : 's'} for the week!`);
+        }
       } else {
         alert('Failed to save tasks');
       }
     } catch (error) {
       console.error('Error generating tasks:', error);
-      alert('Failed to generate tasks');
+      alert('Failed to generate tasks. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -212,10 +216,22 @@ const WeeklyTasksPage = () => {
           {loading ? (
             <div className="text-center py-8">Loading tasks...</div>
           ) : filteredTasks.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              {tasks.length === 0 
-                ? 'No tasks found for this week. Click "Generate Tasks" to create tasks from your active trays.'
-                : 'No tasks match the selected filters.'}
+            <div className="text-center py-8">
+              <div className="max-w-md mx-auto">
+                <p className="text-gray-500 mb-4">
+                  {tasks.length === 0 
+                    ? 'No tasks found for this week. Click "Generate Tasks" to create tasks from your active trays.'
+                    : 'No tasks match the selected filters.'}
+                </p>
+                {tasks.length === 0 && (
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      <strong>Tip:</strong> To generate tasks, you need active trays with sow dates. 
+                      Create trays in the <strong>Trays</strong> page first!
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">

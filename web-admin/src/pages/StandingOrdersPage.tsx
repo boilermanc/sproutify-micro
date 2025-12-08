@@ -143,9 +143,18 @@ const StandingOrdersPage = () => {
   const fetchProducts = async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        console.warn('No session data found when fetching products');
+        setProducts([]);
+        return;
+      }
 
       const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        console.warn('No farmUuid in session data');
+        setProducts([]);
+        return;
+      }
 
       const { data, error } = await supabase
         .from('products')
@@ -154,10 +163,16 @@ const StandingOrdersPage = () => {
         .eq('is_active', true)
         .order('product_name', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching products:', error);
+        setProducts([]);
+        return;
+      }
+
       setProducts(data || []);
     } catch (error) {
       console.error('Error fetching products:', error);
+      setProducts([]);
     }
   };
 
@@ -179,6 +194,10 @@ const StandingOrdersPage = () => {
   };
 
   const handleProductChange = (productId: string) => {
+    // Ignore placeholder value
+    if (productId === '__no_products__') {
+      return;
+    }
     setNewItem({ ...newItem, product_id: productId, variant_id: '' });
     if (productId) {
       fetchProductVariants(parseInt(productId));
@@ -522,7 +541,13 @@ const StandingOrdersPage = () => {
               <div className="border-t pt-4">
                 <div className="flex justify-between items-center mb-2">
                   <Label>Order Items</Label>
-                  <Dialog open={isAddItemDialogOpen} onOpenChange={setIsAddItemDialogOpen}>
+                  <Dialog open={isAddItemDialogOpen} onOpenChange={(open) => {
+                    setIsAddItemDialogOpen(open);
+                    if (open && products.length === 0) {
+                      // Refresh products when dialog opens if none are loaded
+                      fetchProducts();
+                    }
+                  }}>
                     <DialogTrigger asChild>
                       <Button
                         type="button"
@@ -546,18 +571,30 @@ const StandingOrdersPage = () => {
                           <Select
                             value={newItem.product_id}
                             onValueChange={handleProductChange}
+                            disabled={products.length === 0}
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select product" />
+                              <SelectValue placeholder={products.length === 0 ? "No products available" : "Select product"} />
                             </SelectTrigger>
                             <SelectContent>
-                              {products.map((product) => (
-                                <SelectItem key={product.product_id} value={product.product_id.toString()}>
-                                  {product.product_name}
+                              {products.length === 0 ? (
+                                <SelectItem value="__no_products__" disabled>
+                                  No products available
                                 </SelectItem>
-                              ))}
+                              ) : (
+                                products.map((product) => (
+                                  <SelectItem key={product.product_id} value={product.product_id.toString()}>
+                                    {product.product_name}
+                                  </SelectItem>
+                                ))
+                              )}
                             </SelectContent>
                           </Select>
+                          {products.length === 0 && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              No active products found. Please create products first.
+                            </p>
+                          )}
                         </div>
 
                         {newItem.product_id && (

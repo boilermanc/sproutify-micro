@@ -221,7 +221,7 @@ const VendorsPage = () => {
               Add Vendor
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle>Add New Vendor</DialogTitle>
               <DialogDescription>
@@ -238,27 +238,25 @@ const VendorsPage = () => {
                   onChange={(e) => setNewVendor({ ...newVendor, name: e.target.value })}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="contact@vendor.com"
-                    value={newVendor.email}
-                    onChange={(e) => setNewVendor({ ...newVendor, email: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="(555) 123-4567"
-                    value={newVendor.phone}
-                    onChange={(e) => setNewVendor({ ...newVendor, phone: e.target.value })}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="contact@vendor.com"
+                  value={newVendor.email}
+                  onChange={(e) => setNewVendor({ ...newVendor, email: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="phone">Phone</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="(555) 123-4567"
+                  value={newVendor.phone}
+                  onChange={(e) => setNewVendor({ ...newVendor, phone: e.target.value })}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="street">Street Address</Label>
@@ -269,16 +267,16 @@ const VendorsPage = () => {
                   onChange={(e) => setNewVendor({ ...newVendor, street: e.target.value })}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="city">City</Label>
-                  <Input
-                    id="city"
-                    placeholder="City"
-                    value={newVendor.city}
-                    onChange={(e) => setNewVendor({ ...newVendor, city: e.target.value })}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label htmlFor="city">City</Label>
+                <Input
+                  id="city"
+                  placeholder="City"
+                  value={newVendor.city}
+                  onChange={(e) => setNewVendor({ ...newVendor, city: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="state">State</Label>
                   <Input
@@ -510,7 +508,7 @@ const VendorsPage = () => {
 
       {/* Edit Vendor Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Vendor</DialogTitle>
             <DialogDescription>
@@ -527,25 +525,23 @@ const VendorsPage = () => {
                   onChange={(e) => setEditingVendor({ ...editingVendor, name: e.target.value })}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-email">Email</Label>
-                  <Input
-                    id="edit-email"
-                    type="email"
-                    value={editingVendor.email || ''}
-                    onChange={(e) => setEditingVendor({ ...editingVendor, email: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-phone">Phone</Label>
-                  <Input
-                    id="edit-phone"
-                    type="tel"
-                    value={editingVendor.phone || ''}
-                    onChange={(e) => setEditingVendor({ ...editingVendor, phone: e.target.value })}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editingVendor.email || ''}
+                  onChange={(e) => setEditingVendor({ ...editingVendor, email: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-phone">Phone</Label>
+                <Input
+                  id="edit-phone"
+                  type="tel"
+                  value={editingVendor.phone || ''}
+                  onChange={(e) => setEditingVendor({ ...editingVendor, phone: e.target.value })}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-street">Street Address</Label>
@@ -555,15 +551,15 @@ const VendorsPage = () => {
                   onChange={(e) => setEditingVendor({ ...editingVendor, street: e.target.value })}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-city">City</Label>
-                  <Input
-                    id="edit-city"
-                    value={editingVendor.city || ''}
-                    onChange={(e) => setEditingVendor({ ...editingVendor, city: e.target.value })}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-city">City</Label>
+                <Input
+                  id="edit-city"
+                  value={editingVendor.city || ''}
+                  onChange={(e) => setEditingVendor({ ...editingVendor, city: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="edit-state">State</Label>
                   <Input

@@ -1,18 +1,23 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Edit, ClipboardList, Plus, Search, Trash2 } from 'lucide-react';
+import { Edit, ClipboardList, Plus, Search, Trash2, Globe, Copy } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { CheckCircle2, X } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 const RecipesPage = () => {
   const [recipes, setRecipes] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<any[]>([]);
   const [stepDescriptions, setStepDescriptions] = useState<any[]>([]);
+  const [globalRecipes, setGlobalRecipes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -24,6 +29,13 @@ const RecipesPage = () => {
   const [editableSteps, setEditableSteps] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [useGlobalRecipe, setUseGlobalRecipe] = useState(false);
+  const [selectedGlobalRecipeId, setSelectedGlobalRecipeId] = useState<string>('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [recipeToDelete, setRecipeToDelete] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteTrayCount, setDeleteTrayCount] = useState(0);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [newRecipe, setNewRecipe] = useState({
     recipe_name: '',
     variety_id: '',
@@ -38,9 +50,8 @@ const RecipesPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      // Join with varieties table to get variety name from foreign key
-      // Explicitly select type to ensure it's included
-      const { data, error } = await supabase
+      // Fetch farm's own recipes
+      const { data: farmRecipesData, error } = await supabase
         .from('recipes')
         .select(`
           recipe_id,
@@ -62,9 +73,31 @@ const RecipesPage = () => {
 
       if (error) throw error;
 
-      // Get step information for each recipe
-      const recipesWithSteps = await Promise.all(
-        (data || []).map(async (recipe) => {
+      // Fetch enabled global recipes for this farm
+      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+        .from('farm_global_recipes')
+        .select(`
+          global_recipe_id,
+          global_recipes!inner(
+            global_recipe_id,
+            recipe_name,
+            variety_name,
+            description,
+            notes,
+            is_active,
+            global_steps(*)
+          )
+        `)
+        .eq('farm_uuid', farmUuid)
+        .eq('is_active', true);
+
+      if (globalError) {
+        console.error('Error fetching enabled global recipes:', globalError);
+      }
+
+      // Process farm recipes
+      const farmRecipesWithSteps = await Promise.all(
+        (farmRecipesData || []).map(async (recipe) => {
           const { data: steps } = await supabase
             .from('steps')
             .select('*')
@@ -100,14 +133,57 @@ const RecipesPage = () => {
           return {
             ...recipe,
             variety_name: varietyName,
-            type: recipe.type || 'Standard', // Default to 'Standard' if type is null/undefined
+            type: recipe.type || 'Standard',
             harvestDays: totalDays,
             stepCount: sortedSteps?.length || 0,
+            is_global: false,
           };
         })
       );
 
-      setRecipes(recipesWithSteps);
+      // Process global recipes
+      const globalRecipesWithSteps = (enabledGlobalRecipes || [])
+        .filter((item: any) => item.global_recipes?.is_active)
+        .map((item: any) => {
+          const globalRecipe = item.global_recipes;
+          const sortedSteps = (globalRecipe.global_steps || []).sort(
+            (a: any, b: any) => a.sequence_order - b.sequence_order
+          );
+
+          // Calculate total days
+          const totalDays = sortedSteps.reduce((sum: number, step: any) => {
+            const duration = step.duration || 0;
+            const unit = (step.duration_unit || 'Days').toUpperCase();
+            
+            if (unit === 'DAYS') {
+              return sum + duration;
+            } else if (unit === 'HOURS') {
+              return sum + (duration >= 12 ? 1 : 0);
+            }
+            return sum + duration;
+          }, 0);
+
+          return {
+            recipe_id: `global_${item.global_recipe_id}`, // Prefix to distinguish
+            global_recipe_id: item.global_recipe_id,
+            recipe_name: globalRecipe.recipe_name,
+            variety_name: globalRecipe.variety_name,
+            description: globalRecipe.description,
+            notes: globalRecipe.notes,
+            type: 'Standard', // Global recipes are always Standard
+            harvestDays: totalDays,
+            stepCount: sortedSteps.length || 0,
+            is_global: true,
+            global_steps: sortedSteps,
+          };
+        });
+
+      // Combine and sort all recipes
+      const allRecipes = [...farmRecipesWithSteps, ...globalRecipesWithSteps].sort(
+        (a, b) => a.recipe_name.localeCompare(b.recipe_name)
+      );
+
+      setRecipes(allRecipes);
     } catch (error) {
       console.error('Error fetching recipes:', error);
     } finally {
@@ -169,29 +245,59 @@ const RecipesPage = () => {
     fetchRecipes();
     fetchVarieties();
     fetchStepDescriptions();
+    fetchGlobalRecipes();
   }, []);
+
+  const fetchGlobalRecipes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('global_recipes')
+        .select('global_recipe_id, recipe_name, variety_name')
+        .eq('is_active', true)
+        .order('recipe_name');
+
+      if (error) {
+        console.error('Error fetching global recipes:', error);
+        return;
+      }
+
+      setGlobalRecipes(data || []);
+    } catch (error) {
+      console.error('Error fetching global recipes:', error);
+    }
+  };
 
   const handleViewRecipe = async (recipe: any) => {
     setViewingRecipe(recipe);
     setIsViewDialogOpen(true);
     
-    // Fetch steps for this recipe with step_descriptions join (left join in case some steps don't have descriptions)
-    const { data: steps } = await supabase
-      .from('steps')
-      .select(`
-        *,
-        step_descriptions(description_name, description_details)
-      `)
-      .eq('recipe_id', recipe.recipe_id);
-    
-    // Sort steps by step_order or sequence_order
-    const sortedSteps = steps ? [...steps].sort((a, b) => {
-      const orderA = a.step_order ?? a.sequence_order ?? 0;
-      const orderB = b.step_order ?? b.sequence_order ?? 0;
-      return orderA - orderB;
-    }) : [];
-    
-    setRecipeSteps(sortedSteps);
+    if (recipe.is_global) {
+      // For global recipes, use the global_steps already loaded
+      const sortedSteps = (recipe.global_steps || []).sort((a: any, b: any) => {
+        const orderA = a.sequence_order ?? 0;
+        const orderB = b.sequence_order ?? 0;
+        return orderA - orderB;
+      });
+      setRecipeSteps(sortedSteps);
+    } else {
+      // Fetch steps for farm recipe
+      const { data: steps } = await supabase
+        .from('steps')
+        .select(`
+          *,
+          step_descriptions(description_name, description_details)
+        `)
+        .eq('recipe_id', recipe.recipe_id);
+      
+      // Sort steps by step_order or sequence_order
+      const sortedSteps = steps ? [...steps].sort((a, b) => {
+        const orderA = a.step_order ?? a.sequence_order ?? 0;
+        const orderB = b.step_order ?? b.sequence_order ?? 0;
+        return orderA - orderB;
+      }) : [];
+      
+      setRecipeSteps(sortedSteps);
+    }
   };
 
   const handleEditRecipe = async (recipe: any) => {
@@ -260,6 +366,60 @@ const RecipesPage = () => {
     setNewRecipeSteps(newSteps);
   };
 
+  const handleGlobalRecipeSelect = async (globalRecipeId: string) => {
+    if (!globalRecipeId) {
+      setSelectedGlobalRecipeId('');
+      setNewRecipe({ recipe_name: '', variety_id: '', type: 'Custom' });
+      setNewRecipeSteps([]);
+      return;
+    }
+
+    try {
+      // Fetch the global recipe with its steps
+      const { data: globalRecipe, error } = await supabase
+        .from('global_recipes')
+        .select(`
+          *,
+          global_steps(*)
+        `)
+        .eq('global_recipe_id', parseInt(globalRecipeId))
+        .single();
+
+      if (error) throw error;
+
+      // Find matching variety by name
+      const matchingVariety = varieties.find(
+        v => v.variety_name?.toLowerCase() === globalRecipe.variety_name?.toLowerCase()
+      );
+
+      // Populate form with global recipe data
+      setNewRecipe({
+        recipe_name: `${globalRecipe.recipe_name} (Custom)`,
+        variety_id: matchingVariety ? matchingVariety.variety_id.toString() : '',
+        type: 'Custom',
+      });
+
+      // Populate steps
+      const sortedSteps = (globalRecipe.global_steps || []).sort(
+        (a: any, b: any) => a.sequence_order - b.sequence_order
+      );
+
+      const mappedSteps = sortedSteps.map((step: any) => ({
+        sequence_order: step.sequence_order,
+        description_id: step.description_id || null,
+        description_name: step.description_name || step.step_name || '',
+        duration: step.duration || 0,
+        duration_unit: step.duration_unit || 'Days',
+        instructions: step.instructions || '',
+      }));
+
+      setNewRecipeSteps(mappedSteps);
+    } catch (error) {
+      console.error('Error loading global recipe:', error);
+      alert('Failed to load global recipe. Please try again.');
+    }
+  };
+
   const handleAddRecipe = async () => {
     if (!newRecipe.recipe_name || !newRecipe.variety_id) return;
 
@@ -320,6 +480,8 @@ const RecipesPage = () => {
 
       setNewRecipe({ recipe_name: '', variety_id: '', type: 'Standard' });
       setNewRecipeSteps([]);
+      setUseGlobalRecipe(false);
+      setSelectedGlobalRecipeId('');
       setIsAddDialogOpen(false);
       fetchRecipes();
     } catch (error) {
@@ -355,6 +517,107 @@ const RecipesPage = () => {
     const newSteps = [...editableSteps];
     newSteps[index] = { ...newSteps[index], [field]: value };
     setEditableSteps(newSteps);
+  };
+
+  const handleDeleteRecipe = async (recipe: any) => {
+    // Cannot delete global recipes
+    if (recipe.is_global) {
+      setSuccessMessage('Global recipes cannot be deleted. You can disable them in the Global Recipes page.');
+      setTimeout(() => setSuccessMessage(null), 5000);
+      return;
+    }
+
+    // Check if recipe is in use (has active trays)
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+
+      const { farmUuid } = JSON.parse(sessionData);
+
+      // Check for active trays using this recipe
+      const { data: activeTrays, error: traysError } = await supabase
+        .from('trays')
+        .select('tray_id, tray_unique_id')
+        .eq('farm_uuid', farmUuid)
+        .eq('recipe_id', recipe.recipe_id)
+        .is('harvest_date', null)
+        .limit(1);
+
+      if (traysError) throw traysError;
+
+      if (activeTrays && activeTrays.length > 0) {
+        setSuccessMessage(`Cannot delete recipe "${recipe.recipe_name}". It is currently in use by ${activeTrays.length} active tray(s). Please harvest or remove those trays first.`);
+        setTimeout(() => setSuccessMessage(null), 7000);
+        return;
+      }
+
+      // Check for any trays (including harvested) - optional, but good to warn
+      const { data: allTrays, error: allTraysError } = await supabase
+        .from('trays')
+        .select('tray_id', { count: 'exact', head: true })
+        .eq('farm_uuid', farmUuid)
+        .eq('recipe_id', recipe.recipe_id);
+
+      if (allTraysError) throw allTraysError;
+
+      const trayCount = allTrays?.length || 0;
+      setDeleteTrayCount(trayCount);
+      setRecipeToDelete(recipe);
+      setDeleteDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error checking recipe usage:', error);
+      setSuccessMessage(`Failed to check recipe usage: ${error.message || 'Unknown error'}`);
+      setTimeout(() => setSuccessMessage(null), 7000);
+    }
+  };
+
+  const confirmDeleteRecipe = async () => {
+    if (!recipeToDelete) return;
+
+    try {
+      setDeleting(true);
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+
+      const { farmUuid } = JSON.parse(sessionData);
+
+      // First, delete all steps associated with this recipe
+      const { error: stepsDeleteError } = await supabase
+        .from('steps')
+        .delete()
+        .eq('recipe_id', recipeToDelete.recipe_id);
+
+      if (stepsDeleteError) {
+        console.error('Error deleting steps:', stepsDeleteError);
+        // Continue anyway - some steps might not exist
+      }
+
+      // Then delete the recipe
+      const { error: deleteError } = await supabase
+        .from('recipes')
+        .delete()
+        .eq('recipe_id', recipeToDelete.recipe_id)
+        .eq('farm_uuid', farmUuid);
+
+      if (deleteError) throw deleteError;
+
+      // Refresh the list
+      await fetchRecipes();
+      const deletedName = recipeToDelete.recipe_name;
+      setDeleteDialogOpen(false);
+      setRecipeToDelete(null);
+      setDeleteTrayCount(0);
+      
+      // Show success message
+      setSuccessMessage(`Recipe "${deletedName}" deleted successfully.`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (error: any) {
+      console.error('Error deleting recipe:', error);
+      setSuccessMessage(`Failed to delete recipe: ${error.message || 'Unknown error'}`);
+      setTimeout(() => setSuccessMessage(null), 7000);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleUpdateRecipe = async () => {
@@ -495,10 +758,57 @@ const RecipesPage = () => {
             <DialogHeader>
               <DialogTitle>Create New Recipe</DialogTitle>
               <DialogDescription>
-                Define how to grow a specific variety.
+                Define how to grow a specific variety. You can start from a global recipe or create from scratch.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-600" />
+                  <Label htmlFor="use-global" className="cursor-pointer">
+                    Start from Global Recipe
+                  </Label>
+                </div>
+                <Switch
+                  id="use-global"
+                  checked={useGlobalRecipe}
+                  onCheckedChange={(checked) => {
+                    setUseGlobalRecipe(checked);
+                    if (!checked) {
+                      setSelectedGlobalRecipeId('');
+                      handleGlobalRecipeSelect('');
+                    }
+                  }}
+                />
+              </div>
+
+              {useGlobalRecipe && (
+                <div className="grid gap-2">
+                  <Label htmlFor="global-recipe">Select Global Recipe</Label>
+                  <Select
+                    value={selectedGlobalRecipeId}
+                    onValueChange={(value) => {
+                      setSelectedGlobalRecipeId(value);
+                      handleGlobalRecipeSelect(value);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a global recipe to start from" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {globalRecipes.map((gr) => (
+                        <SelectItem key={gr.global_recipe_id} value={gr.global_recipe_id.toString()}>
+                          {gr.recipe_name} ({gr.variety_name})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500">
+                    This will copy the recipe name, variety, and steps. You can edit them after.
+                  </p>
+                </div>
+              )}
+
               <div className="grid gap-2">
                 <Label htmlFor="name">Recipe Name</Label>
                 <Input
@@ -527,7 +837,12 @@ const RecipesPage = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="type">Type</Label>
+                <div>
+                  <Label htmlFor="type">Type</Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Standard: Common recipe template | Custom: Your own recipe variation
+                  </p>
+                </div>
                 <Select 
                   value={newRecipe.type} 
                   onValueChange={(value) => setNewRecipe({ ...newRecipe, type: value })}
@@ -784,7 +1099,12 @@ const RecipesPage = () => {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-type">Type</Label>
+                <div>
+                  <Label htmlFor="edit-type">Type</Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Standard: Common recipe template | Custom: Your own recipe variation
+                  </p>
+                </div>
                 <Select 
                   value={editingRecipe.type || 'Standard'} 
                   onValueChange={(value) => setEditingRecipe({ ...editingRecipe, type: value })}
@@ -925,6 +1245,32 @@ const RecipesPage = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Success/Error Message */}
+      {successMessage && (
+        <Alert className={`mb-4 ${successMessage.includes('successfully') ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              {successMessage.includes('successfully') ? (
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+              ) : (
+                <X className="h-4 w-4 text-red-600" />
+              )}
+              <AlertDescription className={successMessage.includes('successfully') ? 'text-green-800' : 'text-red-800'}>
+                {successMessage}
+              </AlertDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setSuccessMessage(null)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       <div className="flex items-center space-x-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -976,12 +1322,20 @@ const RecipesPage = () => {
               filteredRecipes.map((recipe) => (
                 <TableRow key={recipe.recipe_id}>
                   <TableCell className="font-medium">
-                    <button
-                      onClick={() => handleViewRecipe(recipe)}
-                      className="text-left hover:text-blue-600 hover:underline cursor-pointer"
-                    >
-                      {recipe.recipe_name}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleViewRecipe(recipe)}
+                        className="text-left hover:text-blue-600 hover:underline cursor-pointer"
+                      >
+                        {recipe.recipe_name}
+                      </button>
+                      {recipe.is_global && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          <Globe className="h-3 w-3 mr-1" />
+                          Global
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>{recipe.variety_name || 'N/A'}</TableCell>
                   <TableCell>{recipe.type || 'N/A'}</TableCell>
@@ -989,9 +1343,38 @@ const RecipesPage = () => {
                   <TableCell>{recipe.stepCount || 0}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => handleEditRecipe(recipe)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      {!recipe.is_global && (
+                        <>
+                          <Button variant="ghost" size="icon" onClick={() => handleEditRecipe(recipe)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleDeleteRecipe(recipe)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                      {recipe.is_global && (
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => {
+                            // Open copy dialog by selecting this global recipe
+                            setSelectedGlobalRecipeId(recipe.global_recipe_id.toString());
+                            setUseGlobalRecipe(true);
+                            handleGlobalRecipeSelect(recipe.global_recipe_id.toString());
+                            setIsAddDialogOpen(true);
+                          }}
+                          title="Copy to create your own version"
+                          className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1000,6 +1383,53 @@ const RecipesPage = () => {
           </TableBody>
         </Table>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Recipe</DialogTitle>
+            <DialogDescription>
+              {deleteTrayCount > 0
+                ? `This recipe has been used in ${deleteTrayCount} tray(s) (including harvested).`
+                : 'This action cannot be undone.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-600">
+              Are you sure you want to delete <strong>"{recipeToDelete?.recipe_name}"</strong>?
+            </p>
+            {deleteTrayCount > 0 && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  <strong>Note:</strong> This recipe has been used in {deleteTrayCount} tray(s). 
+                  The recipe will be removed, but existing tray records will remain.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setRecipeToDelete(null);
+                setDeleteTrayCount(0);
+              }}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={confirmDeleteRecipe}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Recipe'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

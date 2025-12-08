@@ -38,7 +38,18 @@ export const generateReport = async (params: ReportParams): Promise<ReportResult
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      // Provide more user-friendly error messages
+      const errorMsg = error.message || String(error);
+      if (errorMsg.includes('Failed to send a request') || 
+          errorMsg.includes('fetch') || 
+          errorMsg.includes('CORS') ||
+          errorMsg.includes('ERR_FAILED') ||
+          errorMsg.includes('FunctionsFetchError')) {
+        throw new Error('Unable to connect to the report service. This may be due to:\n• No data available for the selected date range\n• The report service being temporarily unavailable\n• Network connectivity issues\n\nPlease try again later or contact support if the issue persists.');
+      }
+      throw error;
+    }
 
     // Save to report history
     await supabase.from('report_history').insert({
@@ -61,9 +72,27 @@ export const generateReport = async (params: ReportParams): Promise<ReportResult
     };
   } catch (error: any) {
     console.error('Error generating report:', error);
+    
+    // Provide user-friendly error messages
+    let userMessage = 'Failed to generate report';
+    const errorMsg = error.message || String(error);
+    
+    if (errorMsg.includes('no data') || errorMsg.includes('No data')) {
+      userMessage = 'No data available for the selected date range. Try selecting a different date range or ensure you have harvests, orders, or sales data.';
+    } else if (errorMsg.includes('connect') || 
+               errorMsg.includes('network') || 
+               errorMsg.includes('Failed to send') ||
+               errorMsg.includes('CORS') ||
+               errorMsg.includes('ERR_FAILED') ||
+               errorMsg.includes('FunctionsFetchError')) {
+      userMessage = 'Unable to connect to the report service. This may be due to:\n• No data available for the selected date range\n• The report service being temporarily unavailable\n• Network connectivity issues\n\nPlease try again later or contact support if the issue persists.';
+    } else if (errorMsg) {
+      userMessage = errorMsg;
+    }
+    
     return {
       success: false,
-      message: error.message || 'Failed to generate report',
+      message: userMessage,
     };
   }
 };

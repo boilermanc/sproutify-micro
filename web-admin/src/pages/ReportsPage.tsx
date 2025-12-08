@@ -34,11 +34,26 @@ const ReportsPage = () => {
       if (result.success) {
         alert(`Report generated successfully! ${result.message || ''}`);
       } else {
-        alert(`Failed to generate report: ${result.message || 'Unknown error'}`);
+        // Show a more helpful error message
+        const errorMsg = result.message || 'Unknown error';
+        if (errorMsg.includes('no data') || errorMsg.includes('No data')) {
+          alert(`No data available for the selected date range.\n\nTry:\n• Selecting a different date range\n• Ensuring you have ${reportType === 'harvest' ? 'harvested trays' : reportType === 'delivery' ? 'completed orders' : 'sales data'} in that period`);
+        } else if (errorMsg.includes('CORS') || errorMsg.includes('connect') || errorMsg.includes('network')) {
+          alert(`Unable to connect to the report service.\n\nThis may be due to:\n• The service being temporarily unavailable\n• Network connectivity issues\n• No data available for the selected date range\n\nPlease try again later or contact support if the issue persists.`);
+        } else {
+          alert(`Unable to generate report:\n\n${errorMsg}\n\nIf this persists, the report service may be temporarily unavailable.`);
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generating report:', error);
-      alert('Failed to generate report');
+      const errorMsg = error.message || 'Unknown error occurred';
+      if (errorMsg.includes('no data') || errorMsg.includes('No data')) {
+        alert(`No data available for the selected date range.\n\nTry selecting a different date range or ensure you have data for the selected period.`);
+      } else if (errorMsg.includes('CORS') || errorMsg.includes('connect') || errorMsg.includes('network') || errorMsg.includes('ERR_FAILED')) {
+        alert(`Unable to connect to the report service.\n\nThis may be due to:\n• The service being temporarily unavailable\n• Network connectivity issues\n• No data available for the selected date range\n\nPlease try again later or contact support if the issue persists.`);
+      } else {
+        alert(`Failed to generate report:\n\n${errorMsg}`);
+      }
     } finally {
       setGenerating(false);
     }

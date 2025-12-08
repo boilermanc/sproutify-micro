@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { runNotificationChecks } from '../services/notificationService';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   BarChart, 
   Bar, 
@@ -24,7 +25,11 @@ import {
   ShoppingBasket, 
   RefreshCcw,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  X,
+  ArrowRight,
+  AlertTriangle,
+  Sparkles
 } from 'lucide-react';
 import { useOnboarding } from '../hooks/useOnboarding';
 import WelcomeModal from '../components/onboarding/WelcomeModal';
@@ -41,6 +46,208 @@ const DashboardIcon = ({ icon: Icon, colorClass, bgClass }: { icon: React.Compon
   </div>
 );
 
+// --- SAGE MORNING BRIEFING COMPONENT ---
+// In a real app, this data would fetch from 'daily_insights' table
+interface InsightData {
+  opportunity?: { title: string; message: string; action: string; actionUrl?: string };
+  risk?: { title: string; message: string; action: string; actionUrl?: string };
+  inventory?: { title: string; message: string; action: string; actionUrl?: string };
+}
+
+const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightData | null, isVisible: boolean, onClose: () => void, navigate: (path: string) => void }) => {
+  const hasData = data && (data.opportunity || data.risk || data.inventory);
+  
+  // Use real data or show empty state
+  const insights = {
+    date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+    opportunity: data?.opportunity || {
+      title: 'No insights yet',
+      message: 'Daily insights will appear here once you start tracking trays and harvests.',
+      action: 'Create your first tray'
+    },
+    risk: data?.risk || {
+      title: 'No insights yet',
+      message: 'Daily insights will appear here once you start tracking trays and harvests.',
+      action: 'Create your first tray'
+    },
+    inventory: data?.inventory || {
+      title: 'No insights yet',
+      message: 'Daily insights will appear here once you start tracking trays and harvests.',
+      action: 'Create your first tray'
+    }
+  };
+
+  if (!isVisible) return (
+    <div className="flex justify-end mb-6 animate-in fade-in slide-in-from-top-2">
+      <Button 
+        variant="ghost" 
+        size="sm"
+        onClick={onClose} // Actually re-opens it in this logic context
+        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 gap-2"
+      >
+        <Sprout size={16} /> Show Morning Briefing
+      </Button>
+    </div>
+  );
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      className="mb-8 relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl"
+    >
+      {/* Background Decor */}
+      <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
+
+      {/* Header */}
+      <div className="p-6 border-b border-white/5 flex justify-between items-start bg-white/5">
+        <div className="flex gap-4">
+          <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-900/20">
+            <Sparkles className="text-white h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-tight">Morning Briefing</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
+              <span>{insights.date}</span>
+              <span className="w-1 h-1 rounded-full bg-slate-600" />
+              <span className="text-emerald-400 font-medium flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                System Optimal
+              </span>
+            </div>
+          </div>
+        </div>
+        <Button 
+          variant="ghost" 
+          size="icon"
+          onClick={onClose}
+          className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+        >
+          <X size={20} />
+        </Button>
+      </div>
+
+      {/* Insights Grid or Empty State */}
+      {!hasData ? (
+        <div className="p-12 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800/50 mb-4">
+            <Sparkles className="h-8 w-8 text-slate-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-200 mb-2">No insights for today</h3>
+          <p className="text-sm text-slate-400 mb-6 max-w-md mx-auto leading-relaxed">
+            Daily insights will appear here once you start tracking trays, harvests, and orders. 
+            This is normal for new farms and will populate as you use the system.
+          </p>
+          <Button 
+            variant="outline" 
+            className="bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200"
+            onClick={() => navigate('/trays')}
+          >
+            Get Started
+            <ArrowRight size={14} className="ml-2" />
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
+          
+          {/* 1. Opportunity */}
+          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <TrendingUp size={16} />
+              </div>
+              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Opportunity</span>
+            </div>
+            <h3 className="font-semibold text-slate-200 mb-2">{insights.opportunity.title}</h3>
+            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
+              {insights.opportunity.message}
+            </p>
+            <Button 
+              variant="outline" 
+              className="w-full justify-between bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
+              size="sm"
+              onClick={() => {
+                if (insights.opportunity.actionUrl) {
+                  navigate(insights.opportunity.actionUrl);
+                } else {
+                  // Default navigation based on insight type
+                  navigate('/reports');
+                }
+              }}
+            >
+              <span className="flex-1 pr-2 break-words">{insights.opportunity.action}</span>
+              <ArrowRight size={14} className="flex-shrink-0" />
+            </Button>
+          </div>
+
+          {/* 2. Risk */}
+          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+                <AlertTriangle size={16} />
+              </div>
+              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Attention Needed</span>
+            </div>
+            <h3 className="font-semibold text-slate-200 mb-2">{insights.risk.title}</h3>
+            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
+              {insights.risk.message}
+            </p>
+            <Button 
+              variant="outline" 
+              className="w-full justify-between bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
+              size="sm"
+              onClick={() => {
+                if (insights.risk.actionUrl) {
+                  navigate(insights.risk.actionUrl);
+                } else {
+                  // Default navigation based on insight type
+                  navigate('/trays');
+                }
+              }}
+            >
+              <span className="flex-1 pr-2 break-words">{insights.risk.action}</span>
+              <ArrowRight size={14} className="flex-shrink-0" />
+            </Button>
+          </div>
+
+          {/* 3. Inventory */}
+          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
+                <Package size={16} />
+              </div>
+              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Inventory</span>
+            </div>
+            <h3 className="font-semibold text-slate-200 mb-2">{insights.inventory.title}</h3>
+            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
+              {insights.inventory.message}
+            </p>
+            <Button 
+              variant="outline" 
+              className="w-full justify-between bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
+              size="sm"
+              onClick={() => {
+                if (insights.inventory.actionUrl) {
+                  navigate(insights.inventory.actionUrl);
+                } else {
+                  // Default navigation based on insight type
+                  navigate('/supplies');
+                }
+              }}
+            >
+              <span className="flex-1 pr-2 break-words">{insights.inventory.action}</span>
+              <ArrowRight size={14} className="flex-shrink-0" />
+            </Button>
+          </div>
+
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,6 +258,16 @@ const Dashboard = () => {
   const [showWizard, setShowWizard] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [chartDimensions, setChartDimensions] = useState({ bar: { width: 0, height: 0 }, pie: { width: 0, height: 0 } });
+  
+  // Morning Briefing State
+  const [showBriefing, setShowBriefing] = useState(true);
+  const [briefingData, setBriefingData] = useState<InsightData | null>(null);
+  const insightsTableExistsRef = useRef<boolean | null>(null); // null = unknown, true = exists, false = doesn't exist
+  
+  // Refs for chart containers
+  const barChartRef = useRef<HTMLDivElement>(null);
+  const pieChartRef = useRef<HTMLDivElement>(null);
   
   // Data State
   const [farmInfo, setFarmInfo] = useState({ farmName: '', farmUuid: '' });
@@ -198,6 +415,55 @@ const Dashboard = () => {
           .slice(0, 5));
       }
 
+      // 4. Fetch Daily Insight (gracefully handle if no data exists)
+      // Skip if we've already determined the table doesn't exist
+      if (insightsTableExistsRef.current !== false) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const { data: insightData, error: insightError } = await supabase
+          .from('daily_insights')
+          .select('content')
+          .eq('farm_uuid', farmUuid)
+          .eq('date', todayStr)
+          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 when no row exists
+
+        // Handle errors gracefully - 406 means table doesn't exist or isn't accessible
+        // This is expected for new farms that don't have the daily_insights feature set up yet
+        if (insightError) {
+          // Check if it's a 406 or table not found error - these are expected
+          const errorMessage = insightError.message || '';
+          const errorCode = insightError.code || '';
+          const isExpectedError = 
+            errorCode === 'PGRST116' ||
+            errorMessage.includes('406') ||
+            errorMessage.includes('Not Acceptable') ||
+            errorMessage.includes('not found') ||
+            errorMessage.includes('does not exist');
+          
+          // Mark table as non-existent if we get a 406-related error to skip future requests
+          if (errorMessage.includes('406') || errorMessage.includes('Not Acceptable')) {
+            insightsTableExistsRef.current = false;
+          }
+          
+          if (!isExpectedError) {
+            // Only log unexpected errors
+            console.debug('Daily insights error:', errorMessage);
+          }
+          setBriefingData(null);
+        } else {
+          // Success - table exists
+          insightsTableExistsRef.current = true;
+          if (insightData && insightData.content) {
+            setBriefingData(insightData.content as InsightData);
+          } else {
+            // No data for today - this is normal for new users
+            setBriefingData(null);
+          }
+        }
+      } else {
+        // Table doesn't exist, skip the request to avoid repeated 406 errors
+        setBriefingData(null);
+      }
+
     } catch (error) {
       console.error('Error fetching dashboard:', error);
     } finally {
@@ -207,6 +473,45 @@ const Dashboard = () => {
   }, []);
 
   // --- Effects ---
+
+  // 0. Track chart container dimensions using ResizeObserver
+  useEffect(() => {
+    if (isLoading) return;
+
+    let barObserver: ResizeObserver | null = null;
+    let pieObserver: ResizeObserver | null = null;
+
+    const updateDimensions = () => {
+      if (barChartRef.current && pieChartRef.current) {
+        const barRect = barChartRef.current.getBoundingClientRect();
+        const pieRect = pieChartRef.current.getBoundingClientRect();
+        setChartDimensions({
+          bar: { width: barRect.width, height: barRect.height },
+          pie: { width: pieRect.width, height: pieRect.height }
+        });
+      }
+    };
+
+    // Use ResizeObserver to track dimensions
+    if (barChartRef.current) {
+      barObserver = new ResizeObserver(updateDimensions);
+      barObserver.observe(barChartRef.current);
+    }
+
+    if (pieChartRef.current) {
+      pieObserver = new ResizeObserver(updateDimensions);
+      pieObserver.observe(pieChartRef.current);
+    }
+
+    // Initial check
+    const timeout = setTimeout(updateDimensions, 100);
+
+    return () => {
+      clearTimeout(timeout);
+      if (barObserver) barObserver.disconnect();
+      if (pieObserver) pieObserver.disconnect();
+    };
+  }, [isLoading]);
 
   // 1. Initial Load & Onboarding Check
   useEffect(() => {
@@ -304,6 +609,16 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* --- SAGE AI MORNING BRIEFING --- */}
+      <AnimatePresence>
+        <SageBriefing 
+          data={briefingData}
+          isVisible={showBriefing} 
+          onClose={() => setShowBriefing(!showBriefing)}
+          navigate={navigate}
+        />
+      </AnimatePresence>
+
       {/* Stats Grid - "Command Center" Style */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
         <StatCard 
@@ -366,19 +681,21 @@ const Dashboard = () => {
               </div>
             </CardHeader>
             <CardContent className="p-6">
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={harvestData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
-                    <Tooltip 
-                      cursor={{fill: '#f9fafb'}}
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
-                    />
-                    <Bar dataKey="yield" fill="#10B981" radius={[6, 6, 0, 0]} barSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div ref={barChartRef} className="h-[300px] w-full min-h-[300px] min-w-0" style={{ position: 'relative' }}>
+                {chartDimensions.bar.width > 0 && chartDimensions.bar.height > 0 ? (
+                  <ResponsiveContainer width={chartDimensions.bar.width} height={chartDimensions.bar.height}>
+                    <BarChart data={harvestData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
+                      <Tooltip 
+                        cursor={{fill: '#f9fafb'}}
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
+                      />
+                      <Bar dataKey="yield" fill="#10B981" radius={[6, 6, 0, 0]} barSize={40} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : null}
               </div>
             </CardContent>
           </Card>
@@ -424,27 +741,29 @@ const Dashboard = () => {
               <CardTitle className="text-lg font-bold text-gray-800">Current Mix</CardTitle>
             </CardHeader>
             <CardContent className="p-4">
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {(varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]).map((_entry, index) => (
-                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                    <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
+              <div ref={pieChartRef} className="h-[250px] w-full min-h-[250px] min-w-0" style={{ position: 'relative' }}>
+                {chartDimensions.pie.width > 0 && chartDimensions.pie.height > 0 ? (
+                  <ResponsiveContainer width={chartDimensions.pie.width} height={chartDimensions.pie.height}>
+                    <PieChart>
+                      <Pie
+                        data={varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {(varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]).map((_entry, index) => (
+                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : null}
               </div>
             </CardContent>
           </Card>

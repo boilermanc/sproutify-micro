@@ -220,18 +220,18 @@ const MixCalculatorPage = () => {
         .select(`
           *,
           recipes!inner(recipe_id, recipe_name, variety_name),
-          varieties!inner(variety_id, variety_name)
+          varieties!inner(varietyid, name)
         `)
         .eq('product_id', productId);
 
       if (error) throw error;
 
-      const normalizedMappings: MixMapping[] = (data || []).map((m: { recipe_id: number; variety_id: number; ratio?: number; recipes?: { recipe_name?: string }; varieties?: { variety_name?: string } }) => ({
+      const normalizedMappings: MixMapping[] = (data || []).map((m: { recipe_id: number; variety_id: number; ratio?: number; recipes?: { recipe_name?: string }; varieties?: { name?: string; variety_name?: string } }) => ({
         recipe_id: m.recipe_id,
         variety_id: m.variety_id,
         ratio: m.ratio || 1.0,
         recipe_name: m.recipes?.recipe_name || '',
-        variety_name: m.varieties?.variety_name || '',
+        variety_name: m.varieties?.name || m.varieties?.variety_name || '',
       }));
 
       setProductMix(normalizedMappings);

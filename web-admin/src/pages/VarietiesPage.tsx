@@ -22,10 +22,13 @@ const VarietiesPage = () => {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isBrowseCatalogOpen, setIsBrowseCatalogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingVariety, setEditingVariety] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [addingFromCatalog, setAddingFromCatalog] = useState(false);
+  const [allVarieties, setAllVarieties] = useState<any[]>([]); // All varieties (global catalog)
   const [newVariety, setNewVariety] = useState({
     variety_name: '',
     description: '',
@@ -49,11 +52,26 @@ const VarietiesPage = () => {
 
       // Fetch varieties from varieties_view filtered by farm_uuid
       // The view includes is_active from farm_varieties table
-      const { data, error } = await supabase
-        .from('varieties_view')
-        .select('*')
-        .eq('farm_uuid', farmUuid)
-        .order('name', { ascending: true });
+      // Fallback to varieties table if view doesn't exist
+      let data, error;
+      try {
+        const result = await supabase
+          .from('varieties_view')
+          .select('*')
+          .eq('farm_uuid', farmUuid)
+          .order('name', { ascending: true });
+        data = result.data;
+        error = result.error;
+      } catch (viewError) {
+        // If varieties_view doesn't exist, fallback to varieties table
+        console.warn('varieties_view not found, using varieties table:', viewError);
+        const result = await supabase
+          .from('varieties')
+          .select('varietyid, name, description, stock, stock_unit')
+          .order('name', { ascending: true });
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) throw error;
 
@@ -79,11 +97,98 @@ const VarietiesPage = () => {
     fetchVarieties();
   }, []);
 
+  const fetchAllVarieties = async () => {
+    try {
+      // Fetch all varieties from the global catalog (not filtered by farm)
+      const { data, error } = await supabase
+        .from('varieties')
+        .select('varietyid, name, description')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+
+      const normalized = (data || []).map((v: any) => ({
+        variety_id: v.varietyid || v.variety_id,
+        variety_name: v.name || v.variety_name || '',
+        description: v.description || '',
+      }));
+
+      setAllVarieties(normalized);
+    } catch (error) {
+      console.error('Error fetching all varieties:', error);
+    }
+  };
+
+
+  const handleAddFromCatalog = async (variety: any) => {
+    setAddingFromCatalog(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        alert('Session not found. Please refresh the page.');
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        alert('Farm UUID not found. Please refresh the page.');
+        return;
+      }
+
+      const varietyId = variety.variety_id;
+
+      // Check if variety is already in farm catalog
+      const { data: existing } = await supabase
+        .from('farm_varieties')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .eq('variety_id', varietyId)
+        .maybeSingle();
+
+      if (existing) {
+        alert('This variety is already in your catalog!');
+        return;
+      }
+
+      // Add variety to farm catalog by creating farm_varieties entry
+      const { error: insertError } = await supabase
+        .from('farm_varieties')
+        .insert({
+          farm_uuid: farmUuid,
+          variety_id: varietyId,
+          is_active: true,
+        });
+
+      if (insertError) throw insertError;
+
+      // Refresh the varieties list
+      fetchVarieties();
+      setIsBrowseCatalogOpen(false);
+    } catch (error: any) {
+      console.error('Error adding variety from catalog:', error);
+      alert(`Failed to add variety: ${error.message || 'Unknown error'}`);
+    } finally {
+      setAddingFromCatalog(false);
+    }
+  };
+
   const handleAddVariety = async () => {
     if (!newVariety.variety_name) return;
 
     setCreating(true);
     try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        alert('Session not found. Please refresh the page.');
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) {
+        alert('Farm UUID not found. Please refresh the page.');
+        return;
+      }
+
       // Use actual DB column names: name (not variety_name), no farm_uuid
       const payload = {
         name: newVariety.variety_name, // DB column is 'name'
@@ -93,11 +198,30 @@ const VarietiesPage = () => {
         // No farm_uuid - varieties are global
       };
 
-      const { error } = await supabase
+      const { data: newVarietyData, error } = await supabase
         .from('varieties')
-        .insert([payload]);
+        .insert([payload])
+        .select()
+        .single();
 
       if (error) throw error;
+
+      // Add the new variety to this farm's catalog
+      const varietyId = newVarietyData.varietyid || newVarietyData.variety_id;
+      if (varietyId) {
+        const { error: catalogError } = await supabase
+          .from('farm_varieties')
+          .insert({
+            farm_uuid: farmUuid,
+            variety_id: varietyId,
+            is_active: true,
+          });
+
+        if (catalogError) {
+          console.warn('Variety created but failed to add to catalog:', catalogError);
+          // Don't fail the whole operation, just warn
+        }
+      }
 
       setNewVariety({ variety_name: '', description: '', stock: 0, stock_unit: 'g' });
       setIsAddDialogOpen(false);
@@ -298,18 +422,78 @@ const VarietiesPage = () => {
           <p className="text-muted-foreground">Manage your microgreen catalog</p>
         </div>
         
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Variety
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+        <div className="flex gap-2">
+          <Dialog open={isBrowseCatalogOpen} onOpenChange={(open) => {
+            setIsBrowseCatalogOpen(open);
+            if (open) {
+              fetchAllVarieties();
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Package className="mr-2 h-4 w-4" />
+                Browse Catalog
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Browse Variety Catalog</DialogTitle>
+                <DialogDescription>
+                  Select varieties from the global catalog to add to your farm. You can also create custom varieties if you don't see what you need.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                {allVarieties.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>Loading catalog...</p>
+                  </div>
+                ) : (
+                  allVarieties.map((variety) => {
+                    const isInCatalog = varieties.some(v => v.variety_id === variety.variety_id);
+                    return (
+                      <div
+                        key={variety.variety_id}
+                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50"
+                      >
+                        <div className="flex-1">
+                          <div className="font-medium">{variety.variety_name}</div>
+                          {variety.description && (
+                            <div className="text-sm text-muted-foreground">{variety.description}</div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handleAddFromCatalog(variety)}
+                          disabled={isInCatalog || addingFromCatalog}
+                          variant={isInCatalog ? "secondary" : "default"}
+                        >
+                          {isInCatalog ? 'Already Added' : 'Add to Catalog'}
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsBrowseCatalogOpen(false)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Custom Variety
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Add New Variety</DialogTitle>
+              <DialogTitle>Add Custom Variety</DialogTitle>
               <DialogDescription>
-                Add a new microgreen variety to your catalog.
+                Create a custom variety that's not in the catalog. If you're looking for common varieties, try browsing the catalog first.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -440,6 +624,7 @@ const VarietiesPage = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="flex items-center space-x-4">

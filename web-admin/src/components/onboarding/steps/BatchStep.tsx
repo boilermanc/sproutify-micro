@@ -93,6 +93,38 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
 
       if (insertError) throw insertError;
 
+      // Automatically add variety to farm catalog if not already there
+      if (data && varietyId) {
+        try {
+          // Check if variety is already in farm catalog
+          const { data: existingCatalogEntry } = await supabase
+            .from('farm_varieties')
+            .select('*')
+            .eq('farm_uuid', farmUuid)
+            .eq('variety_id', varietyId)
+            .maybeSingle();
+
+          // If not in catalog, add it
+          if (!existingCatalogEntry) {
+            const { error: catalogError } = await supabase
+              .from('farm_varieties')
+              .insert({
+                farm_uuid: farmUuid,
+                variety_id: varietyId,
+                is_active: true,
+              });
+
+            if (catalogError) {
+              console.warn('Batch created but failed to add variety to catalog:', catalogError);
+              // Don't fail the whole operation
+            }
+          }
+        } catch (catalogErr) {
+          console.warn('Error adding variety to catalog:', catalogErr);
+          // Don't fail the batch creation if catalog update fails
+        }
+      }
+
       if (data) {
         onDataCreated(data.batchid || data.batch_id); // Actual column: batchid
         setTimeout(() => {

@@ -31,9 +31,22 @@ const CustomersPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [newCustomer, setNewCustomer] = useState<any>({
+    customer_name: '',
+    email: '',
+    phone: '',
+    address: '',
+    delivery_address: '',
+    preferred_delivery_days: [],
+    delivery_instructions: '',
+    payment_instructions: '',
+    notes: '',
+  });
   const [updating, setUpdating] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     fetchCustomers();
@@ -50,6 +63,70 @@ const CustomersPage = () => {
       customer_id: customer.customer_id,
     });
     setIsEditDialogOpen(true);
+  };
+
+  const handleCreateCustomer = async () => {
+    if (!newCustomer.customer_name) {
+      alert('Customer name is required');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      const { farmUuid } = JSON.parse(sessionData);
+
+      // Parse address into components
+      const addressParts = newCustomer.address?.split(',') || [];
+      const billingstreet = addressParts[0]?.trim() || null;
+      const billingcity = addressParts[1]?.trim() || null;
+      const stateZip = addressParts[2]?.trim()?.split(' ') || [];
+      const billingstate = stateZip[0] || null;
+      const billingpostalcode = stateZip[1] || null;
+
+      // Map to actual DB column names
+      const insertPayload: any = {
+        name: newCustomer.customer_name,
+        email: newCustomer.email || null,
+        contactnumber: newCustomer.phone || null,
+        billingstreet,
+        billingcity,
+        billingstate,
+        billingpostalcode,
+        delivery_instructions: newCustomer.delivery_instructions || null,
+        payment_instructions: newCustomer.payment_instructions || null,
+        notes: newCustomer.notes || null,
+        preferred_delivery_days: newCustomer.preferred_delivery_days?.length > 0 ? newCustomer.preferred_delivery_days : null,
+        delivery_address: newCustomer.delivery_address || null,
+        farm_uuid: farmUuid,
+      };
+
+      const { error } = await supabase
+        .from('customers')
+        .insert(insertPayload);
+
+      if (error) throw error;
+
+      setIsAddDialogOpen(false);
+      setNewCustomer({
+        customer_name: '',
+        email: '',
+        phone: '',
+        address: '',
+        delivery_address: '',
+        preferred_delivery_days: [],
+        delivery_instructions: '',
+        payment_instructions: '',
+        notes: '',
+      });
+      fetchCustomers();
+    } catch (error) {
+      console.error('Error creating customer:', error);
+      alert('Failed to create customer');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleUpdateCustomer = async () => {
@@ -165,7 +242,7 @@ const CustomersPage = () => {
           <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
           <p className="text-muted-foreground">Manage your customer relationships</p>
         </div>
-        <Button onClick={() => alert('Create Customer feature coming soon!')}>
+        <Button onClick={() => setIsAddDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Customer
         </Button>
@@ -270,8 +347,8 @@ const CustomersPage = () => {
 
       {/* View Customer Details Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-5 w-5 text-blue-600" />
               Customer Details
@@ -281,7 +358,7 @@ const CustomersPage = () => {
             </DialogDescription>
           </DialogHeader>
           {viewingCustomer && (
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 px-6 overflow-y-auto flex-1 min-h-0">
               <div className="grid gap-2">
                 <Label className="text-sm font-semibold text-muted-foreground">Name</Label>
                 <p className="text-base font-semibold">{viewingCustomer.customer_name}</p>
@@ -370,7 +447,7 @@ const CustomersPage = () => {
               )}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="px-6 pb-6 pt-4">
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
             </Button>
@@ -388,15 +465,15 @@ const CustomersPage = () => {
 
       {/* Edit Customer Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
             <DialogTitle>Edit Customer</DialogTitle>
             <DialogDescription>
               Update customer information
             </DialogDescription>
           </DialogHeader>
           {editingCustomer && (
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-4 px-6 overflow-y-auto flex-1 min-h-0">
               <div className="grid gap-2">
                 <Label htmlFor="edit-name">Name *</Label>
                 <Input
@@ -507,12 +584,145 @@ const CustomersPage = () => {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="px-6 pb-6 pt-4">
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel
             </Button>
             <Button onClick={handleUpdateCustomer} disabled={updating || !editingCustomer?.customer_name}>
               {updating ? 'Updating...' : 'Update Customer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Customer Dialog */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogTitle>Add New Customer</DialogTitle>
+            <DialogDescription>
+              Create a new customer profile
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 px-6 overflow-y-auto flex-1 min-h-0">
+            <div className="grid gap-2">
+              <Label htmlFor="add-name">Name *</Label>
+              <Input
+                id="add-name"
+                value={newCustomer.customer_name}
+                onChange={(e) => setNewCustomer({ ...newCustomer, customer_name: e.target.value })}
+                placeholder="Customer name"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="add-email">Email</Label>
+                <Input
+                  id="add-email"
+                  type="email"
+                  value={newCustomer.email}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                  placeholder="email@example.com"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="add-phone">Phone</Label>
+                <Input
+                  id="add-phone"
+                  type="tel"
+                  value={newCustomer.phone}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                  placeholder="(555) 123-4567"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="add-address">Billing Address</Label>
+              <Textarea
+                id="add-address"
+                value={newCustomer.address}
+                onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
+                placeholder="Street, City, State, Postal Code"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="add-delivery-address">Delivery Address</Label>
+              <Textarea
+                id="add-delivery-address"
+                value={newCustomer.delivery_address}
+                onChange={(e) => setNewCustomer({ ...newCustomer, delivery_address: e.target.value })}
+                placeholder="Leave blank to use billing address"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Preferred Delivery Days</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => {
+                  const isSelected = newCustomer.preferred_delivery_days?.includes(day) || false;
+                  return (
+                    <Button
+                      key={day}
+                      type="button"
+                      variant={isSelected ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        const currentDays = newCustomer.preferred_delivery_days || [];
+                        const newDays = isSelected
+                          ? currentDays.filter((d: string) => d !== day)
+                          : [...currentDays, day];
+                        setNewCustomer({ ...newCustomer, preferred_delivery_days: newDays });
+                      }}
+                    >
+                      {day}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="add-delivery-instructions">Delivery Instructions</Label>
+              <Textarea
+                id="add-delivery-instructions"
+                value={newCustomer.delivery_instructions}
+                onChange={(e) => setNewCustomer({ ...newCustomer, delivery_instructions: e.target.value })}
+                placeholder="Special delivery instructions..."
+                rows={2}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="add-payment-instructions">Payment Instructions</Label>
+              <Textarea
+                id="add-payment-instructions"
+                value={newCustomer.payment_instructions}
+                onChange={(e) => setNewCustomer({ ...newCustomer, payment_instructions: e.target.value })}
+                placeholder="Payment preferences and instructions..."
+                rows={2}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="add-notes">Notes</Label>
+              <Textarea
+                id="add-notes"
+                value={newCustomer.notes}
+                onChange={(e) => setNewCustomer({ ...newCustomer, notes: e.target.value })}
+                placeholder="General notes about this customer..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter className="px-6 pb-6 pt-4">
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateCustomer} disabled={creating || !newCustomer.customer_name}>
+              {creating ? 'Creating...' : 'Create Customer'}
             </Button>
           </DialogFooter>
         </DialogContent>

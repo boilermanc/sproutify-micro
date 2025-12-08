@@ -13,6 +13,7 @@ import MixCalculatorPage from './pages/MixCalculatorPage';
 import BatchesPage from './pages/BatchesPage';
 import OrdersPage from './pages/OrdersPage';
 import StandingOrdersPage from './pages/StandingOrdersPage';
+import PlantingSchedulePage from './pages/PlantingSchedulePage';
 import WeeklyTasksPage from './pages/WeeklyTasksPage';
 import CustomersPage from './pages/CustomersPage';
 import VendorsPage from './pages/VendorsPage';
@@ -125,6 +126,7 @@ function App() {
           <Route path="batches" element={<BatchesPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="standing-orders" element={<StandingOrdersPage />} />
+          <Route path="planting-schedule" element={<PlantingSchedulePage />} />
           <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="vendors" element={<VendorsPage />} />

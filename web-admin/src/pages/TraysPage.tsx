@@ -402,9 +402,10 @@ const TraysPage = () => {
         }
 
         // Check if there's at least one batch for this variety with sufficient quantity
-        const hasAvailableBatch = (batchesData || []).some((batch: any) => {
-          return batch.varietyid === varietyId && 
-                 batch.quantity >= seedQuantityNeeded;
+        const batchesForVariety = (batchesData || []).filter((b: any) => b.varietyid === varietyId);
+        const hasAvailableBatch = batchesForVariety.some((batch: any) => {
+          const batchQuantity = parseFloat(batch.quantity) || 0;
+          return batchQuantity >= seedQuantityNeeded;
         });
 
         if (!hasAvailableBatch) {
@@ -413,7 +414,12 @@ const TraysPage = () => {
             recipe_name: recipe.recipe_name,
             varietyId,
             seedQuantityNeeded,
-            availableBatches: (batchesData || []).filter((b: any) => b.varietyid === varietyId).map((b: any) => ({ batchid: b.batchid, quantity: b.quantity }))
+            availableBatches: batchesForVariety.map((b: any) => ({ 
+              batchid: b.batchid, 
+              quantity: b.quantity,
+              quantityParsed: parseFloat(b.quantity) || 0,
+              meetsRequirement: (parseFloat(b.quantity) || 0) >= seedQuantityNeeded
+            }))
           });
         }
 

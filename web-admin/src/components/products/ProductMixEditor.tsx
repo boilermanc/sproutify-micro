@@ -17,6 +17,7 @@ interface Recipe {
   recipe_id: number;
   recipe_name: string;
   variety_name: string;
+  variety_id?: number;
 }
 
 interface Variety {
@@ -46,8 +47,8 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newMapping, setNewMapping] = useState({
-    recipe_id: '',
     variety_id: '',
+    recipe_id: '',
     ratio: '1.0',
   });
 
@@ -71,7 +72,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
         .select(`
           *,
           recipes!inner(recipe_id, recipe_name, variety_name),
-          varieties!inner(variety_id, variety_name)
+          varieties!inner(varietyid, name)
         `)
         .eq('product_id', product.product_id);
 
@@ -80,18 +81,18 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
       // Normalize mappings
       const normalizedMappings = (mappingsData || []).map((m: any) => ({
         recipe_id: m.recipe_id,
-        variety_id: m.variety_id,
+        variety_id: m.variety_id, // This comes from product_recipe_mapping table
         ratio: m.ratio || 1.0,
         recipe_name: m.recipes?.recipe_name || '',
-        variety_name: m.varieties?.variety_name || '',
+        variety_name: m.varieties?.variety_name || m.varieties?.name || '',
       }));
 
       setMappings(normalizedMappings);
 
-      // Fetch recipes
+      // Fetch recipes with variety_id if available
       const { data: recipesData, error: recipesError } = await supabase
         .from('recipes')
-        .select('recipe_id, recipe_name, variety_name')
+        .select('recipe_id, recipe_name, variety_name, variety_id')
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true)
         .order('recipe_name', { ascending: true });
@@ -99,19 +100,20 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
       if (recipesError) throw recipesError;
       setRecipes(recipesData || []);
 
-      // Fetch varieties
+      // Fetch varieties from varieties_view (farm-specific catalog)
+      // This shows only varieties that have been added to your farm's catalog
       const { data: varietiesData, error: varietiesError } = await supabase
-        .from('varieties')
-        .select('variety_id, variety_name')
-        .eq('is_active', true)
-        .order('variety_name', { ascending: true });
+        .from('varieties_view')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .order('name', { ascending: true });
 
       if (varietiesError) throw varietiesError;
       
       // Normalize varieties (handle both column name formats)
       const normalizedVarieties = (varietiesData || []).map((v: any) => ({
         variety_id: v.varietyid || v.variety_id,
-        variety_name: v.name || v.variety_name,
+        variety_name: v.name || v.variety_name || '',
       }));
 
       setVarieties(normalizedVarieties);
@@ -122,8 +124,32 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
     }
   };
 
+  // Filter recipes based on selected variety
+  const getFilteredRecipes = () => {
+    if (!newMapping.variety_id) return [];
+    
+    const selectedVarietyId = parseInt(newMapping.variety_id);
+    // Filter to show only recipes that match the selected variety
+    return recipes.filter(r => r.variety_id === selectedVarietyId);
+  };
+
+  // Auto-select recipe when variety is selected (if only one matching recipe exists)
+  const handleVarietyChange = (varietyId: string) => {
+    const updatedMapping = { ...newMapping, variety_id: varietyId, recipe_id: '' };
+    
+    // Find recipes matching this variety
+    const matchingRecipes = recipes.filter(r => r.variety_id === parseInt(varietyId));
+    
+    // Auto-select recipe if there's exactly one match
+    if (matchingRecipes.length === 1) {
+      updatedMapping.recipe_id = matchingRecipes[0].recipe_id.toString();
+    }
+    
+    setNewMapping(updatedMapping);
+  };
+
   const handleAddMapping = () => {
-    if (!newMapping.recipe_id || !newMapping.variety_id) return;
+    if (!newMapping.variety_id || !newMapping.recipe_id) return;
 
     const recipe = recipes.find(r => r.recipe_id.toString() === newMapping.recipe_id);
     const variety = varieties.find(v => v.variety_id.toString() === newMapping.variety_id);
@@ -137,7 +163,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
     };
 
     setMappings([...mappings, mapping]);
-    setNewMapping({ recipe_id: '', variety_id: '', ratio: '1.0' });
+    setNewMapping({ variety_id: '', recipe_id: '', ratio: '1.0' });
   };
 
   const handleRemoveMapping = (index: number) => {
@@ -187,7 +213,8 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
         <DialogHeader>
           <DialogTitle>Product Mix Configuration - {product.product_name}</DialogTitle>
           <DialogDescription>
-            Configure which crops and recipes are used in this product mix for the mix calculator
+            Select varieties from your catalog and matching recipes to configure this product mix. 
+            Add varieties to your catalog in the Varieties page if needed.
           </DialogDescription>
         </DialogHeader>
 
@@ -199,40 +226,65 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
               <h3 className="font-semibold">Add Crop to Mix</h3>
               <div className="grid grid-cols-4 gap-4">
                 <div>
-                  <Label htmlFor="recipe">Recipe</Label>
-                  <Select
-                    value={newMapping.recipe_id}
-                    onValueChange={(value) => setNewMapping({ ...newMapping, recipe_id: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select recipe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {recipes.map((recipe) => (
-                        <SelectItem key={recipe.recipe_id} value={recipe.recipe_id.toString()}>
-                          {recipe.recipe_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="variety">Variety</Label>
+                  <Label htmlFor="variety">Variety *</Label>
                   <Select
                     value={newMapping.variety_id}
-                    onValueChange={(value) => setNewMapping({ ...newMapping, variety_id: value })}
+                    onValueChange={handleVarietyChange}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select variety" />
                     </SelectTrigger>
                     <SelectContent>
-                      {varieties.map((variety) => (
-                        <SelectItem key={variety.variety_id} value={variety.variety_id.toString()}>
-                          {variety.variety_name}
+                      {varieties.length === 0 ? (
+                        <SelectItem value="none" disabled>
+                          No varieties in your catalog. Add varieties in the Varieties page.
                         </SelectItem>
-                      ))}
+                      ) : (
+                        varieties.map((variety) => (
+                          <SelectItem key={variety.variety_id} value={variety.variety_id.toString()}>
+                            {variety.variety_name}
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
+                  {varieties.length === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Add varieties to your catalog in the <a href="/varieties" className="underline">Varieties page</a>
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="recipe">Recipe *</Label>
+                  <Select
+                    value={newMapping.recipe_id}
+                    onValueChange={(value) => setNewMapping({ ...newMapping, recipe_id: value })}
+                    disabled={!newMapping.variety_id}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={newMapping.variety_id ? "Select recipe" : "Select variety first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getFilteredRecipes().length === 0 ? (
+                        <SelectItem value="none" disabled>
+                          {newMapping.variety_id 
+                            ? "No recipes found for this variety. Create a recipe in the Recipes page." 
+                            : "Select a variety first"}
+                        </SelectItem>
+                      ) : (
+                        getFilteredRecipes().map((recipe) => (
+                          <SelectItem key={recipe.recipe_id} value={recipe.recipe_id.toString()}>
+                            {recipe.recipe_name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {newMapping.variety_id && getFilteredRecipes().length === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Create a recipe for this variety in the <a href="/recipes" className="underline">Recipes page</a>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="ratio">Ratio</Label>
@@ -259,8 +311,8 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Recipe</TableHead>
                       <TableHead>Variety</TableHead>
+                      <TableHead>Recipe</TableHead>
                       <TableHead>Ratio</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -268,8 +320,8 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
                   <TableBody>
                     {mappings.map((mapping, index) => (
                       <TableRow key={`${mapping.recipe_id}-${mapping.variety_id}`}>
-                        <TableCell>{mapping.recipe_name || 'Unknown'}</TableCell>
                         <TableCell>{mapping.variety_name || 'Unknown'}</TableCell>
+                        <TableCell>{mapping.recipe_name || 'Unknown'}</TableCell>
                         <TableCell>{mapping.ratio}</TableCell>
                         <TableCell className="text-right">
                           <Button

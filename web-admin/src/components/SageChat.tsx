@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import './SageChat.css';
 
 const SageChat = () => {
@@ -53,14 +54,14 @@ const SageChat = () => {
   return (
     <>
       <button className="sage-button" onClick={toggleChat} aria-label="Open Sage chat">
-        <span className="sage-icon">🌱</span>
+        <Sparkles className="sage-icon" size={24} color="white" />
       </button>
 
       {isOpen && (
         <div className="sage-chat-container">
           <div className="sage-chat-header">
             <div className="sage-header-content">
-              <span className="sage-icon">🌱</span>
+              <Sparkles className="sage-icon" size={20} color="white" />
               <div>
                 <h3>Sage</h3>
                 <p>Your Sproutify Assistant</p>

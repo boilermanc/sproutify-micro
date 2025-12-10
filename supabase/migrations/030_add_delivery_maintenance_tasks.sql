@@ -21,3 +21,4 @@ CREATE INDEX IF NOT EXISTS idx_weekly_tasks_task_description ON weekly_tasks(tas
 COMMENT ON COLUMN weekly_tasks.task_description IS 'Description for custom tasks like "Clean Trays"';
 COMMENT ON COLUMN weekly_tasks.recipe_id IS 'Recipe ID, NULL for custom tasks like maintenance';
 
+

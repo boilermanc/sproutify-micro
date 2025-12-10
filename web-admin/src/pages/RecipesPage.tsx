@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, X } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
 
 const RecipesPage = () => {
   const navigate = useNavigate();
@@ -33,7 +32,6 @@ const RecipesPage = () => {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [supplies, setSupplies] = useState<any[]>([]);
-  const [useGlobalRecipe, setUseGlobalRecipe] = useState(false);
   const [selectedGlobalRecipeId, setSelectedGlobalRecipeId] = useState<string>('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recipeToDelete, setRecipeToDelete] = useState<any>(null);
@@ -520,7 +518,6 @@ const RecipesPage = () => {
 
       setNewRecipe({ recipe_name: '', variety_id: '', type: 'Standard', seed_quantity: null, seed_quantity_unit: 'grams', media_supply_id: '', media_amount: '', media_unit: '' });
       setNewRecipeSteps([]);
-      setUseGlobalRecipe(false);
       setSelectedGlobalRecipeId('');
       setIsAddDialogOpen(false);
       fetchRecipes();
@@ -1966,7 +1963,6 @@ const RecipesPage = () => {
                           onClick={() => {
                             // Open copy dialog by selecting this global recipe
                             setSelectedGlobalRecipeId(recipe.global_recipe_id.toString());
-                            setUseGlobalRecipe(true);
                             handleGlobalRecipeSelect(recipe.global_recipe_id.toString());
                             setIsAddDialogOpen(true);
                           }}

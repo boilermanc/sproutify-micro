@@ -17,3 +17,4 @@ ALTER TABLE steps ADD COLUMN IF NOT EXISTS water_frequency TEXT;
 
 COMMENT ON COLUMN steps.water_frequency IS 'Watering frequency: 1x daily, 2x daily, 3x daily, or custom. Used for blackout and growing steps when water_type is set.';
 
+

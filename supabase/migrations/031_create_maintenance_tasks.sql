@@ -38,3 +38,4 @@ COMMENT ON TABLE maintenance_tasks IS 'Custom maintenance tasks that repeat week
 COMMENT ON COLUMN maintenance_tasks.day_of_week IS 'Day of week (0=Sunday, 1=Monday, etc.). NULL = default to Monday';
 COMMENT ON COLUMN maintenance_tasks.task_date IS 'Specific date for one-time tasks. NULL = recurring weekly';
 
+

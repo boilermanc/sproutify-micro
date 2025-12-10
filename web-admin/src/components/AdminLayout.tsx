@@ -10,7 +10,6 @@ import {
   Package,
   ShoppingBasket,
   FileText,
-  Building2,
   LogOut,
   Menu,
   X,

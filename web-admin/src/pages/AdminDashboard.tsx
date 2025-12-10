@@ -10,8 +10,7 @@ import {
   Sprout, 
   Package, 
   ShoppingBasket,
-  ClipboardList,
-  TrendingUp
+  ClipboardList
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -292,4 +291,5 @@ const DashboardSkeleton = () => (
 );
 
 export default AdminDashboard;
+
 

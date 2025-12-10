@@ -10,10 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   RefreshCcw, 
-  Bell,
   Send,
   Search,
-  X,
   CheckCircle2,
   Circle
 } from 'lucide-react';

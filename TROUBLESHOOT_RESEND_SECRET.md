@@ -56,3 +56,4 @@ Check function logs after sending email:
 - Look for "=== DEBUG: All environment variables ==="
 - This will show what secrets are actually available
 
+

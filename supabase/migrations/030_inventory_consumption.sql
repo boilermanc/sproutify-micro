@@ -200,3 +200,4 @@ AFTER INSERT ON trays
 FOR EACH ROW
 EXECUTE FUNCTION handle_tray_inventory_deduction();
 
+

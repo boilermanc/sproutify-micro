@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
 import VarietiesPage from './pages/VarietiesPage';
 import RecipesPage from './pages/RecipesPage';
+import RecipeBuilderPage from './pages/RecipeBuilder';
 import GlobalRecipesPage from './pages/GlobalRecipesPage';
 import ProductsPage from './pages/ProductsPage';
 import MixCalculatorPage from './pages/MixCalculatorPage';
@@ -24,6 +25,18 @@ import SettingsPage from './pages/SettingsPage';
 import DailyFlow from './components/DailyFlow';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
+import AdminLogin from './pages/AdminLogin';
+import RequireAdmin from './components/RequireAdmin';
+import AdminLayout from './components/AdminLayout';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminFarmsUsers from './pages/AdminFarmsUsers';
+import AdminRecipesVarieties from './pages/AdminRecipesVarieties';
+import AdminTraysBatches from './pages/AdminTraysBatches';
+import AdminCustomersOrders from './pages/AdminCustomersOrders';
+import AdminProducts from './pages/AdminProducts';
+import AdminNotifications from './pages/AdminNotifications';
+import AdminEmailBroadcast from './pages/AdminEmailBroadcast';
+import AdminEmailEvents from './pages/AdminEmailEvents';
 import './App.css';
 
 function App() {
@@ -37,20 +50,38 @@ function App() {
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (session && !error) {
-          // Verify session is still valid and get user profile
-          const { data: profile } = await supabase
+          // Skip profile check for admin users (team@sproutify.app)
+          // Admin users are handled by RequireAdmin component
+          if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
+            // Admin user - check if they have admin session
+            const adminSession = localStorage.getItem('sproutify_admin_session');
+            if (adminSession) {
+              // Admin is logged in, but not authenticated for regular app
+              setIsAuthenticated(false);
+            } else {
+              setIsAuthenticated(false);
+            }
+            return;
+          }
+
+          // Regular user - verify session and get user profile
+          const { data: profile, error: profileError } = await supabase
             .from('profile')
             .select('*, farms(*)')
             .eq('id', session.user.id)
             .single();
 
-          if (profile) {
+          if (profile && !profileError) {
             const sessionPayload = await buildSessionPayload(profile, {
               email: session.user.email,
               userId: session.user.id,
             });
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
             setIsAuthenticated(true);
+          } else {
+            // Profile not found or error - clear session
+            localStorage.removeItem('sproutify_session');
+            setIsAuthenticated(false);
           }
         } else {
           localStorage.removeItem('sproutify_session');
@@ -105,6 +136,29 @@ function App() {
   return (
     <Router basename="/admin">
       <Routes>
+        {/* Admin Portal Routes */}
+        <Route path="/admin-portal/login" element={<AdminLogin />} />
+        
+        <Route path="/admin-portal" element={
+          <RequireAdmin>
+            <AdminLayout onLogout={async () => {
+              await supabase.auth.signOut();
+              localStorage.removeItem('sproutify_admin_session');
+            }} />
+          </RequireAdmin>
+        }>
+          <Route index element={<AdminDashboard />} />
+          <Route path="farms-users" element={<AdminFarmsUsers />} />
+          <Route path="recipes-varieties" element={<AdminRecipesVarieties />} />
+          <Route path="trays-batches" element={<AdminTraysBatches />} />
+          <Route path="customers-orders" element={<AdminCustomersOrders />} />
+          <Route path="products" element={<AdminProducts />} />
+          <Route path="notifications" element={<AdminNotifications />} />
+          <Route path="email-broadcast" element={<AdminEmailBroadcast />} />
+          <Route path="email-events" element={<AdminEmailEvents />} />
+        </Route>
+
+        {/* Regular User Routes */}
         <Route path="/login" element={
           isAuthenticated ? <Navigate to="/" /> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
         } />
@@ -120,6 +174,7 @@ function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="varieties" element={<VarietiesPage />} />
           <Route path="recipes" element={<RecipesPage />} />
+          <Route path="recipes/builder" element={<RecipeBuilderPage />} />
           <Route path="global-recipes" element={<GlobalRecipesPage />} />
           <Route path="products" element={<ProductsPage />} />
           <Route path="mix-calculator" element={<MixCalculatorPage />} />

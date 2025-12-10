@@ -46,6 +46,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
   const navItems = [
     { to: "/", icon: LayoutDashboard, label: "Dashboard", end: true },
     { to: "/flow", icon: Calendar, label: "Daily Flow" },
+    { to: "/weekly-tasks", icon: CheckSquare, label: "Weekly Tasks" },
     { to: "/trays", icon: ShoppingBasket, label: "Trays" },
     { to: "/planting-schedule", icon: CalendarDays, label: "Planting Schedule" },
     { to: "/varieties", icon: Sprout, label: "Varieties" },
@@ -56,7 +57,6 @@ const Layout = ({ onLogout }: LayoutProps) => {
     { to: "/batches", icon: Package, label: "Batches" },
     { to: "/orders", icon: FileText, label: "Orders" },
     { to: "/standing-orders", icon: Repeat, label: "Standing Orders" },
-    { to: "/weekly-tasks", icon: CheckSquare, label: "Weekly Tasks" },
     { to: "/customers", icon: Building2, label: "Customers" },
     { to: "/vendors", icon: Truck, label: "Vendors" },
     { to: "/supplies", icon: ClipboardList, label: "Supplies" },

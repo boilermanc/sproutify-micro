@@ -34,7 +34,9 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
           recipe_id,
           recipe_name,
           variety_id,
-          varieties!inner(varietyid, name, seed_quantity_grams)
+          varieties!inner(varietyid, name, seed_quantity_grams),
+          seed_quantity,
+          seed_quantity_unit
         `)
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
@@ -54,7 +56,15 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       // Filter recipes to only include those with available inventory
       const recipesWithInventory = allRecipesData.filter((recipe: any) => {
         const varietyId = recipe.variety_id || recipe.varieties?.varietyid;
-        const seedQuantityNeeded = recipe.varieties?.seed_quantity_grams || 0;
+        // Use recipe seed_quantity if available, fallback to variety seed_quantity_grams
+        // Convert to grams for comparison (batches are stored in grams)
+        let seedQuantityNeeded = 0;
+        if (recipe.seed_quantity) {
+          const unit = recipe.seed_quantity_unit || 'grams';
+          seedQuantityNeeded = unit === 'oz' ? recipe.seed_quantity * 28.35 : recipe.seed_quantity; // Convert oz to grams
+        } else {
+          seedQuantityNeeded = recipe.varieties?.seed_quantity_grams || 0;
+        }
         
         if (!varietyId || !seedQuantityNeeded) return false;
 

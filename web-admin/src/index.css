@@ -23,7 +23,7 @@
     --destructive: 0 75% 45%;
     --destructive-foreground: 0 0% 100%;
     --border: 210 18% 85%;
-    --input: 210 18% 85%;
+    --input: 210 10% 92%;
     --ring: 159 84% 39%;
     --radius: 1rem;
     --font-sans: 'Space Grotesk', 'Inter', 'Segoe UI', system-ui, -apple-system,
@@ -54,10 +54,6 @@
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
-
   body {
     @apply bg-background text-foreground antialiased;
     min-height: 100vh;

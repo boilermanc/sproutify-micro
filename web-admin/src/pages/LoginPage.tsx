@@ -201,6 +201,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
     setLoading(true);
 
     try {
+      // Check if email is team@sproutify.app - redirect to admin portal
+      if (email.toLowerCase() === 'team@sproutify.app') {
+        navigate('/admin-portal/login');
+        return;
+      }
+
       // Authenticate with Supabase
       const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
         email,

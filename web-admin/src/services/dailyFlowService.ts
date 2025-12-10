@@ -200,6 +200,10 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         currentStep = steps[0];
       }
 
+      // Calculate which day we are within the current step (1-based)
+      let daysIntoCurrentStep = daysSinceSow - daysIntoRecipe;
+      if (daysIntoCurrentStep < 1) daysIntoCurrentStep = 1;
+
       // Determine action from step description
       const stepDesc = (currentStep.description_name || currentStep.step_description || '').toLowerCase();
       let action = 'Water'; // Default
@@ -219,6 +223,106 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
       const skippedSteps = skippedStepsMap[tray.tray_id] || new Set();
       const isStepCompleted = completedSteps.has(currentStep.step_id);
       const isStepSkipped = skippedSteps.has(currentStep.step_id);
+
+      // Generate tasks based on structured step fields (for Blackout and Germination steps)
+      const tasksToCreate: Array<{action: string, stepId?: number, stepDescription?: string}> = [];
+      const isBlackoutStep = stepDesc.includes('blackout');
+      const isGerminationStep = stepDesc.includes('germination');
+
+      // 1. Check for weighted dome setup task (on first day of blackout or germination step)
+      if ((isBlackoutStep || isGerminationStep) && currentStep.requires_weight && daysIntoCurrentStep === 1 && !isStepCompleted && !isStepSkipped) {
+        const weightText = currentStep.weight_lbs ? ` (${currentStep.weight_lbs} lbs)` : '';
+        tasksToCreate.push({
+          action: `Setup Weighted Dome${weightText}`,
+          stepId: currentStep.step_id,
+          stepDescription: `Setup weighted dome${weightText} for ${currentStep.description_name || 'this step'}`
+        });
+      }
+
+      // 2. Check for water/misting/nutrients tasks (recurring during blackout step)
+      const mistingFreq = currentStep.misting_frequency || 'none';
+      const waterType = currentStep.water_type;
+      const waterFreq = currentStep.water_frequency;
+      const waterMethod = currentStep.water_method;
+      const mistingStartDay = currentStep.misting_start_day || 0;
+      const doNotDisturbDays = currentStep.do_not_disturb_days || 0;
+      const actualStartDay = Math.max(mistingStartDay, doNotDisturbDays) + 1; // +1 because daysIntoCurrentStep is 1-based
+
+      if (isBlackoutStep && 
+          daysIntoCurrentStep >= actualStartDay && 
+          !isStepCompleted && 
+          !isStepSkipped) {
+        
+        // Check for Mist option (misting_frequency is set and water_type is not set)
+        if (mistingFreq !== 'none' && !waterType) {
+          let needsMistingToday = false;
+          
+          if (mistingFreq === '1x daily' || mistingFreq === '2x daily' || mistingFreq === '3x daily' || mistingFreq === 'custom') {
+            needsMistingToday = true;
+          }
+
+          if (needsMistingToday) {
+            const mistingCount = mistingFreq === '2x daily' ? '2x' : mistingFreq === '3x daily' ? '3x' : '1x';
+            tasksToCreate.push({
+              action: `Mist ${mistingCount}`,
+              stepId: currentStep.step_id,
+              stepDescription: `Mist ${mistingCount} - ${currentStep.description_name || 'this step'}`
+            });
+          }
+        }
+        
+        // Check for Water option (water_type is 'water')
+        if (waterType === 'water' && waterFreq) {
+          let needsWateringToday = false;
+          
+          if (waterFreq === '1x daily' || waterFreq === '2x daily' || waterFreq === '3x daily' || waterFreq === 'custom') {
+            needsWateringToday = true;
+          }
+
+          if (needsWateringToday) {
+            const waterCount = waterFreq === '2x daily' ? '2x' : waterFreq === '3x daily' ? '3x' : '1x';
+            const methodText = waterMethod === 'bottom' ? ' (Bottom)' : ' (Top)';
+            tasksToCreate.push({
+              action: `Water ${waterCount}${methodText}`,
+              stepId: currentStep.step_id,
+              stepDescription: `Water ${waterCount}${methodText} - ${currentStep.description_name || 'this step'}`
+            });
+          }
+        }
+        
+        // Check for Nutrients option (water_type is 'nutrients')
+        if (waterType === 'nutrients' && waterFreq) {
+          let needsNutrientsToday = false;
+          
+          if (waterFreq === '1x daily' || waterFreq === '2x daily' || waterFreq === '3x daily' || waterFreq === 'custom') {
+            needsNutrientsToday = true;
+          }
+
+          if (needsNutrientsToday) {
+            const nutrientsCount = waterFreq === '2x daily' ? '2x' : waterFreq === '3x daily' ? '3x' : '1x';
+            const methodText = waterMethod === 'bottom' ? ' (Bottom)' : ' (Top)';
+            tasksToCreate.push({
+              action: `Water (Nutrients) ${nutrientsCount}${methodText}`,
+              stepId: currentStep.step_id,
+              stepDescription: `Water (Nutrients) ${nutrientsCount}${methodText} - ${currentStep.description_name || 'this step'}`
+            });
+          }
+        }
+      }
+
+      // 3. If no structured tasks, use the default action from step description
+      if (tasksToCreate.length === 0) {
+        // For watering tasks, include water type if specified
+        let finalAction = action;
+        if (action === 'Water' && currentStep.water_type) {
+          finalAction = currentStep.water_type === 'nutrients' ? 'Water (Nutrients)' : 'Water (Plain)';
+        }
+        tasksToCreate.push({
+          action: finalAction,
+          stepId: currentStep.step_id,
+          stepDescription: currentStep.description_name || currentStep.step_description || ''
+        });
+      }
 
       // Identify missed steps (steps before current day that weren't completed or skipped)
       const missedSteps: MissedStep[] = [];
@@ -285,44 +389,48 @@ export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
         }
       }
 
-      // Create a task key for grouping
+      // Create tasks for each task type
       const varietyName = (recipe as any).variety_name || recipe.recipe_name || 'Unknown';
-      const taskKey = `${action}-${varietyName}-${currentStep.step_id}`;
       const batchId = tray.batch_id ? `B-${tray.batch_id}` : 'N/A';
       const location = tray.location || 'Not set';
 
-      if (taskMap[taskKey]) {
-        // Group similar tasks
-        taskMap[taskKey].trays += 1;
-        taskMap[taskKey].trayIds.push(tray.tray_id);
-        // Merge missed steps
-        if (missedSteps.length > 0 && taskMap[taskKey].missedSteps) {
-          for (const missed of missedSteps) {
-            const existing = taskMap[taskKey].missedSteps!.find(m => m.stepId === missed.stepId);
-            if (existing) {
-              existing.trayIds.push(...missed.trayIds);
-            } else {
-              taskMap[taskKey].missedSteps!.push(missed);
+      for (const taskInfo of tasksToCreate) {
+        const taskKey = `${taskInfo.action}-${varietyName}-${currentStep.step_id}-${taskInfo.stepId || ''}`;
+        
+        if (taskMap[taskKey]) {
+          // Group similar tasks
+          taskMap[taskKey].trays += 1;
+          taskMap[taskKey].trayIds.push(tray.tray_id);
+          // Merge missed steps
+          if (missedSteps.length > 0 && taskMap[taskKey].missedSteps) {
+            for (const missed of missedSteps) {
+              const existing = taskMap[taskKey].missedSteps!.find(m => m.stepId === missed.stepId);
+              if (existing) {
+                existing.trayIds.push(...missed.trayIds);
+              } else {
+                taskMap[taskKey].missedSteps!.push(missed);
+              }
             }
           }
+        } else {
+          const isUrgent = taskInfo.action === 'Harvest' || dayCurrent >= totalDays - 1;
+          taskMap[taskKey] = {
+            id: taskKey,
+            action: taskInfo.action,
+            crop: varietyName,
+            batchId,
+            location,
+            dayCurrent,
+            dayTotal: totalDays,
+            trays: 1,
+            status: isUrgent ? 'urgent' : 'pending',
+            trayIds: [tray.tray_id],
+            recipeId: recipeId,
+            stepId: taskInfo.stepId || currentStep.step_id,
+            stepDescription: taskInfo.stepDescription || currentStep.description_name || currentStep.step_description || '',
+            missedSteps: missedSteps.length > 0 ? missedSteps : undefined,
+          };
         }
-      } else {
-        taskMap[taskKey] = {
-          id: taskKey,
-          action,
-          crop: (recipe as any).variety_name || recipe.recipe_name || 'Unknown',
-          batchId,
-          location,
-          dayCurrent,
-          dayTotal: totalDays,
-          trays: 1,
-          status: action === 'Harvest' || dayCurrent >= totalDays - 1 ? 'urgent' : 'pending',
-          trayIds: [tray.tray_id],
-          recipeId: recipeId,
-          stepId: currentStep.step_id,
-          stepDescription: currentStep.description_name || currentStep.step_description || '',
-          missedSteps: missedSteps.length > 0 ? missedSteps : undefined,
-        };
       }
     }
 

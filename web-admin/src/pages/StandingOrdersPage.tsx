@@ -602,14 +602,14 @@ const StandingOrdersPage = () => {
                             <Label htmlFor="item_variant">Variant (Optional)</Label>
                             {productVariants.length > 0 ? (
                               <Select
-                                value={newItem.variant_id}
-                                onValueChange={(value) => setNewItem({ ...newItem, variant_id: value })}
+                                value={newItem.variant_id || 'none'}
+                                onValueChange={(value) => setNewItem({ ...newItem, variant_id: value === 'none' ? '' : value })}
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select variant (optional)" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">No variant</SelectItem>
+                                  <SelectItem value="none">No variant</SelectItem>
                                   {productVariants.map((variant) => (
                                     <SelectItem key={variant.variant_id} value={variant.variant_id.toString()}>
                                       {variant.variant_name} {variant.size ? `(${variant.size}${variant.unit || ''})` : ''}

@@ -249,11 +249,18 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                     <SelectValue placeholder="Select step description" />
                   </SelectTrigger>
                   <SelectContent>
-                    {stepDescriptions.map((desc) => (
-                      <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
-                        {desc.description_name}
-                      </SelectItem>
-                    ))}
+                    {stepDescriptions
+                      .filter(desc => {
+                        const name = desc.description_name.toLowerCase();
+                        return !name.includes('nutrient application') && 
+                               !name.includes('cleaning') && 
+                               !name.includes('resting');
+                      })
+                      .map((desc) => (
+                        <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
+                          {desc.description_name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>

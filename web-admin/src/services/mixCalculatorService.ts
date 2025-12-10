@@ -13,11 +13,14 @@ interface MixMapping {
 }
 
 interface Recipe {
-  recipe_id: number;
+  recipe_id: number | string; // Can be number for farm recipes or string like "global_123" for global recipes
   recipe_name: string;
   variety_name: string;
   total_days: number; // Total growing days
   average_yield: number; // Average yield per tray (oz)
+  is_global?: boolean;
+  global_recipe_id?: number;
+  expected_yield_oz?: number; // For global recipes, this comes from global_recipes.expected_yield_oz
 }
 
 interface CalculationResult {
@@ -26,7 +29,8 @@ interface CalculationResult {
   recipe_id: number;
   recipe_name: string;
   trays_needed: number;
-  total_yield: number; // Total yield in oz
+  total_yield: number; // Required yield in oz (order quantity × ratio)
+  expected_yield_per_tray: number; // Expected yield per tray in oz (from recipe.average_yield)
   sow_date: Date; // Calculated sow date based on delivery date
   ratio: number;
 }
@@ -53,8 +57,19 @@ export const calculateMixRequirements = async (
 
   // For each crop in the mix
   for (const mapping of productMix.mappings) {
-    const recipe = recipes.find(r => r.recipe_id === mapping.recipe_id);
-    if (!recipe) continue;
+    // Match recipe by recipe_id (handle both numeric farm recipes and string global recipes)
+    const recipe = recipes.find(r => {
+      if (typeof r.recipe_id === 'string' && typeof mapping.recipe_id === 'string') {
+        return r.recipe_id === mapping.recipe_id;
+      } else if (typeof r.recipe_id === 'number' && typeof mapping.recipe_id === 'number') {
+        return r.recipe_id === mapping.recipe_id;
+      }
+      return r.recipe_id.toString() === mapping.recipe_id.toString();
+    });
+    if (!recipe) {
+      console.warn(`Recipe not found for mapping:`, mapping);
+      continue;
+    }
 
     // Calculate normalized ratio
     const normalizedRatio = mapping.ratio / totalRatio;
@@ -76,6 +91,7 @@ export const calculateMixRequirements = async (
       recipe_name: mapping.recipe_name,
       trays_needed: traysNeeded,
       total_yield: requiredYield,
+      expected_yield_per_tray: recipe.average_yield,
       sow_date: sowDate,
       ratio: normalizedRatio,
     });
@@ -87,9 +103,11 @@ export const calculateMixRequirements = async (
 /**
  * Get recipe total days and average yield
  */
-export const getRecipeDetails = async (_recipeId: number): Promise<{ total_days: number; average_yield: number }> => {
+export const getRecipeDetails = async (recipeId: number | string): Promise<{ total_days: number; average_yield: number }> => {
   // This would typically fetch from database
   // For now, return defaults - should be enhanced to fetch actual data
+  // recipeId parameter is kept for future use
+  void recipeId; // Suppress unused parameter warning
   return {
     total_days: 10, // Default, should fetch from steps table
     average_yield: 4.0, // Default oz per tray, should be configurable
@@ -105,7 +123,8 @@ export const formatCalculationResults = (results: CalculationResult[]): string =
   results.forEach((result, index) => {
     output += `${index + 1}. ${result.variety_name} (${result.recipe_name})\n`;
     output += `   Trays Needed: ${result.trays_needed}\n`;
-    output += `   Expected Yield: ${result.total_yield.toFixed(2)} oz\n`;
+    output += `   Required Yield: ${result.total_yield.toFixed(2)} oz\n`;
+    output += `   Expected Yield per Tray: ${result.expected_yield_per_tray.toFixed(1)} oz\n`;
     output += `   Sow Date: ${result.sow_date.toLocaleDateString()}\n`;
     output += `   Ratio: ${(result.ratio * 100).toFixed(1)}%\n\n`;
   });

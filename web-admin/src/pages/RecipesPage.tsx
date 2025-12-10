@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Edit, ClipboardList, Plus, Search, Trash2, Globe, Copy } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
@@ -9,11 +10,13 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 
 const RecipesPage = () => {
+  const navigate = useNavigate();
   const [recipes, setRecipes] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<any[]>([]);
   const [stepDescriptions, setStepDescriptions] = useState<any[]>([]);
@@ -29,6 +32,7 @@ const RecipesPage = () => {
   const [editableSteps, setEditableSteps] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [supplies, setSupplies] = useState<any[]>([]);
   const [useGlobalRecipe, setUseGlobalRecipe] = useState(false);
   const [selectedGlobalRecipeId, setSelectedGlobalRecipeId] = useState<string>('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -36,10 +40,16 @@ const RecipesPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [deleteTrayCount, setDeleteTrayCount] = useState(0);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isStepBuilderOpen, setIsStepBuilderOpen] = useState(false);
   const [newRecipe, setNewRecipe] = useState({
     recipe_name: '',
     variety_id: '',
     type: 'Standard', // Schema only allows 'Standard' or 'Custom'
+    seed_quantity: null as number | null,
+    seed_quantity_unit: 'grams' as 'grams' | 'oz',
+    media_supply_id: '',
+    media_amount: '',
+    media_unit: '',
   });
   const [newRecipeSteps, setNewRecipeSteps] = useState<any[]>([]);
 
@@ -60,6 +70,11 @@ const RecipesPage = () => {
           type,
           variety_name,
           variety_id,
+          seed_quantity,
+          seed_quantity_unit,
+          media_supply_id,
+          media_amount,
+          media_unit,
           farm_uuid,
           is_active,
           notes,
@@ -222,6 +237,31 @@ const RecipesPage = () => {
     }
   };
 
+  const fetchSupplies = async () => {
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+
+      const { farmUuid } = JSON.parse(sessionData);
+
+      const { data, error } = await supabase
+        .from('supplies')
+        .select('supply_id, supply_name, unit, stock, category, low_stock_threshold')
+        .eq('farm_uuid', farmUuid)
+        .eq('is_active', true)
+        .order('supply_name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching supplies:', error);
+        return;
+      }
+
+      setSupplies(data || []);
+    } catch (error) {
+      console.error('Error fetching supplies:', error);
+    }
+  };
+
   const fetchStepDescriptions = async () => {
     try {
       // Fetch all available step descriptions
@@ -244,6 +284,7 @@ const RecipesPage = () => {
   useEffect(() => {
     fetchRecipes();
     fetchVarieties();
+    fetchSupplies();
     fetchStepDescriptions();
     fetchGlobalRecipes();
   }, []);
@@ -301,44 +342,8 @@ const RecipesPage = () => {
   };
 
   const handleEditRecipe = async (recipe: any) => {
-    setEditingRecipe(recipe);
-    setIsEditDialogOpen(true);
-    
-    // Fetch steps for this recipe with step_descriptions join (left join in case some steps don't have descriptions)
-    const { data: steps } = await supabase
-      .from('steps')
-      .select(`
-        *,
-        step_descriptions(description_name, description_details)
-      `)
-      .eq('recipe_id', recipe.recipe_id);
-    
-    // Sort steps by step_order or sequence_order
-    const sortedSteps = steps ? [...steps].sort((a, b) => {
-      const orderA = a.step_order ?? a.sequence_order ?? 0;
-      const orderB = b.step_order ?? b.sequence_order ?? 0;
-      return orderA - orderB;
-    }) : [];
-    
-    setRecipeSteps(sortedSteps);
-    
-    // Initialize editable steps with current step data
-    const editable = sortedSteps.map((step: any) => {
-      const stepDescription = Array.isArray(step.step_descriptions)
-        ? step.step_descriptions[0]
-        : step.step_descriptions;
-      
-      return {
-        step_id: step.step_id,
-        sequence_order: step.sequence_order || 0,
-        description_name: step.description_name || stepDescription?.description_name || '',
-        description_id: step.description_id || null,
-        duration: step.duration || 0,
-        duration_unit: step.duration_unit || 'Days',
-        isNew: false,
-      };
-    });
-    setEditableSteps(editable);
+    // Navigate to builder with recipe ID
+    navigate(`/recipes/builder?id=${recipe.recipe_id}`);
   };
 
   const addNewStep = () => {
@@ -348,6 +353,13 @@ const RecipesPage = () => {
       description_name: '',
       duration: 0,
       duration_unit: 'Days' as 'Days' | 'Hours',
+      instructions: '',
+      requires_weight: false,
+      weight_lbs: null as number | null,
+      misting_frequency: 'none' as 'none' | '1x daily' | '2x daily' | '3x daily' | 'custom',
+      misting_start_day: 0,
+      do_not_disturb_days: 0,
+      water_type: null as 'water' | 'nutrients' | null,
     };
     setNewRecipeSteps([...newRecipeSteps, newStep]);
   };
@@ -369,7 +381,7 @@ const RecipesPage = () => {
   const handleGlobalRecipeSelect = async (globalRecipeId: string) => {
     if (!globalRecipeId) {
       setSelectedGlobalRecipeId('');
-      setNewRecipe({ recipe_name: '', variety_id: '', type: 'Custom' });
+      setNewRecipe({ recipe_name: '', variety_id: '', type: 'Custom', seed_quantity: null, seed_quantity_unit: 'grams', media_supply_id: '', media_amount: '', media_unit: '' });
       setNewRecipeSteps([]);
       return;
     }
@@ -397,6 +409,11 @@ const RecipesPage = () => {
         recipe_name: `${globalRecipe.recipe_name} (Custom)`,
         variety_id: matchingVariety ? matchingVariety.variety_id.toString() : '',
         type: 'Custom',
+    seed_quantity: null,
+    seed_quantity_unit: 'grams',
+    media_supply_id: '',
+    media_amount: '',
+    media_unit: '',
       });
 
       // Populate steps
@@ -411,6 +428,12 @@ const RecipesPage = () => {
         duration: step.duration || 0,
         duration_unit: step.duration_unit || 'Days',
         instructions: step.instructions || '',
+        requires_weight: step.requires_weight || false,
+        weight_lbs: step.weight_lbs || null,
+        misting_frequency: step.misting_frequency || 'none',
+        misting_start_day: step.misting_start_day || 0,
+        do_not_disturb_days: step.do_not_disturb_days || 0,
+        water_type: step.water_type || null,
       }));
 
       setNewRecipeSteps(mappedSteps);
@@ -427,7 +450,7 @@ const RecipesPage = () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
-      const { farmUuid } = JSON.parse(sessionData);
+      const { farmUuid, userId } = JSON.parse(sessionData);
 
       const selectedVariety = varieties.find(v => 
         (v.variety_id ?? v.varietyid)?.toString() === newRecipe.variety_id
@@ -448,6 +471,11 @@ const RecipesPage = () => {
         type: newRecipe.type === 'Standard' || newRecipe.type === 'Custom' 
           ? newRecipe.type 
           : 'Standard', // Schema only allows 'Standard' or 'Custom'
+        seed_quantity: newRecipe.seed_quantity || null,
+        seed_quantity_unit: newRecipe.seed_quantity_unit || 'grams',
+        media_supply_id: newRecipe.media_supply_id ? parseInt(newRecipe.media_supply_id) : null,
+        media_amount: newRecipe.media_amount ? parseFloat(newRecipe.media_amount) : null,
+        media_unit: newRecipe.media_unit || null,
         farm_uuid: farmUuid,
         is_active: true
       };
@@ -467,10 +495,22 @@ const RecipesPage = () => {
           return {
             recipe_id: createdRecipe.recipe_id,
             sequence_order: step.sequence_order,
+            step_name: selectedDescription?.description_name || step.description_name || 'Untitled Step', // Required field
             description_id: step.description_id || null,
             description_name: selectedDescription?.description_name || step.description_name || 'Untitled Step',
             duration: step.duration || 0,
             duration_unit: step.duration_unit || 'Days',
+            instructions: step.instructions || null,
+            requires_weight: step.requires_weight || false,
+            weight_lbs: step.weight_lbs || null,
+            misting_frequency: step.misting_frequency || 'none',
+            misting_start_day: step.misting_start_day || 0,
+            do_not_disturb_days: step.do_not_disturb_days || 0,
+            water_type: step.water_type || null,
+            water_method: step.water_method || null,
+            water_frequency: step.water_frequency || null,
+            farm_uuid: farmUuid, // Required field
+            created_by: userId, // Required field
           };
         });
 
@@ -478,7 +518,7 @@ const RecipesPage = () => {
         if (stepsError) throw stepsError;
       }
 
-      setNewRecipe({ recipe_name: '', variety_id: '', type: 'Standard' });
+      setNewRecipe({ recipe_name: '', variety_id: '', type: 'Standard', seed_quantity: null, seed_quantity_unit: 'grams', media_supply_id: '', media_amount: '', media_unit: '' });
       setNewRecipeSteps([]);
       setUseGlobalRecipe(false);
       setSelectedGlobalRecipeId('');
@@ -500,6 +540,13 @@ const RecipesPage = () => {
       description_name: '',
       duration: 0,
       duration_unit: 'Days' as 'Days' | 'Hours',
+      instructions: '',
+      requires_weight: false,
+      weight_lbs: null as number | null,
+      misting_frequency: 'none' as 'none' | '1x daily' | '2x daily' | '3x daily' | 'custom',
+      misting_start_day: 0,
+      do_not_disturb_days: 0,
+      water_type: null as 'water' | 'nutrients' | null,
       isNew: true,
     };
     setEditableSteps([...editableSteps, newStep]);
@@ -627,6 +674,7 @@ const RecipesPage = () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
+      const { farmUuid, userId } = JSON.parse(sessionData);
 
       const selectedVariety = varieties.find(v => 
         (v.variety_id ?? v.varietyid)?.toString() === editingRecipe.variety_id?.toString()
@@ -644,6 +692,8 @@ const RecipesPage = () => {
         recipe_name: editingRecipe.recipe_name,
         variety_id: varietyId,
         variety_name: varietyName,
+          seed_quantity: editingRecipe.seed_quantity || null,
+          seed_quantity_unit: editingRecipe.seed_quantity_unit || 'grams',
         type: editingRecipe.type === 'Standard' || editingRecipe.type === 'Custom' 
           ? editingRecipe.type 
           : 'Standard',
@@ -683,10 +733,22 @@ const RecipesPage = () => {
             .insert({
               recipe_id: editingRecipe.recipe_id,
               sequence_order: step.sequence_order,
+              step_name: selectedDescription?.description_name || step.description_name || 'Untitled Step', // Required field
               description_id: step.description_id || null,
               description_name: selectedDescription?.description_name || step.description_name || 'Untitled Step',
               duration: step.duration || 0,
               duration_unit: step.duration_unit || 'Days',
+              instructions: step.instructions || null,
+              requires_weight: step.requires_weight || false,
+              weight_lbs: step.weight_lbs || null,
+              misting_frequency: step.misting_frequency || 'none',
+              misting_start_day: step.misting_start_day || 0,
+              do_not_disturb_days: step.do_not_disturb_days || 0,
+              water_type: step.water_type || null,
+              water_method: step.water_method || null,
+              water_frequency: step.water_frequency || null,
+              farm_uuid: farmUuid, // Required field
+              created_by: userId, // Required field
             });
           
           if (insertError) throw insertError;
@@ -699,6 +761,15 @@ const RecipesPage = () => {
               sequence_order: step.sequence_order,
               description_id: step.description_id || null,
               description_name: selectedDescription?.description_name || step.description_name || 'Untitled Step',
+              instructions: step.instructions || null,
+              requires_weight: step.requires_weight || false,
+              weight_lbs: step.weight_lbs || null,
+              misting_frequency: step.misting_frequency || 'none',
+              misting_start_day: step.misting_start_day || 0,
+              do_not_disturb_days: step.do_not_disturb_days || 0,
+              water_type: step.water_type || null,
+              water_method: step.water_method || null,
+              water_frequency: step.water_frequency || null,
               duration: step.duration || 0,
               duration_unit: step.duration_unit || 'Days',
             })
@@ -747,53 +818,61 @@ const RecipesPage = () => {
           <p className="text-muted-foreground">Manage your growing recipes</p>
         </div>
         
+        <Button onClick={() => navigate('/recipes/builder')} className="bg-green-600 hover:bg-green-700 text-white">
+          <Plus className="mr-2 h-4 w-4" />
+          Create New Recipe
+        </Button>
+        
+        {/* Optional: Dialog for choosing between blank and global recipe */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Recipe
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(true)} className="ml-2">
+              <Globe className="mr-2 h-4 w-4" />
+              Copy from Global
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
               <DialogTitle>Create New Recipe</DialogTitle>
               <DialogDescription>
-                Define how to grow a specific variety. You can start from a global recipe or create from scratch.
+                Start with a blank recipe or copy from a global recipe template.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <Globe className="h-4 w-4 text-blue-600" />
-                  <Label htmlFor="use-global" className="cursor-pointer">
-                    Start from Global Recipe
-                  </Label>
-                </div>
-                <Switch
-                  id="use-global"
-                  checked={useGlobalRecipe}
-                  onCheckedChange={(checked) => {
-                    setUseGlobalRecipe(checked);
-                    if (!checked) {
-                      setSelectedGlobalRecipeId('');
-                      handleGlobalRecipeSelect('');
-                    }
+              <div className="space-y-3">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start h-auto py-4"
+                  onClick={() => {
+                    setIsAddDialogOpen(false);
+                    navigate('/recipes/builder');
                   }}
-                />
-              </div>
+                >
+                  <div className="flex flex-col items-start">
+                    <span className="font-semibold">Blank Recipe</span>
+                    <span className="text-xs text-gray-500">Start from scratch</span>
+                  </div>
+                </Button>
 
-              {useGlobalRecipe && (
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-gray-500">Or</span>
+                  </div>
+                </div>
+
                 <div className="grid gap-2">
-                  <Label htmlFor="global-recipe">Select Global Recipe</Label>
+                  <Label htmlFor="global-recipe">Copy from Global Recipe</Label>
                   <Select
                     value={selectedGlobalRecipeId}
                     onValueChange={(value) => {
                       setSelectedGlobalRecipeId(value);
-                      handleGlobalRecipeSelect(value);
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Choose a global recipe to start from" />
+                      <SelectValue placeholder="Choose a global recipe" />
                     </SelectTrigger>
                     <SelectContent>
                       {globalRecipes.map((gr) => (
@@ -803,11 +882,38 @@ const RecipesPage = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-gray-500">
-                    This will copy the recipe name, variety, and steps. You can edit them after.
-                  </p>
+                  <Button
+                    disabled={!selectedGlobalRecipeId}
+                    onClick={async () => {
+                      if (!selectedGlobalRecipeId) return;
+                      
+                      // Fetch global recipe steps
+                      const { data: globalRecipe } = await supabase
+                        .from('global_recipes')
+                        .select(`
+                          *,
+                          global_steps(*)
+                        `)
+                        .eq('global_recipe_id', parseInt(selectedGlobalRecipeId))
+                        .single();
+
+                      if (globalRecipe) {
+                        // Navigate with global recipe data in state
+                        navigate('/recipes/builder', {
+                          state: {
+                            globalRecipe: globalRecipe,
+                            globalSteps: globalRecipe.global_steps || []
+                          }
+                        });
+                      }
+                    }}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    <Globe className="mr-2 h-4 w-4" />
+                    Copy & Edit
+                  </Button>
                 </div>
-              )}
+              </div>
 
               <div className="grid gap-2">
                 <Label htmlFor="name">Recipe Name</Label>
@@ -816,25 +922,139 @@ const RecipesPage = () => {
                   placeholder="e.g., Standard Sunflower"
                   value={newRecipe.recipe_name}
                   onChange={(e) => setNewRecipe({ ...newRecipe, recipe_name: e.target.value })}
+                  className="!border-gray-200"
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="variety">Variety</Label>
                 <Select 
-                  value={newRecipe.variety_id} 
-                  onValueChange={(value) => setNewRecipe({ ...newRecipe, variety_id: value })}
+                  value={newRecipe.variety_id || undefined} 
+                  onValueChange={(value) => {
+                    const selectedVariety = varieties.find(v => {
+                      const vid = v.variety_id ?? v.varietyid;
+                      return vid != null && vid.toString() === value;
+                    });
+                    setNewRecipe({ 
+                      ...newRecipe, 
+                      variety_id: value,
+                      // Pre-fill seed quantity from variety if recipe doesn't have one yet (varieties store in grams)
+                      seed_quantity: newRecipe.seed_quantity || selectedVariety?.seed_quantity_grams || null,
+                      seed_quantity_unit: newRecipe.seed_quantity_unit || 'grams'
+                    });
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a variety" />
                   </SelectTrigger>
                   <SelectContent>
-                    {varieties.map((variety) => (
-                      <SelectItem key={variety.variety_id} value={variety.variety_id.toString()}>
-                        {variety.variety_name}
-                      </SelectItem>
-                    ))}
+                    {varieties.map((variety) => {
+                      const vid = variety.variety_id ?? variety.varietyid;
+                      if (vid == null) return null;
+                      return (
+                        <SelectItem key={vid} value={vid.toString()}>
+                          {variety.variety_name}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="seed-quantity">Seed Quantity per Tray *</Label>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <Input
+                    id="seed-quantity"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder={newRecipe.seed_quantity_unit === 'oz' ? "e.g., 1.0" : "e.g., 28.0"}
+                    value={newRecipe.seed_quantity || ''}
+                    onChange={(e) => setNewRecipe({ ...newRecipe, seed_quantity: e.target.value ? parseFloat(e.target.value) : null })}
+                    className="!border-gray-200"
+                  />
+                  <Select
+                    value={newRecipe.seed_quantity_unit}
+                    onValueChange={(value) => setNewRecipe({ ...newRecipe, seed_quantity_unit: value as 'grams' | 'oz' })}
+                  >
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="grams">g</SelectItem>
+                      <SelectItem value="oz">oz</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-gray-500">Amount of seed needed per tray for this recipe</p>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="medium">Growing Medium (Optional)</Label>
+                  <p className="text-xs text-muted-foreground">Track how much medium each tray consumes</p>
+                </div>
+                <div className="grid gap-2">
+                  <Select
+                    value={newRecipe.media_supply_id || ''}
+                    onValueChange={(value) => {
+                      const selectedSupply = supplies.find((s: any) => s.supply_id?.toString() === value);
+                      setNewRecipe({
+                        ...newRecipe,
+                        media_supply_id: value,
+                        media_unit: selectedSupply?.unit || newRecipe.media_unit || 'units',
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select medium supply (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {supplies.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          Add growing medium supplies first.
+                        </div>
+                      )}
+                      {supplies.map((supply: any) => (
+                        <SelectItem key={supply.supply_id} value={supply.supply_id?.toString()}>
+                          {supply.supply_name} {supply.unit ? `(${supply.unit})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <Input
+                      id="medium-amount"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="e.g., 0.5"
+                      value={newRecipe.media_amount || ''}
+                      onChange={(e) => setNewRecipe({ ...newRecipe, media_amount: e.target.value })}
+                      disabled={!newRecipe.media_supply_id}
+                      className="!border-gray-200"
+                    />
+                    <Select
+                      value={newRecipe.media_unit || (supplies.find((s: any) => s.supply_id?.toString() === newRecipe.media_supply_id)?.unit) || 'units'}
+                      onValueChange={(value) => setNewRecipe({ ...newRecipe, media_unit: value })}
+                      disabled={!newRecipe.media_supply_id}
+                    >
+                      <SelectTrigger className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="grams">g</SelectItem>
+                        <SelectItem value="oz">oz</SelectItem>
+                        <SelectItem value="lbs">lbs</SelectItem>
+                        <SelectItem value="kg">kg</SelectItem>
+                        <SelectItem value={supplies.find((s: any) => s.supply_id?.toString() === newRecipe.media_supply_id)?.unit || 'units'}>
+                          {supplies.find((s: any) => s.supply_id?.toString() === newRecipe.media_supply_id)?.unit || 'units'}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Optional: deduct growing medium (e.g., coco coir, soil) per tray.
+                  </p>
+                </div>
               </div>
               <div className="grid gap-2">
                 <div>
@@ -863,49 +1083,140 @@ const RecipesPage = () => {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={addNewStep}
+                    onClick={() => setIsStepBuilderOpen(true)}
                   >
                     <Plus className="h-4 w-4 mr-1" />
-                    Add Step
+                    {newRecipeSteps.length > 0 ? `Manage Steps (${newRecipeSteps.length})` : 'Add Steps'}
                   </Button>
                 </div>
                 {newRecipeSteps.length > 0 && (
-                  <div className="space-y-2 max-h-60 overflow-y-auto p-2 border rounded">
+                  <div className="space-y-1 p-3 border rounded bg-gray-50">
                     {newRecipeSteps.map((step, index) => (
-                      <div key={index} className="p-2 border rounded bg-gray-50">
-                        <div className="flex items-start gap-2">
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold text-xs mt-1">
-                            {step.sequence_order}
-                          </div>
-                          <div className="flex-1 space-y-2">
+                      <div key={index} className="text-sm text-gray-700 flex items-center gap-2">
+                        <span className="font-semibold text-blue-600">{step.sequence_order}.</span>
+                        <span>{step.description_name || 'Untitled Step'}</span>
+                        <span className="text-gray-500">
+                          ({step.duration || 0} {step.duration_unit || 'Days'})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {newRecipeSteps.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Click "Add Steps" to build your recipe steps. You can also add them later.
+                  </p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setIsAddDialogOpen(false);
+                setNewRecipeSteps([]);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handleAddRecipe} disabled={creating || !newRecipe.recipe_name || !newRecipe.variety_id} className="bg-green-600 hover:bg-green-700 text-white">
+                {creating ? 'Creating...' : 'Create Recipe'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Step Builder Dialog */}
+        <Dialog open={isStepBuilderOpen} onOpenChange={setIsStepBuilderOpen}>
+          <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Recipe Step Builder</DialogTitle>
+              <DialogDescription>
+                Build your recipe steps. Steps will be executed in order.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">Steps ({newRecipeSteps.length})</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={addNewStep}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Step
+                </Button>
+              </div>
+
+              {newRecipeSteps.length === 0 ? (
+                <div className="text-center py-8 border-2 border-dashed rounded-lg">
+                  <p className="text-sm text-gray-500 mb-2">No steps added yet</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addNewStep}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Your First Step
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {newRecipeSteps.map((step, index) => (
+                    <div key={index} className="p-4 border rounded-lg bg-white shadow-sm">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm">
+                          {step.sequence_order}
+                        </div>
+                        <div className="flex-1 space-y-4">
+                          <div className="grid gap-2">
+                            <Label>Step Description *</Label>
                             <Select
                               value={step.description_id?.toString() || ''}
                               onValueChange={(value) => {
                                 const selectedDesc = stepDescriptions.find(sd => sd.description_id.toString() === value);
-                                updateNewStep(index, 'description_id', selectedDesc ? parseInt(value) : null);
-                                updateNewStep(index, 'description_name', selectedDesc?.description_name || '');
+                                const newSteps = [...newRecipeSteps];
+                                newSteps[index] = { 
+                                  ...newSteps[index], 
+                                  description_id: selectedDesc ? parseInt(value) : null,
+                                  description_name: selectedDesc?.description_name || ''
+                                };
+                                setNewRecipeSteps(newSteps);
                               }}
                             >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select step description" />
                               </SelectTrigger>
                               <SelectContent>
-                                {stepDescriptions.map((desc) => (
-                                  <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
-                                    {desc.description_name}
-                                  </SelectItem>
-                                ))}
+                                {stepDescriptions
+                                  .filter(desc => {
+                                    const name = desc.description_name.toLowerCase();
+                                    return !name.includes('nutrient application') && 
+                                           !name.includes('cleaning') && 
+                                           !name.includes('resting');
+                                  })
+                                  .map((desc) => (
+                                    <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
+                                      {desc.description_name}
+                                    </SelectItem>
+                                  ))}
                               </SelectContent>
                             </Select>
-                            <div className="grid grid-cols-2 gap-2">
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label>Duration *</Label>
                               <Input
                                 type="number"
                                 min="0"
                                 step="0.1"
-                                placeholder="Duration"
+                                placeholder="0"
                                 value={step.duration || 0}
                                 onChange={(e) => updateNewStep(index, 'duration', parseFloat(e.target.value) || 0)}
                               />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label>Unit *</Label>
                               <Select
                                 value={step.duration_unit || 'Days'}
                                 onValueChange={(value) => updateNewStep(index, 'duration_unit', value)}
@@ -920,36 +1231,138 @@ const RecipesPage = () => {
                               </Select>
                             </div>
                           </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeNewStep(index)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+
+                          <div className="grid gap-2">
+                            <Label>Instructions (Optional)</Label>
+                            <Textarea
+                              placeholder="Additional notes or instructions for this step"
+                              value={step.instructions || ''}
+                              onChange={(e) => updateNewStep(index, 'instructions', e.target.value)}
+                              className="min-h-[80px]"
+                            />
+                          </div>
+
+                          {/* Only show weighted dome and misting fields for Blackout steps */}
+                          {(step.description_name?.toLowerCase() === 'blackout' || 
+                            stepDescriptions.find(d => d.description_id === step.description_id)?.description_name?.toLowerCase() === 'blackout') && (
+                            <div className="space-y-4 pt-4 border-t">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id={`weight-${index}`}
+                                  checked={step.requires_weight || false}
+                                  onChange={(e) => updateNewStep(index, 'requires_weight', e.target.checked)}
+                                  className="rounded"
+                                />
+                                <Label htmlFor={`weight-${index}`} className="cursor-pointer">
+                                  Requires Weighted Dome
+                                </Label>
+                              </div>
+                              {step.requires_weight && (
+                                <div className="grid gap-2">
+                                  <Label>Weight (lbs)</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.1"
+                                    placeholder="e.g., 5.0"
+                                    value={step.weight_lbs || ''}
+                                    onChange={(e) => updateNewStep(index, 'weight_lbs', e.target.value ? parseFloat(e.target.value) : null)}
+                                  />
+                                </div>
+                              )}
+                              <div className="grid gap-2">
+                                <Label>Do Not Disturb (days)</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Days at start where tray should not be disturbed"
+                                  value={step.do_not_disturb_days || 0}
+                                  onChange={(e) => updateNewStep(index, 'do_not_disturb_days', parseInt(e.target.value) || 0)}
+                                />
+                                <p className="text-xs text-gray-500">e.g., 3 days under weight before misting</p>
+                              </div>
+                              <div className="grid gap-2">
+                                <Label>Misting Frequency</Label>
+                                <Select
+                                  value={step.misting_frequency || 'none'}
+                                  onValueChange={(value) => updateNewStep(index, 'misting_frequency', value)}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">None</SelectItem>
+                                    <SelectItem value="1x daily">1x Daily</SelectItem>
+                                    <SelectItem value="2x daily">2x Daily</SelectItem>
+                                    <SelectItem value="3x daily">3x Daily</SelectItem>
+                                    <SelectItem value="custom">Custom</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              {(step.misting_frequency && step.misting_frequency !== 'none') && (
+                                <div className="grid gap-2">
+                                  <Label>Misting Start Day</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    placeholder="Day within step when misting starts (0 = immediately)"
+                                    value={step.misting_start_day || 0}
+                                    onChange={(e) => updateNewStep(index, 'misting_start_day', parseInt(e.target.value) || 0)}
+                                  />
+                                  <p className="text-xs text-gray-500">0 = start immediately, 1 = start on day 2 of step</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Show water type selection for watering-related steps */}
+                          {(() => {
+                            const stepDescName = step.description_name?.toLowerCase() || 
+                              stepDescriptions.find(d => d.description_id === step.description_id)?.description_name?.toLowerCase() || '';
+                            const isWateringStep = stepDescName.includes('water') || 
+                              stepDescName.includes('irrigat') || 
+                              stepDescName.includes('nutrient') ||
+                              stepDescName.includes('growing');
+                            
+                            return isWateringStep ? (
+                              <div className="grid gap-2 pt-4 border-t">
+                                <Label>Water Type *</Label>
+                                <Select
+                                  value={step.water_type || ''}
+                                  onValueChange={(value) => updateNewStep(index, 'water_type', value as 'water' | 'nutrients')}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select water type" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="water">Water</SelectItem>
+                                    <SelectItem value="nutrients">Nutrients</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-gray-500">Required for watering tasks</p>
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeNewStep(index)}
+                          className="text-destructive hover:text-destructive flex-shrink-0"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-                    ))}
-                  </div>
-                )}
-                {newRecipeSteps.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    You can add steps now or edit the recipe later to add them.
-                  </p>
-                )}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setIsAddDialogOpen(false);
-                setNewRecipeSteps([]);
-              }}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddRecipe} disabled={creating || !newRecipe.recipe_name || !newRecipe.variety_id}>
-                {creating ? 'Creating...' : 'Create Recipe'}
+              <Button variant="outline" onClick={() => setIsStepBuilderOpen(false)}>
+                Done
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1020,6 +1433,37 @@ const RecipesPage = () => {
                           <div className="flex-1">
                             <p className="text-sm font-medium">{displayText}</p>
                             <p className="text-xs text-muted-foreground mt-1">Duration: {durationDisplay}</p>
+                            {step.instructions && (
+                              <p className="text-xs text-gray-600 mt-2 italic bg-gray-50 p-2 rounded">{step.instructions}</p>
+                            )}
+                            {/* Show water type selection for watering-related steps */}
+                            {(() => {
+                              const stepDescName = step.description_name?.toLowerCase() || 
+                                stepDescriptions.find(d => d.description_id === step.description_id)?.description_name?.toLowerCase() || '';
+                              const isWateringStep = stepDescName.includes('water') || 
+                                stepDescName.includes('irrigat') || 
+                                stepDescName.includes('nutrient') ||
+                                stepDescName.includes('growing');
+                              
+                              return isWateringStep ? (
+                                <div className="grid gap-2 pt-2 border-t">
+                                  <Label className="text-xs">Water Type *</Label>
+                                  <Select
+                                    value={step.water_type || ''}
+                                    onValueChange={(value) => updateNewStep(index, 'water_type', value as 'water' | 'nutrients')}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select water type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="water">Water</SelectItem>
+                                      <SelectItem value="nutrients">Nutrients</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <p className="text-xs text-gray-500">Required for watering tasks</p>
+                                </div>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       );
@@ -1074,15 +1518,19 @@ const RecipesPage = () => {
               <div className="grid gap-2">
                 <Label htmlFor="edit-variety">Variety</Label>
                 <Select 
-                  value={editingRecipe.variety_id?.toString() || ''} 
+                  value={editingRecipe.variety_id ? editingRecipe.variety_id.toString() : undefined} 
                   onValueChange={(value) => {
-                    const selectedVariety = varieties.find(v => 
-                      (v.variety_id ?? v.varietyid)?.toString() === value
-                    );
+                    const selectedVariety = varieties.find(v => {
+                      const vid = v.variety_id ?? v.varietyid;
+                      return vid != null && vid.toString() === value;
+                    });
                     setEditingRecipe({ 
                       ...editingRecipe, 
                       variety_id: value,
-                      variety_name: selectedVariety?.variety_name || selectedVariety?.name || ''
+                      variety_name: selectedVariety?.variety_name || selectedVariety?.name || '',
+                      // Pre-fill seed quantity from variety if recipe doesn't have one yet (varieties store in grams)
+                      seed_quantity: editingRecipe.seed_quantity || selectedVariety?.seed_quantity_grams || null,
+                      seed_quantity_unit: editingRecipe.seed_quantity_unit || 'grams'
                     });
                   }}
                 >
@@ -1090,13 +1538,44 @@ const RecipesPage = () => {
                     <SelectValue placeholder="Select a variety" />
                   </SelectTrigger>
                   <SelectContent>
-                    {varieties.map((variety) => (
-                      <SelectItem key={variety.variety_id} value={variety.variety_id.toString()}>
-                        {variety.variety_name}
-                      </SelectItem>
-                    ))}
+                    {varieties.map((variety) => {
+                      const vid = variety.variety_id ?? variety.varietyid;
+                      if (vid == null) return null;
+                      return (
+                        <SelectItem key={vid} value={vid.toString()}>
+                          {variety.variety_name}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-seed-quantity">Seed Quantity per Tray *</Label>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <Input
+                    id="edit-seed-quantity"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder={editingRecipe.seed_quantity_unit === 'oz' ? "e.g., 1.0" : "e.g., 28.0"}
+                    value={editingRecipe.seed_quantity || ''}
+                    onChange={(e) => setEditingRecipe({ ...editingRecipe, seed_quantity: e.target.value ? parseFloat(e.target.value) : null })}
+                  />
+                  <Select
+                    value={editingRecipe.seed_quantity_unit || 'grams'}
+                    onValueChange={(value) => setEditingRecipe({ ...editingRecipe, seed_quantity_unit: value as 'grams' | 'oz' })}
+                  >
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="grams">g</SelectItem>
+                      <SelectItem value="oz">oz</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-gray-500">Amount of seed needed per tray for this recipe</p>
               </div>
               <div className="grid gap-2">
                 <div>
@@ -1141,9 +1620,9 @@ const RecipesPage = () => {
                   <Label className="text-sm font-semibold">Steps ({editableSteps.length})</Label>
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
                     onClick={addStep}
+                    className="bg-green-600 hover:bg-green-700 text-white"
                   >
                     <Plus className="h-4 w-4 mr-1" />
                     Add Step
@@ -1163,19 +1642,31 @@ const RecipesPage = () => {
                               value={step.description_id?.toString() || ''}
                               onValueChange={(value) => {
                                 const selectedDesc = stepDescriptions.find(sd => sd.description_id.toString() === value);
-                                updateStep(index, 'description_id', selectedDesc ? parseInt(value) : null);
-                                updateStep(index, 'description_name', selectedDesc?.description_name || '');
+                                const newSteps = [...editableSteps];
+                                newSteps[index] = { 
+                                  ...newSteps[index], 
+                                  description_id: selectedDesc ? parseInt(value) : null,
+                                  description_name: selectedDesc?.description_name || ''
+                                };
+                                setEditableSteps(newSteps);
                               }}
                             >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select step description" />
                               </SelectTrigger>
                               <SelectContent>
-                                {stepDescriptions.map((desc) => (
-                                  <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
-                                    {desc.description_name}
-                                  </SelectItem>
-                                ))}
+                                {stepDescriptions
+                                  .filter(desc => {
+                                    const name = desc.description_name.toLowerCase();
+                                    return !name.includes('nutrient application') && 
+                                           !name.includes('cleaning') && 
+                                           !name.includes('resting');
+                                  })
+                                  .map((desc) => (
+                                    <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
+                                      {desc.description_name}
+                                    </SelectItem>
+                                  ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1207,6 +1698,116 @@ const RecipesPage = () => {
                               </Select>
                             </div>
                           </div>
+                          <div className="grid gap-2">
+                            <Label className="text-xs">Instructions</Label>
+                            <Textarea
+                              placeholder="Step instructions (optional additional notes)"
+                              value={step.instructions || ''}
+                              onChange={(e) => updateStep(index, 'instructions', e.target.value)}
+                              className="min-h-[60px] text-sm"
+                            />
+                          </div>
+                          {/* Only show weighted dome and misting fields for Blackout steps */}
+                          {(step.description_name?.toLowerCase() === 'blackout' || 
+                            stepDescriptions.find(d => d.description_id === step.description_id)?.description_name?.toLowerCase() === 'blackout') && (
+                            <div className="space-y-3 pt-2 border-t">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id={`edit-weight-${index}`}
+                                  checked={step.requires_weight || false}
+                                  onChange={(e) => updateStep(index, 'requires_weight', e.target.checked)}
+                                  className="rounded"
+                                />
+                                <Label htmlFor={`edit-weight-${index}`} className="text-xs font-normal cursor-pointer">
+                                  Requires Weighted Dome
+                                </Label>
+                              </div>
+                              {step.requires_weight && (
+                                <div className="grid gap-2">
+                                  <Label className="text-xs">Weight (lbs)</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.1"
+                                    placeholder="e.g., 5.0"
+                                    value={step.weight_lbs || ''}
+                                    onChange={(e) => updateStep(index, 'weight_lbs', e.target.value ? parseFloat(e.target.value) : null)}
+                                  />
+                                </div>
+                              )}
+                              <div className="grid gap-2">
+                                <Label className="text-xs">Do Not Disturb (days)</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Days at start where tray should not be disturbed"
+                                  value={step.do_not_disturb_days || 0}
+                                  onChange={(e) => updateStep(index, 'do_not_disturb_days', parseInt(e.target.value) || 0)}
+                                />
+                                <p className="text-xs text-gray-500">e.g., 3 days under weight before misting</p>
+                              </div>
+                              <div className="grid gap-2">
+                                <Label className="text-xs">Misting Frequency</Label>
+                                <Select
+                                  value={step.misting_frequency || 'none'}
+                                  onValueChange={(value) => updateStep(index, 'misting_frequency', value)}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">None</SelectItem>
+                                    <SelectItem value="1x daily">1x Daily</SelectItem>
+                                    <SelectItem value="2x daily">2x Daily</SelectItem>
+                                    <SelectItem value="3x daily">3x Daily</SelectItem>
+                                    <SelectItem value="custom">Custom</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              {(step.misting_frequency && step.misting_frequency !== 'none') && (
+                                <div className="grid gap-2">
+                                  <Label className="text-xs">Misting Start Day</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    placeholder="Day within step when misting starts (0 = immediately)"
+                                    value={step.misting_start_day || 0}
+                                    onChange={(e) => updateStep(index, 'misting_start_day', parseInt(e.target.value) || 0)}
+                                  />
+                                  <p className="text-xs text-gray-500">0 = start immediately, 1 = start on day 2 of step</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {/* Show water type selection for watering-related steps */}
+                          {(() => {
+                            const stepDescName = step.description_name?.toLowerCase() || 
+                              stepDescriptions.find(d => d.description_id === step.description_id)?.description_name?.toLowerCase() || '';
+                            const isWateringStep = stepDescName.includes('water') || 
+                              stepDescName.includes('irrigat') || 
+                              stepDescName.includes('nutrient') ||
+                              stepDescName.includes('growing');
+                            
+                            return isWateringStep ? (
+                              <div className="grid gap-2 pt-2 border-t">
+                                <Label className="text-xs">Water Type *</Label>
+                                <Select
+                                  value={step.water_type || ''}
+                                  onValueChange={(value) => updateStep(index, 'water_type', value as 'water' | 'nutrients')}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select water type" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="water">Water</SelectItem>
+                                    <SelectItem value="nutrients">Nutrients</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-gray-500">Required for watering tasks</p>
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                         <Button
                           type="button"
@@ -1238,7 +1839,7 @@ const RecipesPage = () => {
             }}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateRecipe} disabled={updating || !editingRecipe?.recipe_name}>
+            <Button onClick={handleUpdateRecipe} disabled={updating || !editingRecipe?.recipe_name} className="bg-green-600 hover:bg-green-700 text-white">
               {updating ? 'Updating...' : 'Update Recipe'}
             </Button>
           </DialogFooter>

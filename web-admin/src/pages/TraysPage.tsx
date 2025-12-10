@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 
+type TrayStatusFilter = 'all' | 'active' | 'harvested' | 'lost';
+
 const TraysPage = () => {
   const [trays, setTrays] = useState<any[]>([]);
   const [recipes, setRecipes] = useState<any[]>([]);
@@ -21,6 +23,7 @@ const TraysPage = () => {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<TrayStatusFilter>('active');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -54,7 +57,7 @@ const TraysPage = () => {
 
       // Fetch trays with recipes join, and join varieties to get variety name
       // Note: seedbatches join removed - will fetch separately to avoid column name issues
-      const { data, error } = await supabase
+      let query = supabase
         .from('trays')
         .select(`
           *,
@@ -64,8 +67,19 @@ const TraysPage = () => {
             varieties!inner(varietyid, name)
           )
         `)
-        .eq('farm_uuid', farmUuid)
-        .order('created_at', { ascending: false });
+        .eq('farm_uuid', farmUuid);
+
+      // Apply status filter
+      if (statusFilter === 'active') {
+        query = query.is('harvest_date', null).or('status.is.null,status.eq.active');
+      } else if (statusFilter === 'harvested') {
+        query = query.not('harvest_date', 'is', null);
+      } else if (statusFilter === 'lost') {
+        query = query.eq('status', 'lost');
+      }
+      // 'all' shows everything, so no additional filter
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
 
@@ -381,7 +395,15 @@ const TraysPage = () => {
       // But if no recipes have inventory, show all recipes anyway (user can see what's missing)
       const recipesWithInventory = recipesWithVarieties.filter((recipe: any) => {
         const varietyId = recipe.variety_id || recipe.varieties?.varietyid;
-        const seedQuantityNeeded = recipe.varieties?.seed_quantity_grams || 0;
+        // Use recipe seed_quantity if available, fallback to variety seed_quantity_grams
+        // Convert to grams for comparison (batches are stored in grams)
+        let seedQuantityNeeded = 0;
+        if (recipe.seed_quantity) {
+          const unit = recipe.seed_quantity_unit || 'grams';
+          seedQuantityNeeded = unit === 'oz' ? recipe.seed_quantity * 28.35 : recipe.seed_quantity; // Convert oz to grams
+        } else {
+          seedQuantityNeeded = recipe.varieties?.seed_quantity_grams || 0;
+        }
         
         if (!varietyId) {
           console.log('Recipe filtered out - missing variety_id:', {
@@ -433,7 +455,13 @@ const TraysPage = () => {
         variety_id: r.variety_id, 
         hasVariety: !!r.varieties,
         varietyName: r.varieties?.name,
-        seedQuantity: r.varieties?.seed_quantity_grams
+        seedQuantity: (() => {
+          if (r.seed_quantity) {
+            const unit = r.seed_quantity_unit || 'grams';
+            return unit === 'oz' ? r.seed_quantity * 28.35 : r.seed_quantity; // Convert to grams for display
+          }
+          return r.varieties?.seed_quantity_grams || 0;
+        })()
       })));
       console.log('Recipes with inventory:', recipesWithInventory.map(r => ({ id: r.recipe_id, name: r.recipe_name })));
       console.log('Batches data:', (batchesData || []).map(b => ({ batchid: b.batchid, varietyid: b.varietyid, quantity: b.quantity })));
@@ -478,7 +506,7 @@ const TraysPage = () => {
   useEffect(() => {
     fetchTrays();
     fetchFormData();
-  }, []);
+  }, [statusFilter]);
 
   // Update available batches when recipe is selected
   useEffect(() => {
@@ -502,7 +530,15 @@ const TraysPage = () => {
 
       // For global recipes, we need to match by variety_name since they don't have variety_id
       const varietyId = selectedRecipe.variety_id || selectedRecipe.varieties?.varietyid;
-      const seedQuantityNeeded = selectedRecipe.varieties?.seed_quantity_grams || 0;
+      // Use recipe seed_quantity if available, fallback to variety seed_quantity_grams
+      // Convert to grams for comparison (batches are stored in grams)
+      let seedQuantityNeeded = 0;
+      if (selectedRecipe.seed_quantity) {
+        const unit = selectedRecipe.seed_quantity_unit || 'grams';
+        seedQuantityNeeded = unit === 'oz' ? selectedRecipe.seed_quantity * 28.35 : selectedRecipe.seed_quantity; // Convert oz to grams
+      } else {
+        seedQuantityNeeded = selectedRecipe.varieties?.seed_quantity_grams || 0;
+      }
       const varietyName = selectedRecipe.varieties?.name || selectedRecipe.variety_name || 'this variety';
 
       // For global recipes without variety_id, show all batches for now
@@ -846,7 +882,9 @@ const TraysPage = () => {
             recipe_name,
             variety_name,
             variety_id,
-            varieties!inner(varietyid, name, seed_quantity_grams)
+            varieties!inner(varietyid, name, seed_quantity_grams),
+            seed_quantity,
+            seed_quantity_unit
           )
         `)
         .eq('tray_id', tray.id)
@@ -1124,6 +1162,18 @@ const TraysPage = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-8"
           />
+        </div>
+        <div className="flex items-center gap-2">
+          {(['all', 'active', 'harvested', 'lost'] as TrayStatusFilter[]).map((status) => (
+            <Button
+              key={status}
+              variant={statusFilter === status ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setStatusFilter(status)}
+            >
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </Button>
+          ))}
         </div>
       </div>
 

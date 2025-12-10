@@ -26,11 +26,14 @@ interface MixMapping {
 }
 
 interface Recipe {
-  recipe_id: number;
+  recipe_id: number | string; // Can be number for farm recipes or string like "global_123" for global recipes
   recipe_name: string;
   variety_name: string;
   total_days: number;
-  average_yield: number;
+  average_yield: number; // Yield per tray in oz
+  is_global?: boolean;
+  global_recipe_id?: number;
+  expected_yield_oz?: number; // For global recipes, this comes from global_recipes.expected_yield_oz
 }
 
 interface CalculationResult {
@@ -39,7 +42,8 @@ interface CalculationResult {
   recipe_id: number;
   recipe_name: string;
   trays_needed: number;
-  total_yield: number;
+  total_yield: number; // Required yield in oz
+  expected_yield_per_tray: number; // Expected yield per tray in oz
   sow_date: Date;
   ratio: number;
 }
@@ -126,10 +130,11 @@ const MixCalculatorPage = () => {
         return;
       }
 
-      // Fetch recipes with steps to calculate total days
-      const { data: recipesData, error: recipesError } = await supabase
+      // Fetch farm recipes with steps to calculate total days
+      // Include global_recipe_id to look up expected_yield_oz
+      const { data: farmRecipesData, error: recipesError } = await supabase
         .from('recipes')
-        .select('recipe_id, recipe_name, variety_name')
+        .select('recipe_id, recipe_name, variety_name, global_recipe_id')
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
 
@@ -139,71 +144,158 @@ const MixCalculatorPage = () => {
         return;
       }
 
-      // Fetch steps for each recipe to calculate total days
+      // Fetch enabled global recipes with expected_yield_oz
+      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+        .from('farm_global_recipes')
+        .select(`
+          global_recipe_id,
+          global_recipes!inner(
+            global_recipe_id,
+            recipe_name,
+            variety_name,
+            expected_yield_oz,
+            is_active,
+            global_steps(duration, duration_unit, sequence_order)
+          )
+        `)
+        .eq('farm_uuid', farmUuid)
+        .eq('is_active', true);
+
+      if (globalError) {
+        console.error('Error fetching enabled global recipes:', globalError);
+      }
+
+      // Fetch all global recipes with expected_yield_oz for lookup by global_recipe_id
+      const { data: allGlobalRecipes, error: allGlobalError } = await supabase
+        .from('global_recipes')
+        .select('global_recipe_id, recipe_name, variety_name, expected_yield_oz')
+        .eq('is_active', true);
+
+      if (allGlobalError) {
+        console.error('Error fetching all global recipes:', allGlobalError);
+      }
+
+      // Create a map for quick lookup by global_recipe_id
+      const globalRecipesMap = new Map(
+        (allGlobalRecipes || []).map((gr: { global_recipe_id: number; expected_yield_oz?: number }) => [
+          gr.global_recipe_id,
+          gr
+        ])
+      );
+
+      // Process farm recipes
       const recipesWithDetails: Recipe[] = [];
-      for (const recipe of recipesData || []) {
+      for (const recipe of farmRecipesData || []) {
         try {
           // Fetch steps using actual schema (duration, duration_unit, sequence_order)
-          // Note: sequence_order is used for newer recipes, step_order for older ones
           const { data: stepsData, error: stepsError } = await supabase
             .from('steps')
             .select('duration, duration_unit, sequence_order')
             .eq('recipe_id', recipe.recipe_id);
           
-          // Sort steps by sequence_order (fallback to step_order for backwards compatibility)
+          // Sort steps by sequence_order
           const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const orderA = (a as any).sequence_order ?? (a as any).step_order ?? 0;
+            const orderA = (a as any).sequence_order ?? 0;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const orderB = (b as any).sequence_order ?? (b as any).step_order ?? 0;
+            const orderB = (b as any).sequence_order ?? 0;
             return orderA - orderB;
           }) : null;
 
           if (stepsError) {
             console.warn(`Error fetching steps for recipe ${recipe.recipe_id}:`, stepsError);
-            // Still add the recipe with default days
+            // Look up expected_yield_oz using global_recipe_id if available
+            const globalRecipe = recipe.global_recipe_id 
+              ? globalRecipesMap.get(recipe.global_recipe_id)
+              : null;
+            
             recipesWithDetails.push({
               recipe_id: recipe.recipe_id,
               recipe_name: recipe.recipe_name,
               variety_name: recipe.variety_name || '',
-              total_days: 10, // Default to 10 if steps can't be fetched
-              average_yield: 4.0,
+              total_days: 10,
+              average_yield: globalRecipe?.expected_yield_oz || 4.0,
+              is_global: false,
             });
             continue;
           }
 
           // Calculate total days, accounting for duration_unit
-          const totalDays = (sortedStepsData || []).reduce((sum: number, step: { duration?: number; duration_days?: number; duration_unit?: string }) => {
-            const duration = step.duration || step.duration_days || 0;
+          const totalDays = (sortedStepsData || []).reduce((sum: number, step: { duration?: number; duration_unit?: string }) => {
+            const duration = step.duration || 0;
             const unit = (step.duration_unit || 'Days').toUpperCase();
             
             if (unit === 'DAYS') {
               return sum + duration;
             } else if (unit === 'HOURS') {
-              // Hours >= 12 counts as 1 day, otherwise 0
               return sum + (duration >= 12 ? 1 : 0);
             }
-            return sum + duration; // default: treat as days
+            return sum + duration;
           }, 0);
+
+          // Look up expected_yield_oz using global_recipe_id if available
+          const globalRecipe = recipe.global_recipe_id 
+            ? globalRecipesMap.get(recipe.global_recipe_id)
+            : null;
 
           recipesWithDetails.push({
             recipe_id: recipe.recipe_id,
             recipe_name: recipe.recipe_name,
             variety_name: recipe.variety_name || '',
-            total_days: totalDays || 10, // Default to 10 if no steps
-            average_yield: 4.0, // Default yield, should be configurable per recipe
+            total_days: totalDays || 10,
+            average_yield: globalRecipe?.expected_yield_oz || 4.0, // Use global recipe's expected_yield_oz if found
+            is_global: false,
           });
         } catch (stepError) {
           console.warn(`Error processing steps for recipe ${recipe.recipe_id}:`, stepError);
-          // Still add the recipe with default days
+          // Look up expected_yield_oz using global_recipe_id if available
+          const globalRecipe = recipe.global_recipe_id 
+            ? globalRecipesMap.get(recipe.global_recipe_id)
+            : null;
+
           recipesWithDetails.push({
             recipe_id: recipe.recipe_id,
             recipe_name: recipe.recipe_name,
             variety_name: recipe.variety_name || '',
             total_days: 10,
-            average_yield: 4.0,
+            average_yield: globalRecipe?.expected_yield_oz || 4.0,
+            is_global: false,
           });
         }
+      }
+
+      // Process global recipes
+      for (const item of enabledGlobalRecipes || []) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const globalRecipe = (item as any).global_recipes;
+        if (!globalRecipe || !globalRecipe.is_active) continue;
+
+        // Calculate total days from global_steps
+        const steps = (globalRecipe.global_steps || []) as Array<{ duration?: number; duration_unit?: string; sequence_order?: number }>;
+        const sortedSteps = [...steps].sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+        
+        const totalDays = sortedSteps.reduce((sum: number, step: { duration?: number; duration_unit?: string }) => {
+          const duration = step.duration || 0;
+          const unit = (step.duration_unit || 'Days').toUpperCase();
+          
+          if (unit === 'DAYS') {
+            return sum + duration;
+          } else if (unit === 'HOURS') {
+            return sum + (duration >= 12 ? 1 : 0);
+          }
+          return sum + duration;
+        }, 0);
+
+        recipesWithDetails.push({
+          recipe_id: `global_${item.global_recipe_id}`,
+          recipe_name: globalRecipe.recipe_name || '',
+          variety_name: globalRecipe.variety_name || '',
+          total_days: totalDays || 10,
+          average_yield: globalRecipe.expected_yield_oz || 4.0, // Use expected_yield_oz from global_recipes
+          is_global: true,
+          global_recipe_id: item.global_recipe_id,
+          expected_yield_oz: globalRecipe.expected_yield_oz,
+        });
       }
 
       setRecipes(recipesWithDetails);
@@ -230,7 +322,7 @@ const MixCalculatorPage = () => {
         recipe_id: m.recipe_id,
         variety_id: m.variety_id,
         ratio: m.ratio || 1.0,
-        recipe_name: m.recipes?.recipe_name || '',
+        recipe_name: (m.recipes?.recipe_name || '').replace(' (Copy)', ' (Global)'),
         variety_name: m.varieties?.name || m.varieties?.variety_name || '',
       }));
 
@@ -286,6 +378,12 @@ const MixCalculatorPage = () => {
     a.download = `mix-calculation-${new Date().toISOString().split('T')[0]}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleClear = () => {
+    setCalculations([]);
+    setOrderQuantity('');
+    setDeliveryDate('');
   };
 
   const selectedProduct = products.find(p => p.product_id.toString() === selectedProductId);
@@ -426,7 +524,8 @@ const MixCalculatorPage = () => {
                       <TableRow>
                         <TableHead>Variety</TableHead>
                         <TableHead>Trays</TableHead>
-                        <TableHead>Yield (oz)</TableHead>
+                        <TableHead>Required (oz)</TableHead>
+                        <TableHead>Yield/Tray (oz)</TableHead>
                         <TableHead>Sow Date</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -436,12 +535,13 @@ const MixCalculatorPage = () => {
                           <TableCell className="font-medium">
                             {calc.variety_name}
                             <br />
-                            <span className="text-xs text-gray-500">{calc.recipe_name}</span>
+                            <span className="text-xs text-gray-500">{calc.recipe_name.replace(' (Copy)', ' (Global)')}</span>
                           </TableCell>
                           <TableCell>
                             <Badge>{calc.trays_needed}</Badge>
                           </TableCell>
                           <TableCell>{calc.total_yield.toFixed(2)}</TableCell>
+                          <TableCell>{calc.expected_yield_per_tray.toFixed(1)}</TableCell>
                           <TableCell>
                             {calc.sow_date.toLocaleDateString()}
                           </TableCell>
@@ -451,9 +551,14 @@ const MixCalculatorPage = () => {
                   </Table>
                 </div>
 
-                <Button onClick={handleExport} variant="outline" className="w-full">
-                  Export Calculation
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={handleClear} variant="outline" className="flex-1">
+                    Clear Calculations
+                  </Button>
+                  <Button onClick={handleExport} variant="outline" className="flex-1" disabled={calculations.length === 0}>
+                    Export Calculation
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

@@ -9,6 +9,95 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Helper function to normalize batch unit display (same logic as SuppliesPage)
+const normalizeBatchUnit = (batch: any) => {
+  let displayUnit = batch.unit || 'lbs';
+  let displayQuantity = batch.quantity ?? 0;
+  let displayThreshold = batch.low_stock_threshold || batch.reorderlevel || null;
+  const quantityNum = parseFloat(displayQuantity.toString());
+  const thresholdNum = displayThreshold ? parseFloat(displayThreshold.toString()) : null;
+
+  // Case 1: Unit is 'grams' but quantity is 1 (likely 1 lb mislabeled as grams)
+  if ((displayUnit === 'grams' || displayUnit === 'g') && quantityNum === 1) {
+    displayUnit = 'lbs';
+    // Quantity stays 1, just change the unit
+    if (thresholdNum !== null) {
+      // Convert threshold from grams to lbs if it exists
+      displayThreshold = thresholdNum / 453.592;
+    }
+  }
+  // Case 2: Unit is 'lbs' but quantity is < 1 lb (has been partially used)
+  // After deductions, the trigger should convert back to lbs, so 0.5 lbs is valid
+  // But if it's a whole number like 160, 200, etc., it's likely grams mislabeled as lbs
+  else if ((displayUnit === 'lbs' || displayUnit === 'lb') && quantityNum > 0 && quantityNum < 1) {
+    if (quantityNum === Math.floor(quantityNum)) {
+      // Whole number less than 1 - this is definitely grams, not lbs
+      displayQuantity = quantityNum * 453.592; // Convert to grams
+      displayUnit = 'grams';
+      if (thresholdNum !== null && thresholdNum < 1 && thresholdNum === Math.floor(thresholdNum)) {
+        displayThreshold = thresholdNum * 453.592;
+      }
+    }
+  }
+  // Case 3: Unit is 'lbs' but quantity is a whole number 50-500
+  // These are likely grams mislabeled as lbs (e.g., 160 grams showing as 160 lbs)
+  else if ((displayUnit === 'lbs' || displayUnit === 'lb') && quantityNum >= 50 && quantityNum < 500) {
+    if (quantityNum === Math.floor(quantityNum)) {
+      // Whole number in suspicious range - likely grams
+      displayUnit = 'grams';
+      // Quantity is already in grams, no conversion needed
+      if (thresholdNum !== null && thresholdNum >= 50 && thresholdNum < 500 && thresholdNum === Math.floor(thresholdNum)) {
+        // Threshold is also in grams
+      } else if (thresholdNum !== null && thresholdNum < 1) {
+        // Threshold is a decimal like 0.25 lbs, convert to grams
+        displayThreshold = thresholdNum * 453.592;
+      }
+    }
+  }
+  // Case 4: Unit is 'grams' but quantity is very large (2000+), might actually be lbs
+  else if ((displayUnit === 'grams' || displayUnit === 'g') && quantityNum >= 2000) {
+    if (quantityNum === Math.floor(quantityNum)) {
+      displayUnit = 'lbs';
+      displayQuantity = quantityNum / 453.592; // Convert grams to lbs
+      if (thresholdNum !== null && thresholdNum >= 2000 && thresholdNum === Math.floor(thresholdNum)) {
+        displayThreshold = thresholdNum / 453.592;
+      }
+    }
+  }
+
+  // Always convert threshold to lbs for display, regardless of quantity unit
+  if (displayThreshold !== null) {
+    const originalUnit = batch.unit || 'lbs';
+    const originalThreshold = batch.low_stock_threshold || batch.reorderlevel || null;
+    
+    if (originalThreshold !== null) {
+      const originalThresholdNum = parseFloat(originalThreshold.toString());
+      
+      // Convert threshold to lbs based on original unit
+      if (originalUnit === 'grams' || originalUnit === 'g') {
+        displayThreshold = originalThresholdNum / 453.592; // Convert grams to lbs
+      } else if (originalUnit === 'oz' || originalUnit === 'ounce' || originalUnit === 'ounces') {
+        displayThreshold = originalThresholdNum / 16; // Convert oz to lbs
+      } else if (originalUnit === 'kg' || originalUnit === 'kilogram' || originalUnit === 'kilograms') {
+        displayThreshold = originalThresholdNum * 2.20462; // Convert kg to lbs
+      } else if (originalUnit === 'lbs' || originalUnit === 'lb' || originalUnit === 'pound' || originalUnit === 'pounds') {
+        // Already in lbs, no conversion needed
+        displayThreshold = originalThresholdNum;
+      } else {
+        // Unknown unit, assume it's already in lbs
+        displayThreshold = originalThresholdNum;
+      }
+    }
+  }
+
+  return {
+    quantity: displayQuantity,
+    unit: displayUnit,
+    threshold: displayThreshold,
+    thresholdUnit: 'lbs', // Always lbs for thresholds
+  };
+};
+
 const BatchesPage = () => {
   const [batches, setBatches] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<any[]>([]);
@@ -30,6 +119,7 @@ const BatchesPage = () => {
     lot_number: '',
     purchase_date: new Date().toISOString().split('T')[0],
     cost: '',
+    low_stock_threshold: '',
   });
 
   const fetchBatches = async () => {
@@ -73,6 +163,28 @@ const BatchesPage = () => {
         }));
       }
 
+      // Fetch vendors if not already loaded (needed for batch normalization)
+      let vendorsList = vendors;
+      if (vendorsList.length === 0) {
+        const { data: vendorsData } = await supabase
+          .from('vendors')
+          .select('*')
+          .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
+        
+        vendorsList = (vendorsData || []).map((v: any) => {
+          const vendorId = v.vendorid || v.vendor_id || v.id;
+          const vendorName = v.name || v.vendor_name || v.vendorname || '';
+          return {
+            ...v,
+            vendor_id: vendorId,
+            vendorid: vendorId,
+            vendor_name: vendorName,
+            name: vendorName,
+            vendorname: vendorName,
+          };
+        }).filter((v: any) => v.vendor_id != null && v.vendor_id !== undefined);
+      }
+
       // Get tray counts for each batch and join vendor/variety data
       // Actual DB columns: batchid, vendorid, varietyid
       const batchesWithTrayCounts = await Promise.all(
@@ -85,9 +197,9 @@ const BatchesPage = () => {
             .eq('farm_uuid', farmUuid);
 
           // Find vendor name if vendorid exists (actual DB column)
-          // Use vendors state (already normalized) or fetch if not loaded
+          // Use vendorsList (fetched if needed) instead of vendors state
           const vendorId = batch.vendorid || batch.vendor_id;
-          const vendor = vendorId ? vendors.find(v => 
+          const vendor = vendorId ? vendorsList.find(v => 
             (v.vendorid || v.vendor_id) === vendorId
           ) : null;
 
@@ -107,8 +219,10 @@ const BatchesPage = () => {
             lot_number: batch.lot_number || batch.lotnumber || null,
             vendor_id: vendorId,
             trayCount: count || 0,
+            low_stock_threshold: batch.low_stock_threshold || batch.reorderlevel || null,
+            unit: batch.unit || 'lbs', // Ensure unit is available
             vendors: vendor ? { 
-              vendor_name: ((vendor as any).vendor_name || (vendor as any).vendorname || '') as string 
+              vendor_name: (vendor.vendor_name || vendor.name || vendor.vendorname || '') as string 
             } : null,
           };
           return normalizedBatch;
@@ -318,6 +432,7 @@ const BatchesPage = () => {
         varietyid: parseInt(newBatch.variety_id), // Actual DB column
         vendorid: newBatch.vendor_id ? parseInt(newBatch.vendor_id) : null, // Actual DB column
         quantity: parseFloat(newBatch.quantity),
+        unit: newBatch.unit || 'lbs', // Save the unit
         lot_number: newBatch.lot_number,
         purchasedate: newBatch.purchase_date, // Actual DB column
         farm_uuid: farmUuid,
@@ -331,6 +446,11 @@ const BatchesPage = () => {
         if (newBatch.quantity && newBatch.unit === 'oz') {
           payload.priceperounce = parseFloat(newBatch.cost) / parseFloat(newBatch.quantity);
         }
+      }
+
+      // Add low stock threshold if provided
+      if (newBatch.low_stock_threshold) {
+        payload.low_stock_threshold = parseFloat(newBatch.low_stock_threshold);
       }
 
       const { error } = await supabase
@@ -378,6 +498,7 @@ const BatchesPage = () => {
         lot_number: '',
         purchase_date: new Date().toISOString().split('T')[0],
         cost: '',
+        low_stock_threshold: '',
       });
       setIsAddDialogOpen(false);
       fetchBatches();
@@ -412,6 +533,7 @@ const BatchesPage = () => {
         ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
       cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
+      low_stock_threshold: batch.low_stock_threshold?.toString() || batch.reorderlevel?.toString() || '',
     };
     
     setEditingBatch(editData);
@@ -434,6 +556,7 @@ const BatchesPage = () => {
         varietyid: parseInt(editingBatch.variety_id), // Actual DB column
         vendorid: editingBatch.vendor_id ? parseInt(editingBatch.vendor_id) : null, // Actual DB column
         quantity: parseFloat(editingBatch.quantity),
+        unit: editingBatch.unit || 'lbs', // Save the unit
         lot_number: editingBatch.lot_number || null,
         purchasedate: editingBatch.purchase_date, // Actual DB column
       };
@@ -445,6 +568,11 @@ const BatchesPage = () => {
         if (editingBatch.quantity && editingBatch.unit === 'oz') {
           payload.priceperounce = parseFloat(editingBatch.cost) / parseFloat(editingBatch.quantity);
         }
+      }
+
+      // Add low stock threshold if provided
+      if (editingBatch.low_stock_threshold) {
+        payload.low_stock_threshold = parseFloat(editingBatch.low_stock_threshold);
       }
 
       const { error } = await supabase
@@ -670,6 +798,34 @@ const BatchesPage = () => {
                   />
                 </div>
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="threshold">Low Stock Threshold (Optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="threshold"
+                    type="number"
+                    step="0.1"
+                    placeholder="0.0"
+                    value={newBatch.low_stock_threshold}
+                    onChange={(e) => setNewBatch({ ...newBatch, low_stock_threshold: e.target.value })}
+                  />
+                  <Select 
+                    value={newBatch.unit} 
+                    onValueChange={(value) => setNewBatch({ ...newBatch, unit: value })}
+                  >
+                    <SelectTrigger className="w-[80px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lbs">lbs</SelectItem>
+                      <SelectItem value="oz">oz</SelectItem>
+                      <SelectItem value="kg">kg</SelectItem>
+                      <SelectItem value="g">g</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">Alert when seed quantity falls below this amount</p>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
@@ -703,6 +859,7 @@ const BatchesPage = () => {
               <TableHead>Variety</TableHead>
               <TableHead>Purchase Date</TableHead>
               <TableHead>Quantity</TableHead>
+              <TableHead>Threshold</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead>Trays</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -711,7 +868,7 @@ const BatchesPage = () => {
           <TableBody>
             {filteredBatches.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="p-0 border-none">
+                <TableCell colSpan={8} className="p-0 border-none">
                   <div className="p-8 flex flex-col items-center justify-center text-center">
                      {searchTerm ? (
                        <>
@@ -732,21 +889,32 @@ const BatchesPage = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredBatches.map((batch) => (
-                <TableRow key={batch.batch_id || batch.batchid}>
-                  <TableCell className="font-medium">
-                    <button
-                      onClick={() => handleViewBatch(batch)}
-                      className="text-primary hover:underline cursor-pointer"
-                    >
-                      B-{batch.batch_id || batch.batchid}
-                    </button>
-                  </TableCell>
-                  <TableCell>{batch.variety_name || 'N/A'}</TableCell>
-                  <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell>{batch.quantity ? `${batch.quantity} ${batch.unit || 'units'}` : 'N/A'}</TableCell>
-                  <TableCell>{batch.vendors?.vendor_name || '-'}</TableCell>
-                  <TableCell>{batch.trayCount || 0}</TableCell>
+              filteredBatches.map((batch) => {
+                const normalized = normalizeBatchUnit(batch);
+                return (
+                  <TableRow key={batch.batch_id || batch.batchid}>
+                    <TableCell className="font-medium">
+                      <button
+                        onClick={() => handleViewBatch(batch)}
+                        className="text-primary hover:underline cursor-pointer"
+                      >
+                        B-{batch.batch_id || batch.batchid}
+                      </button>
+                    </TableCell>
+                    <TableCell>{batch.variety_name || 'N/A'}</TableCell>
+                    <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
+                    <TableCell>
+                      {normalized.quantity 
+                        ? `${normalized.quantity.toFixed(2).replace(/\.?0+$/, '')} ${normalized.unit}` 
+                        : 'N/A'}
+                    </TableCell>
+                    <TableCell>
+                      {normalized.threshold !== null 
+                        ? `${normalized.threshold.toFixed(2).replace(/\.?0+$/, '')} ${normalized.thresholdUnit || 'lbs'}` 
+                        : '-'}
+                    </TableCell>
+                    <TableCell>{batch.vendors?.vendor_name || '-'}</TableCell>
+                    <TableCell>{batch.trayCount || 0}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button 
@@ -763,8 +931,9 @@ const BatchesPage = () => {
                       </Button>
                     </div>
                   </TableCell>
-                </TableRow>
-              ))
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -779,54 +948,71 @@ const BatchesPage = () => {
               View detailed information about this seed batch.
             </DialogDescription>
           </DialogHeader>
-          {selectedBatch && (
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Batch ID</Label>
-                  <div className="font-medium">B-{selectedBatch.batch_id || selectedBatch.batchid}</div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Variety</Label>
-                  <div>{selectedBatch.variety_name || 'N/A'}</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Purchase Date</Label>
-                  <div>
-                    {(selectedBatch.purchase_date || selectedBatch.purchasedate) 
-                      ? new Date((selectedBatch.purchase_date || selectedBatch.purchasedate) as string).toLocaleDateString() 
-                      : 'N/A'}
+          {selectedBatch && (() => {
+            const normalized = normalizeBatchUnit(selectedBatch);
+            return (
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Batch ID</Label>
+                    <div className="font-medium">B-{selectedBatch.batch_id || selectedBatch.batchid}</div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Variety</Label>
+                    <div>{selectedBatch.variety_name || 'N/A'}</div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Vendor</Label>
-                  <div>{selectedBatch.vendors?.vendor_name || '-'}</div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Purchase Date</Label>
+                    <div>
+                      {(selectedBatch.purchase_date || selectedBatch.purchasedate) 
+                        ? new Date((selectedBatch.purchase_date || selectedBatch.purchasedate) as string).toLocaleDateString() 
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Vendor</Label>
+                    <div>{selectedBatch.vendors?.vendor_name || '-'}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Quantity</Label>
+                    <div>
+                      {normalized.quantity 
+                        ? `${normalized.quantity.toFixed(2).replace(/\.?0+$/, '')} ${normalized.unit}` 
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Lot Number</Label>
+                    <div>{selectedBatch.lot_number || selectedBatch.lotnumber || '-'}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Low Stock Threshold</Label>
+                    <div>
+                      {normalized.threshold !== null 
+                        ? `${normalized.threshold.toFixed(2).replace(/\.?0+$/, '')} ${normalized.thresholdUnit || 'lbs'}` 
+                        : '-'}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Cost</Label>
+                    <div>{selectedBatch.totalprice || selectedBatch.cost ? `$${parseFloat((selectedBatch.totalprice || selectedBatch.cost).toString()).toFixed(2)}` : '-'}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Trays</Label>
+                    <div>{selectedBatch.trayCount || 0}</div>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Quantity</Label>
-                  <div>{selectedBatch.quantity ? `${selectedBatch.quantity} ${selectedBatch.unit || 'units'}` : 'N/A'}</div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Lot Number</Label>
-                  <div>{selectedBatch.lot_number || selectedBatch.lotnumber || '-'}</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Cost</Label>
-                  <div>{selectedBatch.totalprice || selectedBatch.cost ? `$${parseFloat((selectedBatch.totalprice || selectedBatch.cost).toString()).toFixed(2)}` : '-'}</div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">Trays</Label>
-                  <div>{selectedBatch.trayCount || 0}</div>
-                </div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
@@ -976,6 +1162,34 @@ const BatchesPage = () => {
                     onChange={(e) => setEditingBatch({ ...editingBatch, purchase_date: e.target.value })}
                   />
                 </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-threshold">Low Stock Threshold (Optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="edit-threshold"
+                    type="number"
+                    step="0.1"
+                    placeholder="0.0"
+                    value={editingBatch.low_stock_threshold || ''}
+                    onChange={(e) => setEditingBatch({ ...editingBatch, low_stock_threshold: e.target.value })}
+                  />
+                  <Select 
+                    value={editingBatch.unit} 
+                    onValueChange={(value) => setEditingBatch({ ...editingBatch, unit: value })}
+                  >
+                    <SelectTrigger className="w-[80px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lbs">lbs</SelectItem>
+                      <SelectItem value="oz">oz</SelectItem>
+                      <SelectItem value="kg">kg</SelectItem>
+                      <SelectItem value="g">g</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">Alert when seed quantity falls below this amount</p>
               </div>
             </div>
           )}

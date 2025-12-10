@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 interface FarmData {
   farm_uuid: string;
   farm_name: string;
+  seeding_days?: string[];
   subscription_status?: string;
   subscription_plan?: string;
   trial_start_date?: string;
@@ -39,6 +40,7 @@ const SettingsPage = () => {
 
   // Farm settings
   const [farmName, setFarmName] = useState('');
+  const [seedingDays, setSeedingDays] = useState<string[]>(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
   
   // User profile
   const [userName, setUserName] = useState('');
@@ -76,6 +78,7 @@ const SettingsPage = () => {
       if (farm) {
         setFarmData(farm);
         setFarmName(farm.farm_name || farm.farmname || '');
+        setSeedingDays(farm.seeding_days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
       }
 
       // Fetch profile data
@@ -120,7 +123,10 @@ const SettingsPage = () => {
     try {
       const { error } = await supabase
         .from('farms')
-        .update({ farm_name: farmName })
+        .update({ 
+          farm_name: farmName,
+          seeding_days: seedingDays
+        })
         .eq('farm_uuid', farmData.farm_uuid);
 
       if (error) throw error;
@@ -331,6 +337,34 @@ const SettingsPage = () => {
               onChange={(e) => setFarmName(e.target.value)}
               placeholder="Enter farm name"
             />
+          </div>
+          <div className="grid gap-2">
+            <Label>Seeding Days</Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Select the days of the week when seeding typically occurs
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                <div key={day} className="flex items-center space-x-2">
+                  <input
+                    id={`seeding-${day}`}
+                    type="checkbox"
+                    checked={seedingDays.includes(day)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSeedingDays([...seedingDays, day]);
+                      } else {
+                        setSeedingDays(seedingDays.filter(d => d !== day));
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor={`seeding-${day}`} className="font-normal cursor-pointer">
+                    {day}
+                  </Label>
+                </div>
+              ))}
+            </div>
           </div>
           <Button onClick={handleSaveFarm} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />

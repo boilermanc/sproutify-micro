@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { notifyNewOrder, checkHarvestReminders } from '../services/notificationService';
+import { checkHarvestReminders } from '../services/notificationService';
 import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
-import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle } from 'lucide-react';
+import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -17,6 +17,14 @@ import { Textarea } from '@/components/ui/textarea';
 type TrayStatusFilter = 'all' | 'active' | 'harvested' | 'lost';
 
 const TraysPage = () => {
+  const stageColors: Record<string, string> = {
+    Germination: 'bg-yellow-500 hover:bg-yellow-600',
+    Blackout: 'bg-purple-500 hover:bg-purple-600',
+    Grow: 'bg-green-500 hover:bg-green-600',
+    Growing: 'bg-green-500 hover:bg-green-600',
+    Harvest: 'bg-blue-500 hover:bg-blue-600',
+    Harvesting: 'bg-blue-500 hover:bg-blue-600',
+  };
   const [trays, setTrays] = useState<any[]>([]);
   const [recipes, setRecipes] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
@@ -24,6 +32,10 @@ const TraysPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<TrayStatusFilter>('active');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+  const ITEMS_PER_PAGE = 20;
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -34,12 +46,13 @@ const TraysPage = () => {
   const [updating, setUpdating] = useState(false);
   const [newTray, setNewTray] = useState({
     recipe_id: '',
-    batch_id: '',
-    customer_id: '',
+    quantity: 1,
+    seed_date: new Date().toISOString().split('T')[0],
     location: '',
   });
-  const [availableBatches, setAvailableBatches] = useState<any[]>([]);
-  const [batchWarning, setBatchWarning] = useState<string>('');
+  // Batch selection helpers (setter-only to avoid unused state)
+  const [, setAvailableBatches] = useState<any[]>([]);
+  const [, setBatchWarning] = useState('');
 
   // Lost Tray Dialog state
   const [isLostDialogOpen, setIsLostDialogOpen] = useState(false);
@@ -48,12 +61,16 @@ const TraysPage = () => {
   const [lossNotes, setLossNotes] = useState('');
   const [markingAsLost, setMarkingAsLost] = useState(false);
 
-  const fetchTrays = async () => {
+  const fetchTrays = useCallback(async () => {
+    setLoading(true);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
+      const offset = page * ITEMS_PER_PAGE;
+      const to = offset + ITEMS_PER_PAGE - 1;
+      const search = searchTerm.trim();
 
       // Fetch trays with recipes join, and join varieties to get variety name
       // Note: seedbatches join removed - will fetch separately to avoid column name issues
@@ -66,22 +83,33 @@ const TraysPage = () => {
             variety_id,
             varieties!inner(varietyid, name)
           )
-        `)
+        `, { count: 'exact' })
         .eq('farm_uuid', farmUuid);
 
       // Apply status filter
       if (statusFilter === 'active') {
         query = query.is('harvest_date', null).or('status.is.null,status.eq.active');
       } else if (statusFilter === 'harvested') {
-        query = query.not('harvest_date', 'is', null);
+        query = query
+          .not('harvest_date', 'is', null) // harvested trays have a harvest_date
+          .neq('status', 'lost'); // exclude lost even if they somehow have a harvest_date
       } else if (statusFilter === 'lost') {
         query = query.eq('status', 'lost');
       }
       // 'all' shows everything, so no additional filter
 
-      const { data, error } = await query.order('created_at', { ascending: false });
+      if (search) {
+        query = query.or(`tray_unique_id.ilike.%${search}%,recipes.recipe_name.ilike.%${search}%,recipes.varieties.name.ilike.%${search}%`);
+      }
+
+      const { data, error, count } = await query
+        .order('created_at', { ascending: false })
+        .range(offset, to);
 
       if (error) throw error;
+      if (typeof count === 'number') {
+        setTotalCount(count);
+      }
 
       // Fetch seedbatches separately to get batch info
       // Actual DB column: batchid (not batch_id)
@@ -144,7 +172,7 @@ const TraysPage = () => {
 
       // Fetch recipe steps to calculate grow time and projected harvest dates
       const recipeIds = [...new Set((data || []).map((tray: any) => tray.recipe_id).filter((id: any) => id !== null && id !== undefined))];
-      let recipeGrowTimes: Record<number, number> = {};
+      const recipeGrowTimes: Record<number, number> = {};
       
       if (recipeIds.length > 0) {
         const { data: allSteps, error: stepsError } = await supabase
@@ -196,11 +224,52 @@ const TraysPage = () => {
         }
       }
 
+      // Fetch current pending step per active tray to show stage
+      const currentStepByTray: Record<number, string> = {};
+      const activeTrayIds = (data || [])
+        .filter((t: any) => t.status !== 'lost' && t.status !== 'harvested' && !t.harvest_date)
+        .map((t: any) => t.tray_id);
+
+    console.log('Active tray IDs:', activeTrayIds);
+
+      if (activeTrayIds.length > 0) {
+        const { data: currentSteps, error: stepsError } = await supabase
+          .from('tray_steps')
+          .select('tray_id, step_id, scheduled_date, status')
+          .in('tray_id', activeTrayIds)
+          .eq('status', 'Pending')
+          .order('scheduled_date', { ascending: true });
+
+        console.log('Steps query error:', stepsError);
+        console.log('Current steps raw:', currentSteps);
+
+        if (currentSteps && currentSteps.length > 0) {
+          const stepIds = [...new Set(currentSteps.map((cs: any) => cs.step_id))];
+          const { data: stepsData } = await supabase
+            .from('steps')
+            .select('step_id, step_name')
+            .in('step_id', stepIds);
+
+          const stepNameMap: Record<number, string> = {};
+          (stepsData || []).forEach((s: any) => {
+            stepNameMap[s.step_id] = s.step_name;
+          });
+
+          (currentSteps || []).forEach((cs: any) => {
+            if (!currentStepByTray[cs.tray_id]) {
+              currentStepByTray[cs.tray_id] = stepNameMap[cs.step_id] || 'Growing';
+            }
+          });
+        }
+
+        console.log('Current step by tray:', currentStepByTray);
+      }
+
       const formattedTrays = (data || []).map(tray => {
         const batch = tray.batch_id ? batchesMap[tray.batch_id] : null;
         const customerName = tray.customer_id ? customersMap[tray.customer_id] : null;
         
-        // Calculate projected harvest date
+      // Calculate projected harvest date
         let projectedHarvestDate = 'Not set';
         if (tray.sow_date) {
           const sowDate = new Date(tray.sow_date);
@@ -213,12 +282,17 @@ const TraysPage = () => {
         }
         
         // Determine status based on tray.status field (new) or legacy logic
+        const currentStage = currentStepByTray[tray.tray_id];
         let status = 'Growing';
         if (tray.status === 'lost') {
           status = 'Lost';
         } else if (tray.status === 'harvested' || tray.harvest_date) {
           status = 'Harvested';
+        } else if (currentStage) {
+          status = currentStage;
         }
+
+      console.log(`Tray ${tray.tray_id}: currentStage=${currentStage}, status=${status}`);
 
         return {
           id: tray.tray_id,
@@ -237,14 +311,18 @@ const TraysPage = () => {
       });
 
       setTrays(formattedTrays);
+      const pageHasMore = (count === null || count === undefined)
+        ? ((data?.length || 0) === ITEMS_PER_PAGE)
+        : ((offset + (data?.length || 0)) < count);
+      setHasMore(pageHasMore);
     } catch (error) {
       console.error('Error fetching trays:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, page, searchTerm]);
 
-  const fetchFormData = async () => {
+  const fetchFormData = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -501,12 +579,16 @@ const TraysPage = () => {
     } catch (error) {
       console.error('Error fetching form data:', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchTrays();
     fetchFormData();
-  }, [statusFilter]);
+  }, [fetchFormData, fetchTrays]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, searchTerm]);
 
   // Update available batches when recipe is selected
   useEffect(() => {
@@ -612,7 +694,7 @@ const TraysPage = () => {
     };
 
     updateAvailableBatches();
-  }, [newTray.recipe_id, recipes, batches]);
+  }, [newTray.batch_id, newTray.recipe_id, recipes, batches]);
 
   const handleAddTray = async () => {
     if (!newTray.recipe_id) {
@@ -620,11 +702,12 @@ const TraysPage = () => {
       return;
     }
 
-    if (!newTray.batch_id) {
-      alert('Please select a seed batch');
+    if (!newTray.seed_date) {
+      alert('Please select a seed date');
       return;
     }
 
+    const quantity = Math.max(1, newTray.quantity || 1);
     setCreating(true);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
@@ -633,7 +716,7 @@ const TraysPage = () => {
 
       // Find the selected recipe to get recipe_name and variety_name
       const isGlobalRecipe = newTray.recipe_id.startsWith('global_');
-      let selectedRecipe = recipes.find(
+      const selectedRecipe = recipes.find(
         (r) => r.recipe_id.toString() === newTray.recipe_id
       );
 
@@ -672,92 +755,45 @@ const TraysPage = () => {
       // Get variety name from join or fallback to text field
       const varietyName = selectedRecipe.varieties?.name || selectedRecipe.variety_name || '';
 
-      // Insert into tray_creation_requests - trigger will create the tray
+      // Create seeding request (new workflow - creates a plan, not trays immediately)
       const { error: requestError } = await supabase
         .from('tray_creation_requests')
         .insert({
-          customer_name: null,
-          variety_name: varietyName,
-          recipe_name: recipeName,
           farm_uuid: farmUuid,
+          recipe_id: actualRecipeId,
+          recipe_name: recipeName,
+          variety_name: varietyName,
+          quantity: quantity,
+          seed_date: newTray.seed_date, // Date when seeding should happen
+          status: 'pending',
+          source_type: 'manual',
           user_id: userId,
-          requested_at: new Date().toISOString(),
-          batch_id: parseInt(newTray.batch_id), // Now required
         });
-
-      // If customer_id or location is provided, update the created tray
-      if (newTray.customer_id || newTray.location) {
-        // Wait a bit for the trigger to create the tray
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Find the newly created tray and update it
-        const { data: createdTray } = await supabase
-          .from('trays')
-          .select('tray_id')
-          .eq('farm_uuid', farmUuid)
-          .eq('created_by', userId)
-          .eq('recipe_id', actualRecipeId)
-          .eq('batch_id', parseInt(newTray.batch_id))
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (createdTray) {
-          const updateData: any = {};
-          if (newTray.customer_id) {
-            updateData.customer_id = parseInt(newTray.customer_id);
-          }
-          if (newTray.location) {
-            updateData.location = newTray.location.trim();
-          }
-          
-          if (Object.keys(updateData).length > 0) {
-            await supabase
-              .from('trays')
-              .update(updateData)
-              .eq('tray_id', createdTray.tray_id)
-              .eq('farm_uuid', farmUuid);
-          }
-        }
-      }
 
       if (requestError) throw requestError;
 
-      // Query for the newly created tray (trigger creates it)
-      let query = supabase
-        .from('trays')
-        .select('*')
-        .eq('farm_uuid', farmUuid)
-        .eq('created_by', userId)
-        .eq('recipe_id', actualRecipeId);
-
-      // Add batch_id filter
-      const batchId = parseInt(newTray.batch_id);
-      query = query.eq('batch_id', batchId);
-
-      const { data: insertedTray, error: trayError } = await query
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (trayError) throw trayError;
-
-      setNewTray({ recipe_id: '', batch_id: '', customer_id: '', location: '' });
+      // Reset form
+      setNewTray({ 
+        recipe_id: '', 
+        quantity: 1, 
+        seed_date: new Date().toISOString().split('T')[0],
+        location: '' 
+      });
       setIsAddDialogOpen(false);
       fetchTrays();
 
       // Check for notifications
-      if (insertedTray) {
-        // If tray has a customer_id, notify about new order
-        if ((insertedTray as { customer_id?: number }).customer_id) {
-          notifyNewOrder(insertedTray.tray_id);
-        }
-        // Check if harvest is coming up soon
-        checkHarvestReminders();
+      checkHarvestReminders();
+
+      // Show success message
+      if (quantity === 1) {
+        alert('Seeding request created successfully');
+      } else {
+        alert(`Successfully created seeding request for ${quantity} trays`);
       }
     } catch (error) {
-      console.error('Error creating tray:', error);
-      alert('Failed to create tray');
+      console.error('Error creating seeding request:', error);
+      alert(`Failed to create seeding request`);
     } finally {
       setCreating(false);
     }
@@ -999,6 +1035,7 @@ const TraysPage = () => {
     tray.variety.toLowerCase().includes(searchTerm.toLowerCase()) ||
     tray.trayId.toString().toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE)) : Math.max(1, page + 1);
 
   if (loading) {
     return (
@@ -1026,6 +1063,14 @@ const TraysPage = () => {
           if (open) {
             // Refresh recipes when dialog opens
             fetchFormData();
+            // Reset form to defaults
+            setNewTray({
+              recipe_id: '',
+              batch_id: '',
+              quantity: 1,
+              seed_date: new Date().toISOString().split('T')[0],
+              location: '',
+            });
           }
         }}>
           <DialogTrigger asChild>
@@ -1036,9 +1081,9 @@ const TraysPage = () => {
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Add New Tray</DialogTitle>
+              <DialogTitle>Add New Tray(s)</DialogTitle>
               <DialogDescription>
-                Start a new tray from a recipe.
+                Start growing trays for inventory or speculative purposes. For customer orders, use the Orders page.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -1074,59 +1119,42 @@ const TraysPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              {newTray.recipe_id && (
-                <div className="grid gap-2">
-                  <Label htmlFor="batch">Seed Batch *</Label>
-                  {batchWarning && (
-                    <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">
-                      {batchWarning}
-                    </div>
-                  )}
-                  {availableBatches.length === 0 && !batchWarning ? (
-                    <div className="text-sm text-muted-foreground p-2 border rounded">
-                      No batches available for this variety. Please add a seed batch first.
-                    </div>
-                  ) : availableBatches.length === 0 ? null : (
-                    <Select 
-                      value={newTray.batch_id} 
-                      onValueChange={(value) => setNewTray({ ...newTray, batch_id: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a batch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableBatches.map((batch) => {
-                          const batchId = batch.batch_id || batch.batchid;
-                          return (
-                            <SelectItem key={batchId} value={batchId.toString()}>
-                              B-{batchId} - {batch.quantity}g available
-                              {batch.lot_number ? ` (Lot: ${batch.lot_number})` : ''}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              )}
               <div className="grid gap-2">
-                <Label htmlFor="customer">Customer (Optional)</Label>
-                <Select 
-                  value={newTray.customer_id || ''} 
-                  onValueChange={(value) => setNewTray({ ...newTray, customer_id: value === 'none' ? '' : value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a customer (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {customers.map((customer) => (
-                      <SelectItem key={customer.customer_id} value={customer.customer_id.toString()}>
-                        {customer.customer_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="quantity">Quantity *</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="1"
+                  placeholder="1"
+                  value={newTray.quantity}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || 1;
+                    setNewTray({ ...newTray, quantity: Math.max(1, val) });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of trays to create
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="seed_date">Seed Date *</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="seed_date"
+                    type="date"
+                    value={newTray.seed_date}
+                    onChange={(e) => setNewTray({ ...newTray, seed_date: e.target.value })}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setNewTray({ ...newTray, seed_date: new Date().toISOString().split('T')[0] })}
+                  >
+                    Today
+                  </Button>
+                </div>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="location">Location (Optional)</Label>
@@ -1144,9 +1172,9 @@ const TraysPage = () => {
               </Button>
               <Button 
                 onClick={handleAddTray} 
-                disabled={creating || !newTray.recipe_id || !newTray.batch_id}
+                disabled={creating || !newTray.recipe_id || !newTray.seed_date}
               >
-                {creating ? 'Creating...' : 'Create Tray'}
+                {creating ? 'Creating...' : newTray.quantity === 1 ? 'Create Seeding Request' : `Create ${newTray.quantity} Seeding Requests`}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1231,10 +1259,10 @@ const TraysPage = () => {
                   <TableCell>{tray.customer}</TableCell>
                   <TableCell>{tray.harvest_date}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant={tray.status === 'Growing' ? 'default' : tray.status === 'Lost' ? 'destructive' : 'secondary'}
-                      className={tray.status === 'Growing' ? 'bg-green-500 hover:bg-green-600' : ''}
-                    >
+                  <Badge
+                    variant={tray.status === 'Lost' ? 'destructive' : tray.status === 'Harvested' ? 'secondary' : 'default'}
+                    className={stageColors[tray.status] || (tray.status === 'Lost' ? '' : tray.status === 'Harvested' ? '' : 'bg-green-500 hover:bg-green-600')}
+                  >
                       {tray.status}
                     </Badge>
                   </TableCell>
@@ -1272,6 +1300,30 @@ const TraysPage = () => {
         </Table>
       </div>
 
+      <div className="flex items-center justify-between">
+        <Button
+          variant="outline"
+          onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
+          disabled={page === 0 || loading}
+          className="gap-2"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </Button>
+        <span className="text-sm text-muted-foreground">
+          Page {page + 1}{totalPages ? ` of ${totalPages}` : ''}
+        </span>
+        <Button
+          variant="outline"
+          onClick={() => setPage((prev) => prev + 1)}
+          disabled={!hasMore || loading}
+          className="gap-2"
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+
       {/* View Tray Details Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
@@ -1294,8 +1346,8 @@ const TraysPage = () => {
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold text-muted-foreground">Status</Label>
                   <Badge
-                    variant={viewingTray.status === 'Growing' ? 'default' : viewingTray.status === 'Lost' ? 'destructive' : 'secondary'}
-                    className={viewingTray.status === 'Growing' ? 'bg-green-500 hover:bg-green-600' : ''}
+                    variant={viewingTray.status === 'Lost' ? 'destructive' : viewingTray.status === 'Harvested' ? 'secondary' : 'default'}
+                    className={stageColors[viewingTray.status] || (viewingTray.status === 'Lost' ? '' : viewingTray.status === 'Harvested' ? '' : 'bg-green-500 hover:bg-green-600')}
                   >
                     {viewingTray.status}
                   </Badge>

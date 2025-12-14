@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -23,11 +23,7 @@ const SalesReport = ({ startDate, endDate }: SalesReportProps) => {
   const [groupBy, setGroupBy] = useState<'customer' | 'product' | 'size'>('customer');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchSalesData();
-  }, [startDate, endDate]);
-
-  const fetchSalesData = async () => {
+  const fetchSalesData = useCallback(async () => {
     try {
       setLoading(true);
       const sessionData = localStorage.getItem('sproutify_session');
@@ -92,7 +88,11 @@ const SalesReport = ({ startDate, endDate }: SalesReportProps) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    fetchSalesData();
+  }, [fetchSalesData]);
 
   if (loading) {
     return <div className="text-center py-8">Loading sales data...</div>;

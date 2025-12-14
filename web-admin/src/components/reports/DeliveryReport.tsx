@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -24,11 +24,7 @@ const DeliveryReport = ({ startDate, endDate }: DeliveryReportProps) => {
   const [data, setData] = useState<DeliveryData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchDeliveryData();
-  }, [startDate, endDate]);
-
-  const fetchDeliveryData = async () => {
+  const fetchDeliveryData = useCallback(async () => {
     try {
       setLoading(true);
       const sessionData = localStorage.getItem('sproutify_session');
@@ -92,7 +88,11 @@ const DeliveryReport = ({ startDate, endDate }: DeliveryReportProps) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    fetchDeliveryData();
+  }, [fetchDeliveryData]);
 
   if (loading) {
     return <div className="text-center py-8">Loading delivery data...</div>;

@@ -14,14 +14,14 @@ type ProfileRecord = {
   farmname?: string | null;
 };
 
-export type SproutifySession = {
+export interface SproutifySession {
   email: string | null;
   farmUuid: string;
   role: string | null;
   userId: string | null;
   farmName: string;
   trialEndDate: string | null;
-};
+}
 
 const getFarmNameFromProfile = (profile: ProfileRecord) =>
   profile.farms?.farm_name ??
@@ -42,7 +42,7 @@ export const buildSessionPayload = async (
   let farmName = getFarmNameFromProfile(profile);
   let trialEndDate = profile.farms?.trial_end_date ?? null;
 
-  if ((!farmName || !farmName.trim()) && farmUuid) {
+  if ((!farmName || !farmName.trim()) && farmUuid && supabase) {
     const { data: farm } = await supabase
       .from('farms')
       .select('farm_name, farmname, trial_end_date')

@@ -39,3 +39,6 @@ COMMENT ON COLUMN maintenance_tasks.day_of_week IS 'Day of week (0=Sunday, 1=Mon
 COMMENT ON COLUMN maintenance_tasks.task_date IS 'Specific date for one-time tasks. NULL = recurring weekly';
 
 
+
+
+

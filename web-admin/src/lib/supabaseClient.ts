@@ -1,23 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || import.meta.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || import.meta.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
-if (!supabaseUrl) {
-  throw new Error(
-    'Missing Supabase URL. Please set VITE_SUPABASE_URL in your .env file. ' +
-    'Create a .env file in the web-admin directory with: VITE_SUPABASE_URL=your_supabase_url'
+// NEVER throw during module initialization - this prevents other modules from loading
+// This ensures session.ts and other modules can always expose their exports
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    'Supabase not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file. ' +
+    'Create a .env file in the web-admin directory with these variables.'
   );
 }
 
-if (!supabaseAnonKey) {
-  throw new Error(
-    'Missing Supabase Anon Key. Please set VITE_SUPABASE_ANON_KEY in your .env file. ' +
-    'Create a .env file in the web-admin directory with: VITE_SUPABASE_ANON_KEY=your_supabase_anon_key'
-  );
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Export a safe client that may be null if not configured
+// This allows the module to always initialize successfully
+export const supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 export type Database = {
   public: {

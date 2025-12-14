@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabaseClient';
 
 interface ReportParams {
-  reportType: 'harvest' | 'delivery' | 'sales';
+  reportType: 'harvest' | 'delivery' | 'sales' | 'seed-usage';
   startDate: Date;
   endDate: Date;
   filters?: Record<string, any>;

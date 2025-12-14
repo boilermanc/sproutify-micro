@@ -13,8 +13,7 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell,
-  Legend
+  Cell
 } from 'recharts';
 import { 
   Sprout, 
@@ -248,6 +247,45 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
   );
 };
 
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+};
+
+const getActivityIcon = (type: string) => {
+  switch (type) {
+    case 'tray_created': return Package;
+    case 'tray_lost': return AlertTriangle;
+    case 'task_completed': return Scissors;
+    case 'task_canceled': return X;
+    case 'standing_order_created': return ClipboardList;
+    case 'order_fulfilled': return ShoppingBasket;
+    case 'request_canceled': return X;
+    default: return Package;
+  }
+};
+
+const getActivityStyles = (type: string) => {
+  switch (type) {
+    case 'tray_created': return { bg: 'bg-amber-100', color: 'text-amber-600' };
+    case 'tray_lost': return { bg: 'bg-red-100', color: 'text-red-600' };
+    case 'task_completed': return { bg: 'bg-emerald-100', color: 'text-emerald-600' };
+    case 'task_canceled': return { bg: 'bg-gray-100', color: 'text-gray-600' };
+    case 'standing_order_created': return { bg: 'bg-violet-100', color: 'text-violet-600' };
+    case 'order_fulfilled': return { bg: 'bg-blue-100', color: 'text-blue-600' };
+    case 'request_canceled': return { bg: 'bg-gray-100', color: 'text-gray-600' };
+    default: return { bg: 'bg-gray-100', color: 'text-gray-600' };
+  }
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -287,6 +325,12 @@ const Dashboard = () => {
   // Chart Data
   const [harvestData, setHarvestData] = useState<Array<{ name: string; yield: number }>>([]);
   const [varietyData, setVarietyData] = useState<Array<{ name: string; value: number }>>([]);
+  const [recentActivity, setRecentActivity] = useState<Array<{
+    activity_id: string;
+    activity_type: string;
+    description: string;
+    occurred_at: string;
+  }>>([]);
 
   // Vibrant Material-like colors
   const PIE_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6'];
@@ -413,6 +457,18 @@ const Dashboard = () => {
           .map(([name, value]) => ({ name, value }))
           .sort((a, b) => b.value - a.value)
           .slice(0, 5));
+      }
+
+      // Fetch Recent Activity
+      const { data: activityData } = await supabase
+        .from('recent_activity')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .order('occurred_at', { ascending: false })
+        .limit(5);
+
+      if (activityData) {
+        setRecentActivity(activityData);
       }
 
       // 4. Fetch Daily Insight (gracefully handle if no data exists)
@@ -741,29 +797,59 @@ const Dashboard = () => {
               <CardTitle className="text-lg font-bold text-gray-800">Current Mix</CardTitle>
             </CardHeader>
             <CardContent className="p-4">
-              <div ref={pieChartRef} className="h-[250px] w-full min-h-[250px] min-w-0" style={{ position: 'relative' }}>
-                {chartDimensions.pie.width > 0 && chartDimensions.pie.height > 0 ? (
-                  <ResponsiveContainer width={chartDimensions.pie.width} height={chartDimensions.pie.height}>
-                    <PieChart>
-                      <Pie
-                        data={varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {(varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]).map((_entry, index) => (
-                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : null}
+              <div className="flex gap-4 items-start">
+                {/* Chart on the left */}
+                <div ref={pieChartRef} className="h-[250px] w-[250px] min-h-[250px] min-w-[250px] flex-shrink-0" style={{ position: 'relative' }}>
+                  {chartDimensions.pie.width > 0 && chartDimensions.pie.height > 0 ? (
+                    <ResponsiveContainer width={chartDimensions.pie.width} height={chartDimensions.pie.height}>
+                      <PieChart>
+                        <Pie
+                          data={varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {(varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]).map((_entry, index) => (
+                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : null}
+                </div>
+                
+                {/* Legend on the right */}
+                <div className="flex-1 min-w-0">
+                  <div className="max-h-[250px] overflow-y-auto pr-2">
+                    <div className="space-y-2">
+                      {(varietyData.length > 0 ? varietyData : [{ name: 'No Data', value: 1 }]).map((entry, index) => {
+                        const color = PIE_COLORS[index % PIE_COLORS.length];
+                        const percentage = varietyData.length > 0 
+                          ? ((entry.value / varietyData.reduce((sum, item) => sum + item.value, 0)) * 100).toFixed(1)
+                          : '0';
+                        return (
+                          <div key={`legend-${index}`} className="flex items-center gap-2 py-1">
+                            <div 
+                              className="w-3 h-3 rounded-full flex-shrink-0" 
+                              style={{ backgroundColor: color }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate">{entry.name}</div>
+                              {varietyData.length > 0 && (
+                                <div className="text-xs text-gray-500">{percentage}%</div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -775,29 +861,30 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-gray-50">
-                <ActivityItem 
-                  text="Batch #104 Created" 
-                  time="2h ago" 
-                  icon={Package} 
-                  bg="bg-amber-100" 
-                  color="text-amber-600" 
-                />
-                <ActivityItem 
-                  text="Harvested Sunflower" 
-                  time="5h ago" 
-                  icon={Scissors} 
-                  bg="bg-emerald-100" 
-                  color="text-emerald-600" 
-                />
-                <ActivityItem 
-                  text="Order #492 Fulfilled" 
-                  time="1d ago" 
-                  icon={ClipboardList} 
-                  bg="bg-blue-100" 
-                  color="text-blue-600" 
-                />
+            {recentActivity.length > 0 ? (
+              recentActivity.map((activity) => {
+                const Icon = getActivityIcon(activity.activity_type);
+                const styles = getActivityStyles(activity.activity_type);
+                return (
+                  <ActivityItem 
+                    key={activity.activity_id}
+                    text={activity.description}
+                    time={formatTimeAgo(activity.occurred_at)}
+                    icon={Icon}
+                    bg={styles.bg}
+                    color={styles.color}
+                  />
+                );
+              })
+            ) : (
+              <p className="text-sm text-gray-400 p-4">No recent activity</p>
+            )}
               </div>
-              <Button variant="ghost" className="w-full text-xs text-gray-400 hover:text-gray-600 mt-2">
+          <Button 
+            variant="ghost" 
+            className="w-full text-xs text-gray-400 hover:text-gray-600 mt-2"
+            onClick={() => navigate('/activity')}
+          >
                 View All Activity
               </Button>
             </CardContent>

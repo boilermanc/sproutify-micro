@@ -46,6 +46,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
   const navItems = [
     { to: "/", icon: LayoutDashboard, label: "Dashboard", end: true },
     { to: "/flow", icon: Calendar, label: "Daily Flow" },
+    { to: "/calendar", icon: CalendarDays, label: "Calendar" },
     { to: "/weekly-tasks", icon: CheckSquare, label: "Weekly Tasks" },
     { to: "/trays", icon: ShoppingBasket, label: "Trays" },
     { to: "/planting-schedule", icon: CalendarDays, label: "Planting Schedule" },

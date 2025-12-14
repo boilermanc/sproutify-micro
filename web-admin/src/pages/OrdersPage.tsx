@@ -35,7 +35,6 @@ const OrdersPage = () => {
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [_products, setProducts] = useState<any[]>([]);
   const [newOrder, setNewOrder] = useState({
     customer_id: '',
     order_date: new Date().toISOString().split('T')[0],
@@ -242,8 +241,8 @@ const OrdersPage = () => {
             isNewOrder: true, // Flag to indicate this is from new orders table
           }));
         }
-      } catch (e) {
-        console.log('New orders table not available, using tray-based orders');
+      } catch (error) {
+        console.log('New orders table not available, using tray-based orders', error);
       }
 
       // Also fetch legacy tray-based orders for backward compatibility
@@ -383,29 +382,7 @@ const OrdersPage = () => {
   useEffect(() => {
     fetchOrders();
     fetchCustomers();
-    fetchProducts();
   }, []);
-
-  const fetchProducts = async () => {
-    try {
-      const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
-
-      const { farmUuid } = JSON.parse(sessionData);
-
-      const { data, error } = await supabase
-        .from('products')
-        .select('product_id, product_name, product_type')
-        .eq('farm_uuid', farmUuid)
-        .eq('is_active', true)
-        .order('product_name', { ascending: true });
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    }
-  };
 
   const handleEditOrder = async (order: any) => {
     setEditingOrder(order);

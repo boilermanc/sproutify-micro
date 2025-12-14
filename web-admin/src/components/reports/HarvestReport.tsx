@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -22,11 +22,7 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
   const [data, setData] = useState<HarvestData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchHarvestData();
-  }, [startDate, endDate]);
-
-  const fetchHarvestData = async () => {
+  const fetchHarvestData = useCallback(async () => {
     try {
       setLoading(true);
       const sessionData = localStorage.getItem('sproutify_session');
@@ -92,7 +88,11 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    fetchHarvestData();
+  }, [fetchHarvestData]);
 
   if (loading) {
     return <div className="text-center py-8">Loading harvest data...</div>;

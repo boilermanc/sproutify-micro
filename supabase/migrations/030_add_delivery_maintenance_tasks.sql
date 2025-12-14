@@ -22,3 +22,6 @@ COMMENT ON COLUMN weekly_tasks.task_description IS 'Description for custom tasks
 COMMENT ON COLUMN weekly_tasks.recipe_id IS 'Recipe ID, NULL for custom tasks like maintenance';
 
 
+
+
+

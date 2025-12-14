@@ -376,25 +376,36 @@ const VarietiesPage = () => {
 
       switch (sortField) {
         case 'name':
-          const nameA = (a.variety_name || '').toLowerCase();
-          const nameB = (b.variety_name || '').toLowerCase();
-          comparison = nameA.localeCompare(nameB);
-          break;
+          {
+            const nameA = (a.variety_name || '').toLowerCase();
+            const nameB = (b.variety_name || '').toLowerCase();
+            comparison = nameA.localeCompare(nameB);
+            break;
+          }
         case 'description':
-          const descA = (a.description || '').toLowerCase();
-          const descB = (b.description || '').toLowerCase();
-          comparison = descA.localeCompare(descB);
-          break;
+          {
+            const descA = (a.description || '').toLowerCase();
+            const descB = (b.description || '').toLowerCase();
+            comparison = descA.localeCompare(descB);
+            break;
+          }
         case 'status':
           // Active (true) comes before Inactive (false) when ascending
-          const statusA = a.is_active ? 1 : 0;
-          const statusB = b.is_active ? 1 : 0;
-          comparison = statusA - statusB;
-          break;
+          {
+            const statusA = a.is_active ? 1 : 0;
+            const statusB = b.is_active ? 1 : 0;
+            comparison = statusA - statusB;
+            break;
+          }
         case 'stock':
-          const stockA = a.stock ?? 0;
-          const stockB = b.stock ?? 0;
-          comparison = stockA - stockB;
+          {
+            const stockA = a.stock ?? 0;
+            const stockB = b.stock ?? 0;
+            comparison = stockA - stockB;
+            break;
+          }
+        default:
+          comparison = 0;
           break;
       }
 

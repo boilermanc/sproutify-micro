@@ -159,7 +159,6 @@ const AdminNotifications = () => {
 
       // Create notifications in batches
       const batchSize = 100;
-      let created = 0;
 
       for (let i = 0; i < targetUsers.length; i += batchSize) {
         const batch = targetUsers.slice(i, i + batchSize);
@@ -178,7 +177,6 @@ const AdminNotifications = () => {
           .insert(notificationsToInsert);
 
         if (insertError) throw insertError;
-        created += batch.length;
       }
 
       setSendSuccess(true);

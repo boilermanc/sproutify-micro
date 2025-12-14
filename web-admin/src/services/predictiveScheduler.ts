@@ -83,7 +83,7 @@ export const optimizeSowSchedule = (
     }
 
     // Find the closest preferred day
-    let adjustedDate = new Date(schedule.sow_date);
+    const adjustedDate = new Date(schedule.sow_date);
     let daysDiff = 0;
     let minDiff = Infinity;
     let bestDay = sowDay;
@@ -169,7 +169,7 @@ export const calculateStandingOrderSowDates = (
   const deliveryDayNumbers = standingOrder.delivery_days.map(day => dayMap[day] || -1).filter(d => d >= 0);
   if (deliveryDayNumbers.length === 0) return schedules;
 
-  let currentDate = new Date(standingOrder.start_date);
+  const currentDate = new Date(standingOrder.start_date);
   const endDate = standingOrder.end_date || new Date('2099-12-31');
 
   while (currentDate <= endDate) {

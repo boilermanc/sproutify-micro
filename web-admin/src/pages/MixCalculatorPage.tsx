@@ -195,9 +195,7 @@ const MixCalculatorPage = () => {
           
           // Sort steps by sequence_order
           const sortedStepsData = stepsData ? [...stepsData].sort((a, b) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const orderA = (a as any).sequence_order ?? 0;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const orderB = (b as any).sequence_order ?? 0;
             return orderA - orderB;
           }) : null;
@@ -266,7 +264,6 @@ const MixCalculatorPage = () => {
 
       // Process global recipes
       for (const item of enabledGlobalRecipes || []) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const globalRecipe = (item as any).global_recipes;
         if (!globalRecipe || !globalRecipe.is_active) continue;
 

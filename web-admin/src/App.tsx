@@ -15,6 +15,7 @@ import BatchesPage from './pages/BatchesPage';
 import OrdersPage from './pages/OrdersPage';
 import StandingOrdersPage from './pages/StandingOrdersPage';
 import PlantingSchedulePage from './pages/PlantingSchedulePage';
+import CalendarPage from './pages/CalendarPage';
 import WeeklyTasksPage from './pages/WeeklyTasksPage';
 import CustomersPage from './pages/CustomersPage';
 import VendorsPage from './pages/VendorsPage';
@@ -25,6 +26,7 @@ import SettingsPage from './pages/SettingsPage';
 import DailyFlow from './components/DailyFlow';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
+import Activity from './pages/Activity';
 import AdminLogin from './pages/AdminLogin';
 import RequireAdmin from './components/RequireAdmin';
 import AdminLayout from './components/AdminLayout';
@@ -182,6 +184,7 @@ function App() {
           <Route path="orders" element={<OrdersPage />} />
           <Route path="standing-orders" element={<StandingOrdersPage />} />
           <Route path="planting-schedule" element={<PlantingSchedulePage />} />
+          <Route path="calendar" element={<CalendarPage />} />
           <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="vendors" element={<VendorsPage />} />
@@ -190,6 +193,7 @@ function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="flow" element={<DailyFlow />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="activity" element={<Activity />} />
         </Route>
       </Routes>
       {isAuthenticated && <SageChat />}

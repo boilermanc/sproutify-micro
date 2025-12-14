@@ -57,3 +57,6 @@ Check function logs after sending email:
 - This will show what secrets are actually available
 
 
+
+
+

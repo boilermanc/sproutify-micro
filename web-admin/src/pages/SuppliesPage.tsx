@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { checkSupplyStock } from '../services/notificationService';
 import { Edit, Package, Plus, Search, Settings } from 'lucide-react';
@@ -208,7 +208,7 @@ const SuppliesPage = () => {
     }
   };
 
-  const fetchSupplies = async () => {
+  const fetchSupplies = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -278,9 +278,9 @@ const SuppliesPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -308,9 +308,9 @@ const SuppliesPage = () => {
       console.error('Error fetching templates:', error);
       setTemplates([]);
     }
-  };
+  }, []);
 
-  const fetchVendors = async () => {
+  const fetchVendors = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -340,13 +340,13 @@ const SuppliesPage = () => {
       console.error('Error fetching vendors:', error);
       setVendors([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchSupplies();
     fetchTemplates();
     fetchVendors();
-  }, []);
+  }, [fetchSupplies, fetchTemplates, fetchVendors]);
 
   const handleAddSupply = async () => {
     if (!newSupply.supply_name) return;

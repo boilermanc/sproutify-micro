@@ -8,9 +8,10 @@ import { Label } from '@/components/ui/label';
 import HarvestReport from '../components/reports/HarvestReport';
 import DeliveryReport from '../components/reports/DeliveryReport';
 import SalesReport from '../components/reports/SalesReport';
+import SeedUsageReport from '../components/reports/SeedUsageReport';
 import { generateReport } from '../services/reportService';
 
-type ReportType = 'harvest' | 'delivery' | 'sales';
+type ReportType = 'harvest' | 'delivery' | 'sales' | 'seed-usage';
 
 const ReportsPage = () => {
   const [reportType, setReportType] = useState<ReportType>('harvest');
@@ -23,6 +24,10 @@ const ReportsPage = () => {
   const [generating, setGenerating] = useState(false);
 
   const handleGenerateReport = async () => {
+    if (reportType === 'seed-usage') {
+      alert('Seed Usage report is generated inline. Use Print/Export to download.');
+      return;
+    }
     setGenerating(true);
     try {
       const result = await generateReport({
@@ -85,6 +90,7 @@ const ReportsPage = () => {
                   <SelectItem value="harvest">Harvest Report</SelectItem>
                   <SelectItem value="delivery">Delivery Report</SelectItem>
                   <SelectItem value="sales">Sales Report</SelectItem>
+                  <SelectItem value="seed-usage">Seed Usage Report</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -131,6 +137,7 @@ const ReportsPage = () => {
             {reportType === 'harvest' && 'Harvest report sorted by product and size'}
             {reportType === 'delivery' && 'Delivery report listed by customer, product, size, and price'}
             {reportType === 'sales' && 'Sales report by customer, product, and size'}
+            {reportType === 'seed-usage' && 'Seed inventory usage over time by variety'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -142,6 +149,9 @@ const ReportsPage = () => {
           )}
           {reportType === 'sales' && (
             <SalesReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
+          )}
+          {reportType === 'seed-usage' && (
+            <SeedUsageReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
           )}
         </CardContent>
       </Card>

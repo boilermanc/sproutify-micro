@@ -10,6 +10,7 @@ export interface WeeklyTask {
   task_description?: string;
   customer_name?: string;
   product_name?: string;
+  maintenance_task_id?: number;
 }
 
 const formatDateString = (date: Date): string => {
@@ -37,28 +38,112 @@ export const fetchWeeklyTasks = async (
   const weekEndStr = formatDateString(weekEnd);
 
   try {
-    // 1. Fetch planting schedules
-    const { data: schedules, error: scheduleError } = await supabase
+    // 0. Fetch actual seeding tasks (view splits soak/seed and computes remaining)
+    const { data: seedingTasks, error: seedingError } = await supabase
+      .from('seeding_request_daily_tasks')
+      .select('*')
+      .eq('farm_uuid', farmUuid)
+      .gte('task_date', weekStartStr)
+      .lte('task_date', weekEndStr)
+      .order('task_date');
+
+    if (seedingError) throw seedingError;
+
+    // 1. Fetch planting schedules (still used for harvest/delivery projections)
+    const { data: allSchedules, error: scheduleError } = await supabase
       .from('planting_schedule_view')
       .select('*')
       .eq('farm_uuid', farmUuid);
 
     if (scheduleError) throw scheduleError;
 
-    // 2. Fetch soak requirements
-    const { data: globalRecipes } = await supabase
-      .from('global_recipes')
-      .select('recipe_name, requires_soak, soak_hours');
-
-    const soakMap = new Map<string, { requires_soak: boolean; soak_hours: number }>();
-    (globalRecipes || []).forEach((gr: any) => {
-      soakMap.set(gr.recipe_name?.toLowerCase(), {
-        requires_soak: gr.requires_soak || false,
-        soak_hours: gr.soak_hours || 0,
+    // 1.5. Filter out schedules where trays have already been created
+    // Fetch all trays and task_completions for these recipes to check if they're already seeded
+    let schedules = allSchedules || [];
+    const recipeIds = [...new Set(schedules.map((s: any) => s.recipe_id).filter((id: any) => id !== null))];
+    
+    if (recipeIds.length > 0) {
+      // Fetch all existing trays for these recipes
+      const { data: existingTrays } = await supabase
+        .from('trays')
+        .select('recipe_id, sow_date')
+        .eq('farm_uuid', farmUuid)
+        .eq('status', 'active') // only consider active trays
+        .in('recipe_id', recipeIds);
+      
+      // Fetch all completed sowing tasks for these recipes
+      const { data: completedSowingTasks } = await supabase
+        .from('task_completions')
+        .select('recipe_id, task_date')
+        .eq('farm_uuid', farmUuid)
+        .in('recipe_id', recipeIds)
+        .eq('task_type', 'sowing')
+        .eq('status', 'completed');
+      
+      // Create a map of recipe_id -> set of seeded dates (for flexible matching)
+      const seededDatesByRecipe = new Map<number, Set<string>>();
+      
+      // Add dates for existing trays
+      if (existingTrays && existingTrays.length > 0) {
+        existingTrays.forEach((tray: any) => {
+          if (tray.sow_date) {
+            const recipeId = tray.recipe_id;
+            const traySowDateStr = formatDateString(new Date(tray.sow_date));
+            if (!seededDatesByRecipe.has(recipeId)) {
+              seededDatesByRecipe.set(recipeId, new Set<string>());
+            }
+            seededDatesByRecipe.get(recipeId)!.add(traySowDateStr);
+          }
+        });
+      }
+      
+      // Add dates for completed tasks
+      if (completedSowingTasks && completedSowingTasks.length > 0) {
+        completedSowingTasks.forEach((task: any) => {
+          const taskDateStr = task.task_date ? (task.task_date.includes('T') ? task.task_date.split('T')[0] : task.task_date) : '';
+          if (taskDateStr) {
+            const recipeId = task.recipe_id;
+            if (!seededDatesByRecipe.has(recipeId)) {
+              seededDatesByRecipe.set(recipeId, new Set<string>());
+            }
+            seededDatesByRecipe.get(recipeId)!.add(taskDateStr);
+          }
+        });
+      }
+      
+      // Filter schedules: remove any that have trays or task_completions for that recipe
+      // on the scheduled date OR within ±1 day (handles same-day or next-day seeding)
+      const DATE_TOLERANCE_DAYS = 1;
+      schedules = schedules.filter((schedule: any) => {
+        if (!schedule.recipe_id) return true; // Keep schedules without recipe_id (e.g., delivery tasks)
+        
+        const sowDate = new Date(schedule.sow_date);
+        sowDate.setHours(0, 0, 0, 0);
+        const sowDateMs = sowDate.getTime();
+        
+        const seededDates = seededDatesByRecipe.get(schedule.recipe_id);
+        if (!seededDates || seededDates.size === 0) {
+          // No trays/tasks for this recipe, keep the schedule
+          return true;
+        }
+        
+        // Check if any seeded date is within tolerance of the schedule date
+        for (const seededDateStr of seededDates) {
+          const seededDate = new Date(seededDateStr + 'T00:00:00');
+          const seededDateMs = seededDate.getTime();
+          const daysDiff = Math.abs(seededDateMs - sowDateMs) / (1000 * 60 * 60 * 24);
+          
+          // If seeded within tolerance days of the scheduled date, filter out the schedule
+          if (daysDiff <= DATE_TOLERANCE_DAYS) {
+            return false; // Filter out this schedule
+          }
+        }
+        
+        return true; // Keep the schedule
       });
-    });
+    }
 
-    // 3. Fetch completions for this week
+    // 2. Fetch completions for this week
     const { data: completions } = await supabase
       .from('task_completions')
       .select('*')
@@ -67,19 +152,56 @@ export const fetchWeeklyTasks = async (
       .lte('task_date', weekEndStr);
 
     const completionSet = new Set(
-      (completions || []).map((c: any) => 
-        `${c.task_type}-${c.task_date}-${c.recipe_id || ''}-${c.customer_name || ''}-${c.product_name || ''}`
-      )
+      (completions || []).map((c: any) => {
+        // Normalize task_date to YYYY-MM-DD format (remove time if present)
+        const taskDate = c.task_date ? (c.task_date.includes('T') ? c.task_date.split('T')[0] : c.task_date) : '';
+        return `${c.task_type}-${taskDate}-${c.recipe_id || ''}-${c.customer_name || ''}-${c.product_name || ''}`;
+      })
     );
 
     const isCompleted = (type: string, date: string, recipeId?: number, customer?: string, product?: string) => {
+      // Normalize null/undefined to empty string for consistent key matching
       const key = `${type}-${date}-${recipeId || ''}-${customer || ''}-${product || ''}`;
       return completionSet.has(key);
     };
 
-    // 4. Build task lists with grouping
+    // 3. Build task lists with grouping
     const taskMap = new Map<string, WeeklyTask>();
 
+    // 3a. Soak/Seed tasks from actual requests (authoritative)
+    for (const task of seedingTasks || []) {
+      const dateStr = task.task_date?.includes('T') ? task.task_date.split('T')[0] : task.task_date;
+      if (!dateStr) continue;
+      const taskDate = new Date(dateStr + 'T00:00:00');
+      const type = task.task_type === 'soak' ? 'soaking' : 'sowing';
+      const remaining =
+        typeof task.trays_remaining === 'number'
+          ? task.trays_remaining
+          : Math.max(
+              0,
+              (task.trays || task.quantity || 0) - (task.quantity_completed || 0 || 0)
+            );
+      const status =
+        remaining <= 0 || isCompleted(type, dateStr, task.recipe_id)
+          ? 'completed'
+          : 'pending';
+      const key = `${type}-${dateStr}-${task.recipe_id || ''}-${task.request_id || ''}`;
+      if (!taskMap.has(key)) {
+        taskMap.set(key, {
+          task_type: type as 'soaking' | 'sowing',
+          task_date: taskDate,
+          recipe_id: task.recipe_id || null,
+          recipe_name: task.recipe_name || task.variety_name || 'Unknown',
+          quantity: remaining || 0,
+          status,
+          task_description: task.task_type === 'soak'
+            ? `Soak ${task.recipe_name || task.variety_name || 'Unknown'}`
+            : `Seed ${task.recipe_name || task.variety_name || 'Unknown'}`,
+        });
+      }
+    }
+
+    // 3b. Projected harvest/delivery (from planting_schedule_view)
     for (const schedule of (schedules || [])) {
       const sowDate = new Date(schedule.sow_date);
       const sowDateStr = formatDateString(sowDate);
@@ -90,49 +212,6 @@ export const fetchWeeklyTasks = async (
       
       const recipeName = schedule.recipe_name || 'Unknown';
       const trays = schedule.trays_needed || 1;
-      const soakInfo = soakMap.get(recipeName.toLowerCase());
-
-      // SOAKING
-      if (soakInfo?.requires_soak) {
-        const soakDate = new Date(sowDate);
-        soakDate.setDate(soakDate.getDate() - 1);
-        const soakDateStr = formatDateString(soakDate);
-        
-        if (soakDateStr >= weekStartStr && soakDateStr <= weekEndStr) {
-          const key = `soaking-${soakDateStr}-${schedule.recipe_id}`;
-          if (taskMap.has(key)) {
-            taskMap.get(key)!.quantity += trays;
-          } else {
-            taskMap.set(key, {
-              task_type: 'soaking',
-              task_date: soakDate,
-              recipe_id: schedule.recipe_id,
-              recipe_name: recipeName,
-              quantity: trays,
-              status: isCompleted('soaking', soakDateStr, schedule.recipe_id) ? 'completed' : 'pending',
-              task_description: `Soak ${recipeName} (${soakInfo.soak_hours}h)`,
-            });
-          }
-        }
-      }
-
-      // SOWING
-      if (sowDateStr >= weekStartStr && sowDateStr <= weekEndStr) {
-        const key = `sowing-${sowDateStr}-${schedule.recipe_id}`;
-        if (taskMap.has(key)) {
-          taskMap.get(key)!.quantity += trays;
-        } else {
-          taskMap.set(key, {
-            task_type: 'sowing',
-            task_date: sowDate,
-            recipe_id: schedule.recipe_id,
-            recipe_name: recipeName,
-            quantity: trays,
-            status: isCompleted('sowing', sowDateStr, schedule.recipe_id) ? 'completed' : 'pending',
-            task_description: `Seed ${recipeName}`,
-          });
-        }
-      }
 
       // HARVESTING
       if (harvestDateStr >= weekStartStr && harvestDateStr <= weekEndStr) {
@@ -190,13 +269,17 @@ export const fetchWeeklyTasks = async (
         const taskDateStr = formatDateString(taskDate);
         
         if (taskDateStr >= weekStartStr && taskDateStr <= weekEndStr) {
+          // Store task_name in product_name so completion check matches what's saved
+          const taskName = mt.task_name;
           tasks.push({
             task_type: 'maintenance',
             task_date: taskDate,
             recipe_id: null,
             quantity: mt.quantity || 1,
-            status: isCompleted('maintenance', taskDateStr, undefined, mt.task_name) ? 'completed' : 'pending',
-            task_description: mt.task_name,
+            status: isCompleted('maintenance', taskDateStr, undefined, undefined, taskName) ? 'completed' : 'pending',
+            task_description: taskName,
+            product_name: taskName, // Store in product_name for completion matching
+            maintenance_task_id: mt.maintenance_task_id,
           });
         }
       }
@@ -232,18 +315,25 @@ export const updateTaskStatus = async (
 
     } else {
       // Upsert completion record
+      const completionData: any = {
+        farm_uuid: farmUuid,
+        task_type: task.task_type,
+        task_date: taskDateStr,
+        recipe_id: task.recipe_id,
+        customer_name: task.customer_name || null,
+        product_name: task.product_name || null,
+        status: status,
+        completed_at: new Date().toISOString(),
+      };
+      
+      // Add maintenance_task_id if this is a maintenance task
+      if (task.task_type === 'maintenance' && task.maintenance_task_id) {
+        completionData.maintenance_task_id = task.maintenance_task_id;
+      }
+      
       await supabase
         .from('task_completions')
-        .upsert({
-          farm_uuid: farmUuid,
-          task_type: task.task_type,
-          task_date: taskDateStr,
-          recipe_id: task.recipe_id,
-          customer_name: task.customer_name || null,
-          product_name: task.product_name || null,
-          status: status,
-          completed_at: new Date().toISOString(),
-        }, {
+        .upsert(completionData, {
           onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
         });
     }

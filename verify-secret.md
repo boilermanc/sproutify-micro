@@ -29,3 +29,6 @@ After trying to send an email, check the function logs:
 - Look for the debug output showing available environment variables
 
 
+
+
+

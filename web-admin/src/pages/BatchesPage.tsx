@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Edit, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
@@ -13,9 +13,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 const normalizeBatchUnit = (batch: any) => {
   let displayUnit = batch.unit || 'lbs';
   let displayQuantity = batch.quantity ?? 0;
-  let displayThreshold = batch.low_stock_threshold || batch.reorderlevel || null;
+  let displayThreshold = batch.low_stock_threshold ?? batch.reorderlevel ?? null;
   const quantityNum = parseFloat(displayQuantity.toString());
-  const thresholdNum = displayThreshold ? parseFloat(displayThreshold.toString()) : null;
+  const thresholdNum =
+    displayThreshold !== null && displayThreshold !== undefined && displayThreshold !== ''
+      ? parseFloat(displayThreshold.toString())
+      : null;
 
   // Case 1: Unit is 'grams' but quantity is 1 (likely 1 lb mislabeled as grams)
   if ((displayUnit === 'grams' || displayUnit === 'g') && quantityNum === 1) {
@@ -68,7 +71,7 @@ const normalizeBatchUnit = (batch: any) => {
   // Always convert threshold to lbs for display, regardless of quantity unit
   if (displayThreshold !== null) {
     const originalUnit = batch.unit || 'lbs';
-    const originalThreshold = batch.low_stock_threshold || batch.reorderlevel || null;
+    const originalThreshold = batch.low_stock_threshold ?? batch.reorderlevel ?? null;
     
     if (originalThreshold !== null) {
       const originalThresholdNum = parseFloat(originalThreshold.toString());
@@ -122,7 +125,7 @@ const BatchesPage = () => {
     low_stock_threshold: '',
   });
 
-  const fetchBatches = async () => {
+  const fetchBatches = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -219,7 +222,7 @@ const BatchesPage = () => {
             lot_number: batch.lot_number || batch.lotnumber || null,
             vendor_id: vendorId,
             trayCount: count || 0,
-            low_stock_threshold: batch.low_stock_threshold || batch.reorderlevel || null,
+            low_stock_threshold: batch.low_stock_threshold ?? batch.reorderlevel ?? null,
             unit: batch.unit || 'lbs', // Ensure unit is available
             vendors: vendor ? { 
               vendor_name: (vendor.vendor_name || vendor.name || vendor.vendorname || '') as string 
@@ -235,7 +238,7 @@ const BatchesPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [varieties, vendors]);
 
   // Utility function to check actual column names - can be called from browser console
   // Usage: window.checkVarietiesColumns()
@@ -275,7 +278,7 @@ const BatchesPage = () => {
     (window as any).checkVarietiesColumns = checkVarietiesColumns;
   }
 
-  const fetchFormData = async () => {
+  const fetchFormData = useCallback(async () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
@@ -316,19 +319,6 @@ const BatchesPage = () => {
       
       if (vendorsResult.error) {
         console.error('Error fetching vendors:', vendorsResult.error);
-      } else {
-        console.log('Fetched vendors:', vendorsResult.data?.length || 0, vendorsResult.data);
-        // Log each vendor's structure to debug
-        vendorsResult.data?.forEach((v, i) => {
-          console.log(`Vendor ${i + 1}:`, {
-            vendor_id: v.vendor_id,
-            vendorid: v.vendorid,
-            id: v.id,
-            vendor_name: v.vendor_name,
-            vendorname: v.vendorname,
-            fullObject: v
-          });
-        });
       }
       
       // Try to fetch varieties, but don't fail if it doesn't work
@@ -393,26 +383,27 @@ const BatchesPage = () => {
         return nameA.localeCompare(nameB);
       });
 
-      console.log('Normalized vendors:', normalizedVendors.length, normalizedVendors);
-      console.log('Vendors that will be set in state:', normalizedVendors.map(v => ({ id: v.vendor_id, name: v.vendor_name })));
       setVarieties(normalizedVarieties);
       setVendors(normalizedVendors);
     } catch (error) {
       console.error('Error fetching form data:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchFormData();
+  }, [fetchFormData]);
 
   useEffect(() => {
     fetchBatches();
-    fetchFormData();
-  }, []);
+  }, [fetchBatches]);
 
   // Re-fetch vendors when add dialog opens to ensure they're loaded
   useEffect(() => {
     if (isAddDialogOpen && vendors.length === 0) {
       fetchFormData();
     }
-  }, [isAddDialogOpen]);
+  }, [fetchFormData, isAddDialogOpen, vendors.length]);
 
   const handleAddBatch = async () => {
     if (!newBatch.variety_id || !newBatch.quantity) return;
@@ -449,7 +440,7 @@ const BatchesPage = () => {
       }
 
       // Add low stock threshold if provided
-      if (newBatch.low_stock_threshold) {
+      if (newBatch.low_stock_threshold !== '' && newBatch.low_stock_threshold !== null && newBatch.low_stock_threshold !== undefined) {
         payload.low_stock_threshold = parseFloat(newBatch.low_stock_threshold);
       }
 
@@ -533,7 +524,7 @@ const BatchesPage = () => {
         ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
       cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
-      low_stock_threshold: batch.low_stock_threshold?.toString() || batch.reorderlevel?.toString() || '',
+      low_stock_threshold: (batch.low_stock_threshold ?? batch.reorderlevel ?? '').toString(),
     };
     
     setEditingBatch(editData);
@@ -571,7 +562,7 @@ const BatchesPage = () => {
       }
 
       // Add low stock threshold if provided
-      if (editingBatch.low_stock_threshold) {
+      if (editingBatch.low_stock_threshold !== '' && editingBatch.low_stock_threshold !== null && editingBatch.low_stock_threshold !== undefined) {
         payload.low_stock_threshold = parseFloat(editingBatch.low_stock_threshold);
       }
 
@@ -908,11 +899,11 @@ const BatchesPage = () => {
                         ? `${normalized.quantity.toFixed(2).replace(/\.?0+$/, '')} ${normalized.unit}` 
                         : 'N/A'}
                     </TableCell>
-                    <TableCell>
-                      {normalized.threshold !== null 
-                        ? `${normalized.threshold.toFixed(2).replace(/\.?0+$/, '')} ${normalized.thresholdUnit || 'lbs'}` 
-                        : '-'}
-                    </TableCell>
+                  <TableCell>
+                    {batch.low_stock_threshold !== null && batch.low_stock_threshold !== undefined
+                      ? `${parseFloat(batch.low_stock_threshold).toFixed(2).replace(/\.?0+$/, '')} ${batch.unit || 'lbs'}`
+                      : '-'}
+                  </TableCell>
                     <TableCell>{batch.vendors?.vendor_name || '-'}</TableCell>
                     <TableCell>{batch.trayCount || 0}</TableCell>
                   <TableCell className="text-right">
@@ -994,8 +985,8 @@ const BatchesPage = () => {
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Low Stock Threshold</Label>
                     <div>
-                      {normalized.threshold !== null 
-                        ? `${normalized.threshold.toFixed(2).replace(/\.?0+$/, '')} ${normalized.thresholdUnit || 'lbs'}` 
+                      {selectedBatch.low_stock_threshold !== null && selectedBatch.low_stock_threshold !== undefined
+                        ? `${parseFloat(selectedBatch.low_stock_threshold).toFixed(2).replace(/\.?0+$/, '')} ${selectedBatch.unit || 'lbs'}`
                         : '-'}
                     </div>
                   </div>

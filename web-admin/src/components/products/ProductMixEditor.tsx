@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Save, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -54,13 +54,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
     ratio: '1.0',
   });
 
-  useEffect(() => {
-    if (open && product) {
-      fetchData();
-    }
-  }, [open, product]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const sessionData = localStorage.getItem('sproutify_session');
@@ -188,7 +182,13 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
     } finally {
       setLoading(false);
     }
-  };
+  }, [product]);
+
+  useEffect(() => {
+    if (open && product) {
+      fetchData();
+    }
+  }, [open, product, fetchData]);
 
   // Filter recipes based on selected variety
   const getFilteredRecipes = () => {

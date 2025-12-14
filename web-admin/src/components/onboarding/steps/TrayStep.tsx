@@ -151,7 +151,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
     }
 
     fetchAvailableBatches();
-  }, [selectedRecipeId, recipes]);
+  }, [selectedRecipeId, recipes, selectedRecipe]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

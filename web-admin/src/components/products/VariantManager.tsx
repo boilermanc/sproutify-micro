@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit, Trash2, DollarSign } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -45,13 +45,7 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
     unit: 'oz',
   });
 
-  useEffect(() => {
-    if (open && product) {
-      fetchVariants();
-    }
-  }, [open, product]);
-
-  const fetchVariants = async () => {
+  const fetchVariants = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -67,7 +61,13 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
     } finally {
       setLoading(false);
     }
-  };
+  }, [product]);
+
+  useEffect(() => {
+    if (open && product) {
+      fetchVariants();
+    }
+  }, [open, product, fetchVariants]);
 
   const handleAddVariant = async () => {
     if (!newVariant.variant_name || !newVariant.price) return;

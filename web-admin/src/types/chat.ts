@@ -16,3 +16,7 @@ export interface ChatServiceResponse {
   reportHtml?: string;
   cards?: TowerCardData[];
 }
+
+
+
+

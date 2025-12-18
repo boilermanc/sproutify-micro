@@ -21,6 +21,29 @@ const formatDateString = (date: Date): string => {
 };
 
 /**
+ * Parse a date string (YYYY-MM-DD) as a local date, not UTC
+ * This prevents timezone shifts that cause dates to display as the previous day
+ */
+const parseLocalDate = (dateStr: string | null | undefined): Date | null => {
+  if (!dateStr) return null;
+  
+  // If it's already a Date object, return it
+  if (dateStr instanceof Date) return dateStr;
+  
+  // Extract date parts from string (handles both "2025-12-15" and "2025-12-15T00:00:00Z")
+  const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  
+  if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    // Fallback to standard parsing if format is unexpected
+    return new Date(dateStr);
+  }
+  
+  // Create date in local timezone (month is 0-indexed)
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+};
+
+/**
  * Fetch weekly tasks directly from views — no generation needed
  */
 export const fetchWeeklyTasks = async (
@@ -88,11 +111,14 @@ export const fetchWeeklyTasks = async (
         existingTrays.forEach((tray: any) => {
           if (tray.sow_date) {
             const recipeId = tray.recipe_id;
-            const traySowDateStr = formatDateString(new Date(tray.sow_date));
-            if (!seededDatesByRecipe.has(recipeId)) {
-              seededDatesByRecipe.set(recipeId, new Set<string>());
+            const traySowDate = parseLocalDate(tray.sow_date);
+            if (traySowDate) {
+              const traySowDateStr = formatDateString(traySowDate);
+              if (!seededDatesByRecipe.has(recipeId)) {
+                seededDatesByRecipe.set(recipeId, new Set<string>());
+              }
+              seededDatesByRecipe.get(recipeId)!.add(traySowDateStr);
             }
-            seededDatesByRecipe.get(recipeId)!.add(traySowDateStr);
           }
         });
       }
@@ -117,7 +143,7 @@ export const fetchWeeklyTasks = async (
       schedules = schedules.filter((schedule: any) => {
         if (!schedule.recipe_id) return true; // Keep schedules without recipe_id (e.g., delivery tasks)
         
-        const sowDate = new Date(schedule.sow_date);
+        const sowDate = parseLocalDate(schedule.sow_date) || new Date();
         sowDate.setHours(0, 0, 0, 0);
         const sowDateMs = sowDate.getTime();
         
@@ -129,7 +155,8 @@ export const fetchWeeklyTasks = async (
         
         // Check if any seeded date is within tolerance of the schedule date
         for (const seededDateStr of seededDates) {
-          const seededDate = new Date(seededDateStr + 'T00:00:00');
+          const seededDate = parseLocalDate(seededDateStr) || new Date();
+          seededDate.setHours(0, 0, 0, 0);
           const seededDateMs = seededDate.getTime();
           const daysDiff = Math.abs(seededDateMs - sowDateMs) / (1000 * 60 * 60 * 24);
           
@@ -168,11 +195,34 @@ export const fetchWeeklyTasks = async (
     // 3. Build task lists with grouping
     const taskMap = new Map<string, WeeklyTask>();
 
-    // 3a. Soak/Seed tasks from actual requests (authoritative)
+    // 3a. Fetch variety_name for seeding tasks (growers look for variety names on seed bags)
+    const seedingRecipeIds = seedingTasks 
+      ? [...new Set(seedingTasks.map((t: any) => t.recipe_id).filter(Boolean))] 
+      : [];
+    
+    const { data: seedingRecipesData, error: seedingRecipesError } = seedingRecipeIds.length > 0 ? await supabase
+      .from('recipes')
+      .select('recipe_id, variety_name')
+      .in('recipe_id', seedingRecipeIds)
+      .eq('farm_uuid', farmUuid) : { data: null, error: null };
+    
+    // Create a map of recipe_id -> variety_name for seeding tasks
+    const seedingVarietyNameMap: Record<number, string> = {};
+    if (seedingRecipesData && !seedingRecipesError) {
+      seedingRecipesData.forEach((recipe: any) => {
+        if (recipe.recipe_id && recipe.variety_name) {
+          seedingVarietyNameMap[recipe.recipe_id] = recipe.variety_name;
+        }
+      });
+    }
+
+    // 3b. Soak/Seed tasks from actual requests (authoritative)
     for (const task of seedingTasks || []) {
       const dateStr = task.task_date?.includes('T') ? task.task_date.split('T')[0] : task.task_date;
       if (!dateStr) continue;
-      const taskDate = new Date(dateStr + 'T00:00:00');
+      const taskDate = parseLocalDate(dateStr);
+      if (!taskDate) continue;
+      taskDate.setHours(0, 0, 0, 0);
       const type = task.task_type === 'soak' ? 'soaking' : 'sowing';
       const remaining =
         typeof task.trays_remaining === 'number'
@@ -187,27 +237,32 @@ export const fetchWeeklyTasks = async (
           : 'pending';
       const key = `${type}-${dateStr}-${task.recipe_id || ''}-${task.request_id || ''}`;
       if (!taskMap.has(key)) {
+        // Use variety_name for seeding tasks (growers look for variety names on seed bags)
+        const varietyName = seedingVarietyNameMap[task.recipe_id] || task.variety_name || task.recipe_name || 'Unknown';
         taskMap.set(key, {
           task_type: type as 'soaking' | 'sowing',
           task_date: taskDate,
           recipe_id: task.recipe_id || null,
-          recipe_name: task.recipe_name || task.variety_name || 'Unknown',
+          recipe_name: varietyName,
           quantity: remaining || 0,
           status,
           task_description: task.task_type === 'soak'
-            ? `Soak ${task.recipe_name || task.variety_name || 'Unknown'}`
-            : `Seed ${task.recipe_name || task.variety_name || 'Unknown'}`,
+            ? `Soak ${varietyName}`
+            : `Seed ${varietyName}`,
         });
       }
     }
 
     // 3b. Projected harvest/delivery (from planting_schedule_view)
     for (const schedule of (schedules || [])) {
-      const sowDate = new Date(schedule.sow_date);
+      const sowDate = parseLocalDate(schedule.sow_date) || new Date();
+      sowDate.setHours(0, 0, 0, 0);
       const sowDateStr = formatDateString(sowDate);
-      const harvestDate = new Date(schedule.harvest_date);
+      const harvestDate = parseLocalDate(schedule.harvest_date) || new Date();
+      harvestDate.setHours(0, 0, 0, 0);
       const harvestDateStr = formatDateString(harvestDate);
-      const deliveryDate = new Date(schedule.delivery_date);
+      const deliveryDate = parseLocalDate(schedule.delivery_date) || new Date();
+      deliveryDate.setHours(0, 0, 0, 0);
       const deliveryDateStr = formatDateString(deliveryDate);
       
       const recipeName = schedule.recipe_name || 'Unknown';

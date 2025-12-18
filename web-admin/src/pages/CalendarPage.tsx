@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { type LucideIcon, AlertTriangle, Beaker, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Droplets, Scissors, Sprout, CheckSquare } from 'lucide-react';
+import { type LucideIcon, AlertTriangle, Beaker, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Droplets, Scissors, Sprout, CheckSquare, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { fetchCalendarMonth, fetchDayTasks, type CalendarDaySummary, type CalendarDayTask } from '../services/calendarService';
 
@@ -198,11 +205,13 @@ function TaskGroup({
   icon: Icon,
   color,
   tasks,
+  onTaskClick,
 }: {
   title: string;
   icon: LucideIcon;
   color: TaskGroupColor;
   tasks: CalendarDayTask[];
+  onTaskClick?: (task: CalendarDayTask) => void;
 }) {
   const style = taskGroupStyles[color];
   return (
@@ -214,19 +223,67 @@ function TaskGroup({
         <span>{title}</span>
       </div>
       <div className="space-y-2">
-        {tasks.map((task) => (
-          <div key={`${task.task_name}-${task.recipe_name}-${task.task_date}`} className="border rounded-lg p-3 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-slate-900">{task.recipe_name || task.task_name || 'Task'}</div>
-              {task.quantity ? <span className="text-xs text-slate-500">{task.quantity} trays</span> : null}
+        {tasks.map((task, index) => {
+          // Create a unique key that includes all identifying fields
+          const uniqueKey = `${task.task_name || ''}-${task.recipe_name || ''}-${task.task_date}-${task.customer_name || ''}-${task.task_source || ''}-${(task as any).standing_order_id || ''}-${index}`;
+          return (
+            <div 
+              key={uniqueKey} 
+              className={cn(
+                "border rounded-lg p-3 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+                onTaskClick && "cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-colors"
+              )}
+              onClick={() => onTaskClick && onTaskClick(task)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-slate-900">{task.recipe_name || task.task_name || 'Task'}</div>
+                {task.quantity ? <span className="text-xs text-slate-500">{task.quantity} trays missing</span> : null}
+              </div>
+              <div className="text-xs text-slate-500 mt-1 space-y-1">
+                {task.task_name && task.task_name !== task.recipe_name ? <div>{task.task_name}</div> : null}
+                {task.variety_name ? <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{task.variety_name}</div> : null}
+                {task.customer_name ? <div>Customer: {task.customer_name}</div> : null}
+                {/* Show date information for at-risk items */}
+                {task.task_source === 'order_fulfillment' && (task as any).sow_date ? (
+                  <div className="pt-1 border-t border-slate-200 space-y-0.5">
+                    {(task as any).sow_date ? (
+                      <div className="text-amber-600">
+                        <span className="font-medium">Sow date:</span> {new Date((task as any).sow_date + 'T00:00:00').toLocaleDateString()} 
+                        {new Date((task as any).sow_date + 'T00:00:00') < new Date() ? (
+                          <span className="ml-1 text-red-600">(Past due)</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {(task as any).harvest_date ? (
+                      <div>
+                        <span className="font-medium">Harvest:</span> {new Date((task as any).harvest_date + 'T00:00:00').toLocaleDateString()}
+                        {(() => {
+                          const harvestDate = new Date((task as any).harvest_date + 'T00:00:00');
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          const daysUntil = Math.ceil((harvestDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                          return daysUntil >= 0 ? (
+                            <span className="ml-1 text-slate-600">({daysUntil} days)</span>
+                          ) : null;
+                        })()}
+                      </div>
+                    ) : null}
+                    {(task as any).delivery_date ? (
+                      <div>
+                        <span className="font-medium">Delivery:</span> {new Date((task as any).delivery_date + 'T00:00:00').toLocaleDateString()}
+                      </div>
+                    ) : null}
+                    {(task as any).trays_ready !== undefined && (task as any).trays_needed !== undefined ? (
+                      <div className="text-slate-600">
+                        <span className="font-medium">Trays:</span> {(task as any).trays_ready} / {(task as any).trays_needed} ready
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2">
-              {task.task_name ? <span>{task.task_name}</span> : null}
-              {task.variety_name ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{task.variety_name}</span> : null}
-              {task.customer_name ? <span>Customer: {task.customer_name}</span> : null}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -247,6 +304,7 @@ const CalendarPage = () => {
   const [dayTasks, setDayTasks] = useState<CalendarDayTask[]>([]);
   const [dayError, setDayError] = useState<string | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<CalendarDayTask | null>(null);
 
   useEffect(() => {
     const sessionData = localStorage.getItem('sproutify_session');
@@ -339,6 +397,9 @@ const CalendarPage = () => {
   const selectedSummary = selectedDate ? summaryMap[selectedDate] : undefined;
 
   const harvestTasks = useMemo(() => dayTasks.filter((task) => task.task_name?.toLowerCase().includes('harvest')), [dayTasks]);
+  const atRiskTasks = useMemo(() => dayTasks.filter((task) => 
+    task.task_name?.toLowerCase().includes('risk') || task.task_source === 'order_fulfillment'
+  ), [dayTasks]);
   const seedTasks = useMemo(() => dayTasks.filter((task) => task.task_source === 'seed_request'), [dayTasks]);
   const soakTasks = useMemo(() => dayTasks.filter((task) => task.task_source === 'soak_request'), [dayTasks]);
   const passiveTasks = useMemo(() => dayTasks.filter((task) => task.step_type === 'passive'), [dayTasks]);
@@ -445,18 +506,184 @@ const CalendarPage = () => {
               <div className="py-10 text-center text-slate-500">No tasks scheduled for this date.</div>
             ) : (
               <div className="space-y-4">
-                {harvestTasks.length ? <TaskGroup title="Harvest Time" icon={Scissors} color="emerald" tasks={harvestTasks} /> : null}
-                {selectedSummary?.warning_count ? <TaskGroup title="At Risk" icon={AlertTriangle} color="amber" tasks={dayTasks.filter((task) => task.task_name?.toLowerCase().includes('risk'))} /> : null}
-                {seedTasks.length ? <TaskGroup title="To Seed" icon={Sprout} color="indigo" tasks={seedTasks} /> : null}
-                {soakTasks.length ? <TaskGroup title="To Soak" icon={Beaker} color="purple" tasks={soakTasks} /> : null}
-                {passiveTasks.length ? <TaskGroup title="Check-ins" icon={Droplets} color="cyan" tasks={passiveTasks} /> : null}
+                {harvestTasks.length ? <TaskGroup title="Harvest Time" icon={Scissors} color="emerald" tasks={harvestTasks} onTaskClick={setSelectedTask} /> : null}
+                {selectedSummary?.warning_count && atRiskTasks.length > 0 ? <TaskGroup title="At Risk" icon={AlertTriangle} color="amber" tasks={atRiskTasks} onTaskClick={setSelectedTask} /> : null}
+                {seedTasks.length ? <TaskGroup title="To Seed" icon={Sprout} color="indigo" tasks={seedTasks} onTaskClick={setSelectedTask} /> : null}
+                {soakTasks.length ? <TaskGroup title="To Soak" icon={Beaker} color="purple" tasks={soakTasks} onTaskClick={setSelectedTask} /> : null}
+                {passiveTasks.length ? <TaskGroup title="Check-ins" icon={Droplets} color="cyan" tasks={passiveTasks} onTaskClick={setSelectedTask} /> : null}
               </div>
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Task Detail Dialog */}
+      <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedTask && (
+                <>
+                  {selectedTask.task_name?.toLowerCase().startsWith('harvest') && !selectedTask.task_name?.toLowerCase().includes('risk') && <Scissors className="h-5 w-5 text-emerald-600" />}
+                  {selectedTask.task_name?.toLowerCase().includes('risk') && <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                  {selectedTask.task_name?.toLowerCase().includes('seed') && <Sprout className="h-5 w-5 text-indigo-600" />}
+                  {selectedTask.task_name?.toLowerCase().includes('soak') && <Beaker className="h-5 w-5 text-purple-600" />}
+                  {(selectedTask.task_name?.toLowerCase().includes('water') || selectedTask.step_type === 'passive') && <Droplets className="h-5 w-5 text-cyan-600" />}
+                  {selectedTask.task_name?.toLowerCase().includes('uncover') && <Sun className="h-5 w-5 text-amber-600" />}
+                  Task Details
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed information about this task
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTask && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Task</p>
+                  <p className="text-base font-semibold text-slate-900">{selectedTask.task_name || 'Task'}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Recipe</p>
+                  <p className="text-base font-semibold text-slate-900">{selectedTask.recipe_name || 'Unknown'}</p>
+                </div>
+              </div>
+
+              {selectedTask.variety_name && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Variety</p>
+                  <p className="text-base text-slate-900">{selectedTask.variety_name}</p>
+                </div>
+              )}
+
+              {selectedTask.quantity !== null && selectedTask.quantity !== undefined && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Quantity</p>
+                  <p className="text-base font-semibold text-slate-900">
+                    {selectedTask.quantity} {selectedTask.quantity === 1 ? 'tray' : 'trays'}
+                  </p>
+                </div>
+              )}
+
+              {selectedTask.customer_name && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-500">Customer</p>
+                  <p className="text-base text-slate-900">{selectedTask.customer_name}</p>
+                </div>
+              )}
+
+              {/* At-risk specific details */}
+              {selectedTask.task_source === 'order_fulfillment' && (selectedTask as any).sow_date && (
+                <div className="pt-4 border-t border-slate-200 space-y-2">
+                  <p className="text-sm font-medium text-slate-700">Order Details</p>
+                  {(selectedTask as any).sow_date && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Sow date:</span>{' '}
+                      <span className="text-slate-900">
+                        {new Date((selectedTask as any).sow_date + 'T00:00:00').toLocaleDateString()}
+                      </span>
+                      {new Date((selectedTask as any).sow_date + 'T00:00:00') < new Date() && (
+                        <span className="ml-2 text-red-600">(Past due)</span>
+                      )}
+                    </div>
+                  )}
+                  {(selectedTask as any).harvest_date && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Harvest date:</span>{' '}
+                      <span className="text-slate-900">
+                        {new Date((selectedTask as any).harvest_date + 'T00:00:00').toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                  {(selectedTask as any).delivery_date && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Delivery date:</span>{' '}
+                      <span className="text-slate-900">
+                        {new Date((selectedTask as any).delivery_date + 'T00:00:00').toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                  {(selectedTask as any).trays_ready !== undefined && (selectedTask as any).trays_needed !== undefined && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Trays:</span>{' '}
+                      <span className="text-slate-900">
+                        {(selectedTask as any).trays_ready} / {(selectedTask as any).trays_needed} ready
+                      </span>
+                      {((selectedTask as any).trays_ready || 0) < ((selectedTask as any).trays_needed || 0) && (
+                        <span className="ml-2 text-amber-600">
+                          ({(selectedTask as any).trays_needed - (selectedTask as any).trays_ready} missing)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Harvest specific details */}
+              {selectedTask.task_source === 'planting_schedule' && selectedTask.task_name?.toLowerCase().includes('harvest') && (
+                <div className="pt-4 border-t border-slate-200 space-y-2">
+                  <p className="text-sm font-medium text-slate-700">Harvest Details</p>
+                  <div className="text-sm">
+                    <span className="font-medium text-slate-600">Date:</span>{' '}
+                    <span className="text-slate-900">
+                      {new Date(selectedTask.task_date + 'T00:00:00').toLocaleDateString()}
+                    </span>
+                  </div>
+                  {selectedTask.quantity && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Trays ready:</span>{' '}
+                      <span className="text-slate-900">{selectedTask.quantity}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Seed/Soak specific details */}
+              {(selectedTask.task_source === 'seed_request' || selectedTask.task_source === 'soak_request') && (
+                <div className="pt-4 border-t border-slate-200 space-y-2">
+                  <p className="text-sm font-medium text-slate-700">Preparation Details</p>
+                  <div className="text-sm">
+                    <span className="font-medium text-slate-600">Date:</span>{' '}
+                    <span className="text-slate-900">
+                      {new Date(selectedTask.task_date + 'T00:00:00').toLocaleDateString()}
+                    </span>
+                  </div>
+                  {selectedTask.quantity && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">Trays needed:</span>{' '}
+                      <span className="text-slate-900">{selectedTask.quantity}</span>
+                    </div>
+                  )}
+                  {selectedTask.customer_name && (
+                    <div className="text-sm">
+                      <span className="font-medium text-slate-600">For customer:</span>{' '}
+                      <span className="text-slate-900">{selectedTask.customer_name}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-4 border-t border-slate-200">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedTask(null)}
+                  className="w-full"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 export default CalendarPage;
+
+
+
+

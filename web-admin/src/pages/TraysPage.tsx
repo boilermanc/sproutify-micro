@@ -152,7 +152,7 @@ const TraysPage = () => {
         }, {} as Record<number, any>);
       }
 
-      // Fetch customers separately
+      // Fetch customers separately - first from direct customer_id on trays
       const customerIds = (data || [])
         .map(tray => tray.customer_id)
         .filter(id => id !== null && id !== undefined);
@@ -168,6 +168,138 @@ const TraysPage = () => {
           acc[c.customerid] = c.name || '';
           return acc;
         }, {} as Record<number, string>);
+      }
+
+      // For trays without customer_id, try to find customer from standing orders
+      // This handles trays created from standing orders that didn't get customer_id set
+      const traysWithoutCustomer = (data || []).filter((t: any) => !t.customer_id && t.sow_date && t.recipe_id);
+      
+      if (traysWithoutCustomer.length > 0) {
+        // Calculate grow times first (we'll need this to match delivery dates)
+        const recipeGrowTimesForMatching: Record<number, number> = {};
+        const recipeIdsForMatching = [...new Set(traysWithoutCustomer.map((t: any) => t.recipe_id))];
+        
+        if (recipeIdsForMatching.length > 0) {
+          const { data: stepsForMatching } = await supabase
+            .from('steps')
+            .select('recipe_id, duration, duration_unit, sequence_order')
+            .in('recipe_id', recipeIdsForMatching);
+          
+          if (stepsForMatching) {
+            const sortedSteps = [...stepsForMatching].sort((a: any, b: any) => {
+              const orderA = a.sequence_order ?? 0;
+              const orderB = b.sequence_order ?? 0;
+              return orderA - orderB;
+            });
+            
+            const stepsByRecipe: Record<number, any[]> = {};
+            sortedSteps.forEach((step: any) => {
+              if (!stepsByRecipe[step.recipe_id]) {
+                stepsByRecipe[step.recipe_id] = [];
+              }
+              stepsByRecipe[step.recipe_id].push(step);
+            });
+            
+            Object.keys(stepsByRecipe).forEach((recipeIdStr) => {
+              const recipeId = parseInt(recipeIdStr);
+              const steps = stepsByRecipe[recipeId];
+              const totalDays = steps.reduce((sum: number, step: any) => {
+                const duration = step.duration || 0;
+                const unit = (step.duration_unit || 'Days').toUpperCase();
+                if (unit === 'DAYS') {
+                  return sum + duration;
+                } else if (unit === 'HOURS') {
+                  return sum + (duration >= 12 ? 1 : 0);
+                }
+                return sum + duration;
+              }, 0);
+              recipeGrowTimesForMatching[recipeId] = totalDays;
+            });
+          }
+        }
+        
+        // Fetch active standing orders with their customers
+        const { data: standingOrdersData } = await supabase
+          .from('standing_orders')
+          .select(`
+            standing_order_id,
+            customer_id,
+            customers!inner(customerid, name)
+          `)
+          .eq('farm_uuid', farmUuid)
+          .eq('is_active', true);
+        
+        if (standingOrdersData && standingOrdersData.length > 0) {
+          // Fetch product_recipe_mapping to link recipes to products
+          const { data: productMappings } = await supabase
+            .from('product_recipe_mapping')
+            .select('product_id, recipe_id')
+            .in('recipe_id', recipeIdsForMatching);
+          
+          // Fetch standing_order_items to get products
+          const standingOrderIds = standingOrdersData.map((so: any) => so.standing_order_id);
+          const { data: standingOrderItems } = await supabase
+            .from('standing_order_items')
+            .select('standing_order_id, product_id')
+            .in('standing_order_id', standingOrderIds);
+          
+          // Build a map: recipe_id -> [customer_ids]
+          const recipeToCustomers: Record<number, Set<number>> = {};
+          
+          if (productMappings && standingOrderItems) {
+            // Create product_id -> recipe_id map
+            const productToRecipe: Record<number, number[]> = {};
+            productMappings.forEach((pm: any) => {
+              if (!productToRecipe[pm.product_id]) {
+                productToRecipe[pm.product_id] = [];
+              }
+              productToRecipe[pm.product_id].push(pm.recipe_id);
+            });
+            
+            // For each standing order item, find matching recipes
+            standingOrderItems.forEach((item: any) => {
+              const recipes = productToRecipe[item.product_id] || [];
+              const standingOrder = standingOrdersData.find((so: any) => so.standing_order_id === item.standing_order_id);
+              
+              if (standingOrder && standingOrder.customer_id) {
+                recipes.forEach((recipeId: number) => {
+                  if (!recipeToCustomers[recipeId]) {
+                    recipeToCustomers[recipeId] = new Set();
+                  }
+                  recipeToCustomers[recipeId].add(standingOrder.customer_id);
+                });
+              }
+            });
+          }
+          
+          // For each tray without customer, try to match by recipe and date
+          traysWithoutCustomer.forEach((tray: any) => {
+            const recipeId = tray.recipe_id;
+            const possibleCustomers = recipeToCustomers[recipeId];
+            
+            if (possibleCustomers && possibleCustomers.size > 0) {
+              // If there's only one customer for this recipe, use it
+              // Otherwise, we could try to match by delivery date, but for now use the first one
+              const customerId = Array.from(possibleCustomers)[0];
+              
+              // Add to customersMap if not already there
+              if (!customersMap[customerId]) {
+                const standingOrder = standingOrdersData.find((so: any) => so.customer_id === customerId);
+                if (standingOrder && standingOrder.customers) {
+                  const customer = Array.isArray(standingOrder.customers) 
+                    ? standingOrder.customers[0] 
+                    : standingOrder.customers;
+                  if (customer) {
+                    customersMap[customerId] = customer.name || '';
+                  }
+                }
+              }
+              
+              // Set customer_id on the tray data for later use
+              tray.customer_id = customerId;
+            }
+          });
+        }
       }
 
       // Fetch recipe steps to calculate grow time and projected harvest dates
@@ -306,6 +438,7 @@ const TraysPage = () => {
           status,
           loss_reason: tray.loss_reason || null,
           harvest_date: tray.harvest_date ? new Date(tray.harvest_date).toLocaleDateString() : projectedHarvestDate,
+          seeding_date: tray.sow_date ? new Date(tray.sow_date).toLocaleDateString() : 'Not set',
           created_at: new Date(tray.created_at).toLocaleDateString()
         };
       });
@@ -1210,9 +1343,9 @@ const TraysPage = () => {
           <TableHeader>
             <TableRow>
               <TableHead>Tray ID</TableHead>
-              <TableHead>Recipe</TableHead>
               <TableHead>Batch ID</TableHead>
               <TableHead>Variety</TableHead>
+              <TableHead>Seeding Date</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead>Harvest Date</TableHead>
               <TableHead>Status</TableHead>
@@ -1253,9 +1386,9 @@ const TraysPage = () => {
                       {tray.trayId}
                     </button>
                   </TableCell>
-                  <TableCell>{tray.recipe}</TableCell>
                   <TableCell>{tray.batchId}</TableCell>
                   <TableCell>{tray.variety}</TableCell>
+                  <TableCell>{tray.seeding_date}</TableCell>
                   <TableCell>{tray.customer}</TableCell>
                   <TableCell>{tray.harvest_date}</TableCell>
                   <TableCell>
@@ -1263,8 +1396,8 @@ const TraysPage = () => {
                     variant={tray.status === 'Lost' ? 'destructive' : tray.status === 'Harvested' ? 'secondary' : 'default'}
                     className={stageColors[tray.status] || (tray.status === 'Lost' ? '' : tray.status === 'Harvested' ? '' : 'bg-green-500 hover:bg-green-600')}
                   >
-                      {tray.status}
-                    </Badge>
+                    {tray.status}
+                  </Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>

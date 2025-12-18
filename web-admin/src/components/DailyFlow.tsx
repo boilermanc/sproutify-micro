@@ -21,7 +21,11 @@ import {
   XCircle,
   Calendar,
   Beaker,
-  MapPin
+  MapPin,
+  Phone,
+  RefreshCw,
+  FileText,
+  User
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -67,8 +71,12 @@ import {
   useLeftoverSoakedSeed,
   discardSoakedSeed,
   cancelSeedingRequest,
-  rescheduleSeedingRequest
+  rescheduleSeedingRequest,
+  fetchPassiveTrayStatus,
+  type PassiveTrayStatusItem
 } from '../services/dailyFlowService';
+import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
+import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -105,11 +113,21 @@ export default function DailyFlow() {
   const [isCancellingRequest, setIsCancellingRequest] = useState(false);
   const [rescheduleRequestDialog, setRescheduleRequestDialog] = useState<{ task: DailyTask; newDate: string } | null>(null);
   const [passiveStepDetails, setPassiveStepDetails] = useState<{ stepName: string; varieties: Array<{ recipe: string; trays: number }>; totalTrays: number } | null>(null);
+  const [manageOrderDialog, setManageOrderDialog] = useState<DailyTask | null>(null);
+  const [fulfillmentAction, setFulfillmentAction] = useState<FulfillmentActionType | ''>('');
+  const [fulfillmentNotes, setFulfillmentNotes] = useState<string>('');
+  const [fulfillmentQuantity, setFulfillmentQuantity] = useState<string>('');
+  const [isProcessingFulfillment, setIsProcessingFulfillment] = useState(false);
+  const [actionHistory, setActionHistory] = useState<Map<string, any[]>>(new Map());
+  const [availableSubstitutes, setAvailableSubstitutes] = useState<any[]>([]);
+  const [selectedSubstitute, setSelectedSubstitute] = useState<number | null>(null);
+  const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
   
   // Ref to prevent duplicate submissions (more reliable than state for this)
   const isSubmittingSeeding = useRef(false);
   
-  // Track tasks that are animating out
+  // Track tasks that are animating out (use ref so it persists through loadTasks calls)
+  const animatingOutRef = useRef<Set<string>>(new Set());
   const [animatingOut, setAnimatingOut] = useState<Set<string>>(new Set());
 
   // Autofill seeding quantity based on remaining trays and batch inventory
@@ -132,24 +150,88 @@ export default function DailyFlow() {
   }, [seedingTask, isSoakVariety, availableBatches, selectedBatchId, seedQuantityPerTray, seedQuantityCompleted]);
 
   const loadTasks = async () => {
+    console.log('[loadTasks] Starting task refresh...');
     setLoading(true);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
 
-      const [tasksData, count] = await Promise.all([
-        fetchDailyTasks(),
-        getActiveTraysCount()
+      // Force refresh to bypass any caching - pass Date and forceRefresh flag
+      const [tasksData, count, passiveStatus] = await Promise.all([
+        fetchDailyTasks(new Date(), true), // Force refresh
+        getActiveTraysCount(),
+        fetchPassiveTrayStatus() // Fetch passive tray status directly from DB
       ]);
+      
+      // Update passive tray status
+      setPassiveTrayStatus(passiveStatus);
+      
+      const atRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
+      const atRiskCount = atRiskTasks.length;
+      
+      // Check specifically for Purple Basil in the fetched tasks
+      const purpleBasilTasks = tasksData.filter(t => 
+        (t.crop?.toLowerCase().includes('purple basil') || 
+         t.action?.toLowerCase().includes('purple basil')) &&
+        t.recipeId === 14
+      );
+      
       console.log('[DailyFlow Component] Loaded tasks:', {
         total: tasksData.length,
         prep: tasksData.filter(t => t.action === 'Soak' || t.action === 'Seed').length,
-        harvest: tasksData.filter(t => t.action === 'Harvest').length,
-        workflow: tasksData.filter(t => t.action !== 'Harvest' && t.action !== 'Soak' && t.action !== 'Seed').length,
-        allTasks: tasksData
+        harvest: tasksData.filter(t => t.action.toLowerCase().startsWith('harvest')).length,
+        atRisk: atRiskCount,
+        workflow: tasksData.filter(t => !t.action.toLowerCase().startsWith('harvest') && !t.action.toLowerCase().includes('at risk') && t.action !== 'Soak' && t.action !== 'Seed').length,
+        passive: tasksData.filter(t => ['Germination', 'Blackout', 'Growing', 'Growing Phase'].includes(t.action) || ['Germination', 'Blackout', 'Growing', 'Growing Phase'].some(name => t.stepDescription?.includes(name))).length,
+        purpleBasilInTasks: purpleBasilTasks.length,
+        purpleBasilTasks: purpleBasilTasks.map(t => ({
+          action: t.action,
+          crop: t.crop,
+          recipeId: t.recipeId,
+          deliveryDate: t.deliveryDate,
+          standingOrderId: t.standingOrderId,
+          taskSource: t.taskSource,
+          id: t.id
+        })),
+        atRiskTasks: atRiskTasks.map(t => ({
+          action: t.action,
+          crop: t.crop,
+          recipeId: t.recipeId,
+          deliveryDate: t.deliveryDate,
+          standingOrderId: t.standingOrderId,
+          taskSource: t.taskSource,
+          id: t.id
+        }))
       });
-      setTasks(tasksData);
+      
+      // Update state - this will trigger re-render
+      // Preserve tasks that are currently animating out (they'll be removed after animation completes)
+      setTasks(prevTasks => {
+        const animatingTaskIds = animatingOutRef.current;
+        const newTasks = [...tasksData];
+        
+        // Keep animating tasks in the array so animation can complete
+        const animatingTasks = prevTasks.filter(t => animatingTaskIds.has(t.id));
+        const newTaskIds = new Set(newTasks.map(t => t.id));
+        
+        // Add animating tasks that aren't in the new data (they're being removed)
+        const tasksToKeep = animatingTasks.filter(t => !newTaskIds.has(t.id));
+        
+        // Combine new tasks with animating tasks that should stay
+        return [...newTasks, ...tasksToKeep];
+      });
       setActiveTraysCount(count);
+      
+      console.log('[loadTasks] State updated with', tasksData.length, 'tasks');
+      
+      // Load action history for at-risk tasks (only fetch if not already loaded)
+      const atRiskTasksData = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
+      atRiskTasksData.forEach(task => {
+        if (task.standingOrderId && task.deliveryDate) {
+          // Fetch asynchronously (function will check if already loaded)
+          fetchActionHistory(task);
+        }
+      });
 
       // Load available soaked seed
       // Note: available_soaked_seed view already filters by status='available', so we don't need to filter again
@@ -201,9 +283,122 @@ export default function DailyFlow() {
     setErrorDialog({ show: true, message, title });
   };
 
+  // Fetch action history for an at-risk task
+  // Use a ref to track pending fetches to avoid duplicate calls
+  const pendingHistoryFetches = useRef<Set<string>>(new Set());
+  
+  const fetchActionHistory = async (task: DailyTask) => {
+    if (!task.standingOrderId || !task.deliveryDate || !supabase) return;
+    
+    const key = `${task.standingOrderId}-${task.deliveryDate}-${task.recipeId}`;
+    
+    // Check if we already have this history or if it's pending
+    if (pendingHistoryFetches.current.has(key)) {
+      return; // Already fetching
+    }
+    
+    // Check current state synchronously (without triggering re-render)
+    const currentHistory = actionHistory;
+    if (currentHistory.has(key)) {
+      return; // Already have it
+    }
+    
+    // Mark as pending
+    pendingHistoryFetches.current.add(key);
+    
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        pendingHistoryFetches.current.delete(key);
+        return;
+      }
+      
+      const { farmUuid } = JSON.parse(sessionData);
+      
+      const { data } = await supabase
+        .from('order_fulfillment_actions')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .eq('standing_order_id', task.standingOrderId)
+        .eq('delivery_date', task.deliveryDate)
+        .eq('recipe_id', task.recipeId)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      
+      if (data) {
+        setActionHistory(prev => {
+          // Double-check we still don't have it (race condition protection)
+          if (!prev.has(key)) {
+            const newMap = new Map(prev);
+            newMap.set(key, data);
+            return newMap;
+          }
+          return prev; // Return unchanged if already exists
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching action history:', error);
+    } finally {
+      // Remove from pending set
+      pendingHistoryFetches.current.delete(key);
+    }
+  };
+
+  // Fetch available substitutes for substitute action
+  const fetchAvailableSubstitutes = async (task: DailyTask) => {
+    if (!task.deliveryDate) return;
+    
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      
+      const { farmUuid } = JSON.parse(sessionData);
+      
+      if (!supabase) return;
+      
+      const { data } = await supabase
+        .from('order_fulfillment_status')
+        .select('recipe_id, recipe_name, trays_ready, harvest_date')
+        .eq('farm_uuid', farmUuid)
+        .neq('recipe_id', task.recipeId)
+        .gte('trays_ready', 1);
+      
+      if (data && task.deliveryDate) {
+        // Filter by harvest_date <= delivery_date
+        const filtered = data.filter((item: any) => {
+          if (!item.harvest_date) return false;
+          return item.harvest_date <= (task.deliveryDate || '');
+        });
+        setAvailableSubstitutes(filtered);
+      }
+    } catch (error) {
+      console.error('Error fetching available substitutes:', error);
+    }
+  };
+
+  const handleAtRiskTask = (task: DailyTask, actionType?: FulfillmentActionType) => {
+    // Open Manage Order dialog for at-risk tasks
+    setManageOrderDialog(task);
+    if (actionType) {
+      setFulfillmentAction(actionType);
+      // Fetch action history when opening dialog
+      fetchActionHistory(task);
+      // Fetch substitutes if substitute action
+      if (actionType === 'substitute') {
+        fetchAvailableSubstitutes(task);
+      }
+    }
+  };
+
   const handleComplete = async (task: DailyTask, yieldValue?: number, batchId?: number, taskDate?: string) => {
+    // Prevent at-risk tasks from being marked as done - they must use Manage Order
+    if (task.action.toLowerCase().includes('at risk')) {
+      handleAtRiskTask(task);
+      return;
+    }
+    
     // For harvest tasks, open the harvest dialog instead of completing directly
-    if (task.action === 'Harvest' && yieldValue === undefined) {
+    if (task.action.toLowerCase().startsWith('harvest') && !task.action.toLowerCase().includes('at risk') && yieldValue === undefined) {
       setHarvestingTask(task);
       setHarvestYield('');
       return;
@@ -223,7 +418,8 @@ export default function DailyFlow() {
     }
 
     // For seed tasks, open the seeding dialog instead of completing directly
-    if (task.action === 'Seed' && task.taskSource === 'seed_request') {
+    // Handle both seed_request and planting_schedule seeding tasks
+    if (task.action === 'Seed' && (task.taskSource === 'seed_request' || task.taskSource === 'planting_schedule')) {
       setSeedingTask(task);
       setSelectedBatchId(null);
       setAvailableBatches([]);
@@ -233,7 +429,41 @@ export default function DailyFlow() {
       setIsSoakVariety(false);
       setAvailableSoakedSeed(null);
       
-      // Check if this is a soak variety and fetch relevant data
+      // For planting_schedule tasks, we need to fetch batches using recipeId directly
+      if (task.taskSource === 'planting_schedule' && task.recipeId) {
+        // Fetch available batches for this recipe
+        await fetchAvailableBatchesForRecipe(task);
+        
+        // Check if recipe has soak step
+        const { data: hasSoakData } = await supabase.rpc('recipe_has_soak', {
+          p_recipe_id: task.recipeId
+        });
+        
+        const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
+        setIsSoakVariety(hasSoak || false);
+        
+        if (hasSoak) {
+          // Soak variety - fetch available soaked seed for this recipe
+          const sessionData = localStorage.getItem('sproutify_session');
+          if (sessionData) {
+            const { farmUuid } = JSON.parse(sessionData);
+            const { data: soakedSeedData } = await supabase
+              .from('available_soaked_seed')
+              .select('*')
+              .eq('farm_uuid', farmUuid)
+              .eq('recipe_id', task.recipeId)
+              .order('soak_date', { ascending: true })
+              .limit(1);
+            
+            if (soakedSeedData && soakedSeedData.length > 0) {
+              setAvailableSoakedSeed(soakedSeedData[0]);
+            }
+          }
+        }
+        return;
+      }
+      
+      // For seed_request tasks, check if this is a soak variety and fetch relevant data
       if (task.requestId) {
         const { data: requestData } = await supabase
           .from('tray_creation_requests')
@@ -292,6 +522,7 @@ export default function DailyFlow() {
       const success = await completeTask(task, yieldValue, batchId, taskDate);
       if (success) {
         // Start exit animation
+        animatingOutRef.current.add(task.id);
         setAnimatingOut(prev => new Set(prev).add(task.id));
         
         // Show formatted success notification
@@ -301,6 +532,7 @@ export default function DailyFlow() {
         // Wait for animation to complete, then remove task
         setTimeout(() => {
           setTasks(prev => prev.filter(t => t.id !== task.id));
+          animatingOutRef.current.delete(task.id);
           setAnimatingOut(prev => {
             const next = new Set(prev);
             next.delete(task.id);
@@ -667,6 +899,135 @@ export default function DailyFlow() {
     }
   };
 
+  const handleFulfillmentAction = async () => {
+    if (!manageOrderDialog || !fulfillmentAction) return;
+
+    setIsProcessingFulfillment(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        showNotification('error', 'Session expired. Please log in again.');
+        return;
+      }
+
+      const { farmUuid, userId } = JSON.parse(sessionData);
+
+      // Call RPC function directly
+      const response = await recordFulfillmentAction({
+        p_farm_uuid: farmUuid,
+        p_standing_order_id: manageOrderDialog.standingOrderId || 0,
+        p_delivery_date: manageOrderDialog.deliveryDate || '',
+        p_recipe_id: manageOrderDialog.recipeId,
+        p_action_type: fulfillmentAction,
+        p_notes: fulfillmentNotes || null,
+        p_original_quantity: manageOrderDialog.traysNeeded || null,
+        p_fulfilled_quantity: fulfillmentAction === 'partial' ? parseInt(fulfillmentQuantity) || null : null,
+        p_substitute_recipe_id: selectedSubstitute || null,
+        p_created_by: userId || null,
+      });
+
+      console.log('[handleFulfillmentAction] RPC response:', response);
+      
+      if (response.success) {
+        const actionLabel = fulfillmentAction === 'contacted' ? 'Contacted customer' :
+                           fulfillmentAction === 'note' ? 'Note added' :
+                           fulfillmentAction === 'skip' ? 'Skipped' :
+                           fulfillmentAction === 'substitute' ? 'Substituted' : 'Action recorded';
+        
+        showNotification('success', `${manageOrderDialog.crop} ${actionLabel}`);
+        
+        // Refresh action history for this item
+        if (manageOrderDialog.standingOrderId && manageOrderDialog.deliveryDate) {
+          fetchActionHistory(manageOrderDialog);
+        }
+        
+        // If resolved, animate out the card instead of reloading
+        if (response.resolved) {
+          console.log('[handleFulfillmentAction] Item resolved, animating out...');
+          console.log('[handleFulfillmentAction] RPC response details:', {
+            success: response.success,
+            resolved: response.resolved,
+            action_id: response.action_id,
+            schedule_id: response.schedule_id
+          });
+          console.log('[handleFulfillmentAction] Skipped item details:', {
+            recipeId: manageOrderDialog.recipeId,
+            deliveryDate: manageOrderDialog.deliveryDate,
+            standingOrderId: manageOrderDialog.standingOrderId,
+            crop: manageOrderDialog.crop,
+            actionType: fulfillmentAction
+          });
+          
+          // Close dialog first so UI updates immediately
+          setManageOrderDialog(null);
+          setFulfillmentAction('');
+          setFulfillmentNotes('');
+          setFulfillmentQuantity('');
+          setSelectedSubstitute(null);
+          setAvailableSubstitutes([]);
+          
+          // Find the task that matches the resolved item
+          const taskToRemove = tasks.find(t => 
+            t.recipeId === manageOrderDialog.recipeId &&
+            t.deliveryDate === manageOrderDialog.deliveryDate &&
+            t.standingOrderId === manageOrderDialog.standingOrderId &&
+            t.action.toLowerCase().includes('at risk')
+          );
+          
+          if (taskToRemove) {
+            // Start exit animation
+            setAnimatingOut(prev => new Set(prev).add(taskToRemove.id));
+            
+            // Wait for animation to complete, then remove from tasks
+            setTimeout(() => {
+              setTasks(prev => prev.filter(t => t.id !== taskToRemove.id));
+              setAnimatingOut(prev => {
+                const next = new Set(prev);
+                next.delete(taskToRemove.id);
+                return next;
+              });
+              console.log('[handleFulfillmentAction] Task removed after animation');
+            }, 500); // Match animation duration
+          } else {
+            // Fallback: if task not found, do a minimal reload (only at-risk tasks)
+            console.log('[handleFulfillmentAction] Task not found in state, doing minimal reload...');
+            // Only reload at-risk tasks, not the entire page
+            const nonAtRiskTasks = tasks.filter(t => !t.action.toLowerCase().includes('at risk'));
+            
+            // Reload only at-risk tasks
+            const sessionData = localStorage.getItem('sproutify_session');
+            const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
+            if (farmUuid) {
+              fetchDailyTasks(new Date(), true).then((tasksData) => {
+                const newAtRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
+                setTasks([...nonAtRiskTasks, ...newAtRiskTasks]);
+              }).catch((error) => {
+                console.error('[handleFulfillmentAction] Error reloading at-risk tasks:', error);
+                // Fallback to full reload on error
+                loadTasks();
+              });
+            }
+          }
+        } else {
+          console.log('[handleFulfillmentAction] Item NOT resolved - action logged but item remains at-risk');
+          // Close dialog and reset state even if not resolved
+          setManageOrderDialog(null);
+          setFulfillmentAction('');
+          setFulfillmentNotes('');
+          setFulfillmentQuantity('');
+          setSelectedSubstitute(null);
+          setAvailableSubstitutes([]);
+        }
+      }
+    } catch (error: any) {
+      console.error('Error recording fulfillment action:', error);
+      showNotification('error', error?.message || 'Failed to record fulfillment action');
+      // Keep dialog open on error so user can retry
+    } finally {
+      setIsProcessingFulfillment(false);
+    }
+  };
+
   const handleSeedingConfirm = async () => {
     if (!seedingTask) {
       showNotification('error', 'Invalid seeding task');
@@ -675,11 +1036,6 @@ export default function DailyFlow() {
 
     if (!seedQuantityCompleted || parseInt(seedQuantityCompleted) <= 0) {
       showNotification('error', 'Please enter a valid quantity of trays to seed');
-      return;
-    }
-
-    if (!seedingTask.requestId) {
-      showNotification('error', 'Invalid seed task - missing request ID');
       return;
     }
 
@@ -707,9 +1063,31 @@ export default function DailyFlow() {
       batchIdToUse = selectedBatchId;
     }
 
-    // Check if this is a soak variety by checking the request
+    // Determine recipe ID and check if this is a soak variety
+    let recipeId: number | undefined;
     let isSoakVariety = false;
-    if (seedingTask.requestId) {
+    
+    if (seedingTask.taskSource === 'planting_schedule') {
+      // For planting_schedule tasks, use recipeId directly
+      recipeId = seedingTask.recipeId;
+      if (recipeId) {
+        const { data: hasSoak } = await supabase.rpc('recipe_has_soak', {
+          p_recipe_id: recipeId
+        });
+        
+        isSoakVariety = hasSoak && hasSoak[0]?.has_soak;
+        
+        // For soak varieties, batch_id should be null
+        if (isSoakVariety) {
+          batchIdToUse = null;
+        } else if (!batchIdToUse) {
+          // For non-soak varieties, batch_id is required
+          showNotification('error', 'Please select a seed batch for non-soak varieties');
+          return;
+        }
+      }
+    } else if (seedingTask.requestId) {
+      // For seed_request tasks, get recipe_id from request
       const { data: requestData } = await supabase
         .from('tray_creation_requests')
         .select('recipe_id')
@@ -717,8 +1095,9 @@ export default function DailyFlow() {
         .single();
       
       if (requestData) {
+        recipeId = requestData.recipe_id;
         const { data: hasSoak } = await supabase.rpc('recipe_has_soak', {
-          p_recipe_id: requestData.recipe_id
+          p_recipe_id: recipeId
         });
         
         isSoakVariety = hasSoak && hasSoak[0]?.has_soak;
@@ -734,6 +1113,17 @@ export default function DailyFlow() {
       }
     }
 
+    // Validate that we have what we need
+    if (seedingTask.taskSource === 'planting_schedule' && !recipeId) {
+      showNotification('error', 'Invalid seed task - missing recipe ID');
+      return;
+    }
+
+    if (seedingTask.taskSource === 'seed_request' && !seedingTask.requestId) {
+      showNotification('error', 'Invalid seed task - missing request ID');
+      return;
+    }
+
     isSubmittingSeeding.current = true;
     setCompletingIds(prev => new Set(prev).add(seedingTask.id));
 
@@ -741,15 +1131,39 @@ export default function DailyFlow() {
     const quantityToComplete = parseInt(seedQuantityCompleted);
     
     try {
-      const traysCreated = await completeSeedTask(
-        seedingTask.requestId!,
-        quantityToComplete,
-        batchIdToUse
-      );
+      let traysCreated = 0;
+      
+      if (seedingTask.taskSource === 'planting_schedule') {
+        // For planting_schedule tasks, use completeTask which creates trays directly
+        // Create a modified task with the quantity to complete
+        const taskToComplete: DailyTask = {
+          ...seedingTask,
+          trays: quantityToComplete,
+        };
+        
+        // Get today's date for the task date
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const taskDateStr = today.toISOString().split('T')[0];
+        
+        const success = await completeTask(taskToComplete, undefined, batchIdToUse || undefined, taskDateStr);
+        if (success) {
+          traysCreated = quantityToComplete;
+        } else {
+          throw new Error('Failed to complete seeding task');
+        }
+      } else {
+        // For seed_request tasks, use completeSeedTask
+        traysCreated = await completeSeedTask(
+          seedingTask.requestId!,
+          quantityToComplete,
+          batchIdToUse
+        );
+      }
 
       showNotification('success', `Seeding completed! Created ${traysCreated} ${traysCreated === 1 ? 'tray' : 'trays'}`);
       
-      // Only close dialog and clear state on success
+      // Close dialog and clear state on success
       setSeedingTask(null);
       setMissedStepForSeeding(null);
       setSelectedBatchId(null);
@@ -764,10 +1178,68 @@ export default function DailyFlow() {
         }
       }
 
-      // Reload tasks to show updated status
-      setTimeout(async () => {
-        await loadTasks();
-      }, 100);
+      // Animate out the completed seeding task immediately
+      if (seedingTask) {
+        // Store the task ID and details for checking after animation
+        const completedTaskId = seedingTask.id;
+        const completedRequestId = seedingTask.requestId;
+        const completedRecipeId = seedingTask.recipeId;
+        const completedTaskSource = seedingTask.taskSource;
+        
+        // Start exit animation immediately - this must happen before any async operations
+        // to ensure the animation starts right away
+        animatingOutRef.current.add(completedTaskId);
+        setAnimatingOut(prev => new Set(prev).add(completedTaskId));
+        
+        // Wait for animation to complete, then remove and sync with backend
+        setTimeout(async () => {
+          // Remove task from array after animation
+          setTasks(prev => prev.filter(t => t.id !== completedTaskId));
+          
+          // Remove from animating set and ref
+          animatingOutRef.current.delete(completedTaskId);
+          setAnimatingOut(prev => {
+            const next = new Set(prev);
+            next.delete(completedTaskId);
+            return next;
+          });
+          
+          // Update active tray count since seeding creates new trays
+          await getActiveTraysCount().then(count => {
+            setActiveTraysCount(count);
+          }).catch(error => {
+            console.error('[DailyFlow] Error updating active tray count:', error);
+          });
+          
+          // Reload only seeding tasks to check if task is fully completed or partially completed
+          // This ensures we sync with backend state without full page reload
+          const sessionData = localStorage.getItem('sproutify_session');
+          const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
+          if (farmUuid) {
+            try {
+              const allTasks = await fetchDailyTasks(new Date(), true);
+              const seedTasks = allTasks.filter(t => 
+                t.action === 'Seed' && 
+                ((completedTaskSource === 'seed_request' && t.requestId === completedRequestId) ||
+                 (completedTaskSource === 'planting_schedule' && t.recipeId === completedRecipeId))
+              );
+              
+              // If there's a matching task from the reload (partial completion), add it back
+              // Otherwise, the task is fully completed and should stay gone
+              if (seedTasks.length > 0) {
+                setTasks(prev => {
+                  const existingIds = new Set(prev.map(t => t.id));
+                  const newSeedTasks = seedTasks.filter(t => !existingIds.has(t.id));
+                  return [...prev, ...newSeedTasks];
+                });
+              }
+            } catch (error) {
+              console.error('[DailyFlow] Error syncing seeding tasks:', error);
+              // Task already removed, so no action needed
+            }
+          }
+        }, 500); // Match animation duration
+      }
     } catch (error: any) {
       console.error('[DailyFlow] Error in handleSeedingConfirm:', error);
       const errorMessage = error?.message || 'Failed to complete seeding task';
@@ -882,12 +1354,14 @@ export default function DailyFlow() {
       const success = await skipTask(task);
       if (success) {
         // Start exit animation
+        animatingOutRef.current.add(task.id);
         setAnimatingOut(prev => new Set(prev).add(task.id));
         showNotification('success', `Skipped ${task.action} for ${task.trays} ${task.trays === 1 ? 'tray' : 'trays'}`);
         
         // Wait for animation, then remove and reload
         setTimeout(() => {
           setTasks(prev => prev.filter(t => t.id !== task.id));
+          animatingOutRef.current.delete(task.id);
           setAnimatingOut(prev => {
             const next = new Set(prev);
             next.delete(task.id);
@@ -1026,31 +1500,85 @@ export default function DailyFlow() {
   };
 
   // Grouping Logic: Group by action type
-  const harvestTasks = tasks.filter(t => t.action === 'Harvest');
+  const harvestTasks = tasks.filter(t => t.action.toLowerCase().startsWith('harvest') && !t.action.toLowerCase().includes('at risk'));
+  const atRiskTasks = tasks.filter(t => t.action.toLowerCase().includes('at risk'));
   const prepTasks = tasks.filter(t => t.action === 'Soak' || t.action === 'Seed');
+  
+  // Only log task grouping and limit frequency to avoid spam
+  const logKey = `task-grouping-${tasks.length}-${atRiskTasks.length}`;
+  const lastLog = (window as any).__lastTaskGroupingLog;
+  if (lastLog !== logKey) {
+    console.log('[DailyFlow] Task grouping:', {
+      totalTasks: tasks.length,
+      harvestCount: harvestTasks.length,
+      atRiskCount: atRiskTasks.length,
+      atRiskTasks: atRiskTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop })),
+      prepCount: prepTasks.length
+    });
+    (window as any).__lastTaskGroupingLog = logKey;
+  }
   
   // Identify passive steps (informational only - no action required)
   // These are typically: Germination, Blackout, Growing, etc.
+  // Watering and misting are NEVER passive - they're actionable tasks
   const passiveStepNames = ['Germination', 'Blackout', 'Growing', 'Growing Phase'];
-  const passiveTasks = tasks.filter(t => 
-    t.action !== 'Harvest' && 
-    t.action !== 'Soak' && 
-    t.action !== 'Seed' &&
-    (passiveStepNames.includes(t.action) || passiveStepNames.some(name => t.stepDescription?.includes(name)))
-  );
+  const passiveTasks = tasks.filter(t => {
+    const actionLower = t.action.toLowerCase();
+    // Watering and misting are never passive
+    if (actionLower.startsWith('water') || actionLower.startsWith('mist')) {
+      return false;
+    }
+    // Check if action matches passive step names (case-insensitive)
+    const isPassiveStep = passiveStepNames.some(name => 
+      actionLower === name.toLowerCase() || actionLower.includes(name.toLowerCase())
+    );
+    return !actionLower.startsWith('harvest') && 
+           !actionLower.includes('at risk') &&
+           t.action !== 'Soak' && 
+           t.action !== 'Seed' &&
+           (isPassiveStep || passiveStepNames.some(name => t.stepDescription?.toLowerCase().includes(name.toLowerCase())));
+  });
   
-  // Active workflow tasks (exclude passive)
-  const workflowTasks = tasks.filter(t => 
-    t.action !== 'Harvest' && 
-    t.action !== 'Soak' && 
-    t.action !== 'Seed' &&
-    !passiveStepNames.includes(t.action) &&
-    !passiveStepNames.some(name => t.stepDescription?.includes(name))
-  );
+  // Active workflow tasks (exclude passive, harvest, at-risk)
+  // Watering and misting tasks are ALWAYS workflow tasks (actionable)
+  const workflowTasks = tasks.filter(t => {
+    const actionLower = t.action.toLowerCase();
+    // Watering and misting are always workflow tasks
+    if (actionLower.startsWith('water') || actionLower.startsWith('mist')) {
+      return true;
+    }
+    // Check if action matches passive step names (case-insensitive)
+    const isPassiveStep = passiveStepNames.some(name => 
+      actionLower === name.toLowerCase() || actionLower.includes(name.toLowerCase())
+    );
+    return !actionLower.startsWith('harvest') && 
+           !actionLower.includes('at risk') &&
+           t.action !== 'Soak' && 
+           t.action !== 'Seed' &&
+           !isPassiveStep &&
+           !passiveStepNames.some(name => t.stepDescription?.toLowerCase().includes(name.toLowerCase()));
+  });
+
+  // Normalize step names to merge similar variations
+  const normalizeStepName = (stepName: string): string => {
+    const lower = stepName.toLowerCase();
+    if (lower === 'growing' || lower.includes('growing phase')) {
+      return 'Growing';
+    }
+    if (lower.includes('germination')) {
+      return 'Germination';
+    }
+    if (lower.includes('blackout')) {
+      return 'Blackout';
+    }
+    // Return original if no normalization needed
+    return stepName;
+  };
 
   // Aggregate passive tasks by step_name (use stepDescription or action as step name)
   const passiveSummary = passiveTasks.reduce((acc, task) => {
-    const stepName = task.stepDescription || task.action;
+    const rawStepName = task.stepDescription || task.action;
+    const stepName = normalizeStepName(rawStepName);
     if (!acc[stepName]) {
       acc[stepName] = { totalTrays: 0, varieties: [] };
     }
@@ -1124,7 +1652,7 @@ export default function DailyFlow() {
             </div>
           </div>
           <p className="text-slate-600 flex items-center gap-2 mt-2">
-            <Clock size={16} /> {tasks.length} {tasks.length === 1 ? 'Batch' : 'Batches'} require attention
+            <Clock size={16} /> {prepTasks.length + workflowTasks.length + harvestTasks.length + atRiskTasks.length} {(prepTasks.length + workflowTasks.length + harvestTasks.length + atRiskTasks.length) === 1 ? 'Task' : 'Tasks'} require attention
           </p>
         </div>
         
@@ -1190,6 +1718,37 @@ export default function DailyFlow() {
                   onMarkAsLost={handleMarkAsLost}
                 />
               ))}
+            </div>
+          </section>
+        )}
+
+        {/* SECTION 1.5: AT RISK ITEMS */}
+        {atRiskTasks.length > 0 && (
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="h-8 w-1 bg-amber-500 rounded-full"></span>
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <h3 className="text-xl font-semibold text-slate-900">At Risk</h3>
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 ml-2">
+                {atRiskTasks.length} {atRiskTasks.length === 1 ? 'item' : 'items'}
+              </Badge>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {atRiskTasks.map(task => {
+                const historyKey = `${task.standingOrderId}-${task.deliveryDate}-${task.recipeId}`;
+                const history = actionHistory.get(historyKey) || [];
+                return (
+                  <AtRiskTaskCard
+                    key={task.id}
+                    task={task}
+                    onAction={handleAtRiskTask}
+                    actionHistory={history}
+                    onViewDetails={handleViewDetails}
+                    isAnimatingOut={animatingOut.has(task.id)}
+                  />
+                );
+              })}
             </div>
           </section>
         )}
@@ -1337,8 +1896,8 @@ export default function DailyFlow() {
           </section>
         )}
 
-        {/* SECTION 3: TRAY STATUS (Passive Steps) */}
-        {passiveStepSummaries.length > 0 && (
+        {/* SECTION 3: TRAY STATUS (Passive Steps) - Now uses direct DB query */}
+        {passiveTrayStatus.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-slate-400 rounded-full"></span>
@@ -1346,7 +1905,7 @@ export default function DailyFlow() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {passiveStepSummaries.map((summary) => (
+              {passiveTrayStatus.map((summary) => (
                 <PassiveStepCard
                   key={summary.stepName}
                   stepName={summary.stepName}
@@ -1417,7 +1976,8 @@ export default function DailyFlow() {
             <DialogTitle className="flex items-center gap-2">
               {viewingTask && (
                 <>
-                  {viewingTask.action === 'Harvest' && <Scissors className="h-5 w-5 text-emerald-600" />}
+                  {viewingTask.action.toLowerCase().startsWith('harvest') && !viewingTask.action.toLowerCase().includes('at risk') && <Scissors className="h-5 w-5 text-emerald-600" />}
+                  {viewingTask.action.toLowerCase().includes('at risk') && <AlertTriangle className="h-5 w-5 text-amber-600" />}
                   {viewingTask.action === 'Uncover' && <Sun className="h-5 w-5 text-amber-600" />}
                   {viewingTask.action === 'Soak' && <Beaker className="h-5 w-5 text-purple-600" />}
                   {viewingTask.action === 'Seed' && <Sprout className="h-5 w-5 text-indigo-600" />}
@@ -1499,7 +2059,17 @@ export default function DailyFlow() {
                   >
                     Close
                   </Button>
-                  {viewingTask.action !== 'Harvest' && (
+                  {viewingTask.action.toLowerCase().includes('at risk') ? (
+                    <Button
+                      onClick={() => {
+                        setManageOrderDialog(viewingTask);
+                        setViewingTask(null);
+                      }}
+                      className="flex-1 bg-amber-600 hover:bg-amber-700"
+                    >
+                      Manage Order
+                    </Button>
+                  ) : !viewingTask.action.toLowerCase().startsWith('harvest') && (
                     <Button
                       onClick={() => {
                         setViewingTask(null);
@@ -1512,7 +2082,18 @@ export default function DailyFlow() {
                     </Button>
                   )}
                 </div>
-                {viewingTask.action === 'Harvest' && (
+                {viewingTask.action.toLowerCase().includes('at risk') && (
+                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-sm font-medium text-amber-900 mb-2">⚠️ At Risk Item</p>
+                    <p className="text-sm text-amber-800 mb-3">
+                      This item needs {viewingTask.trays} {viewingTask.trays === 1 ? 'tray' : 'trays'} but there are no trays ready to harvest.
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      To resolve this, create more trays by going to the Planting Schedule page and seeding additional trays for this recipe.
+                    </p>
+                  </div>
+                )}
+                {viewingTask.action.toLowerCase().startsWith('harvest') && !viewingTask.action.toLowerCase().includes('at risk') && (
                   <p className="text-xs text-slate-500 mt-2">
                     Harvest completion is managed from tray details; no inline action here.
                   </p>
@@ -2635,6 +3216,179 @@ export default function DailyFlow() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Contacted Modal */}
+      {manageOrderDialog && fulfillmentAction === 'contacted' && (
+        <Dialog open={!!manageOrderDialog} onOpenChange={(open) => !open && (setManageOrderDialog(null), setFulfillmentAction(''))}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5 text-blue-600" />
+                Log Customer Contact
+              </DialogTitle>
+              <DialogDescription>
+                {manageOrderDialog.crop} — {manageOrderDialog.customerName}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  value={fulfillmentNotes}
+                  onChange={(e) => setFulfillmentNotes(e.target.value)}
+                  placeholder="Called Marie, left voicemail about missing Purple Basil. Will call back tomorrow."
+                  rows={4}
+                />
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">⚠️ Item will remain in At-Risk list</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setManageOrderDialog(null); setFulfillmentAction(''); setFulfillmentNotes(''); }}>
+                Cancel
+              </Button>
+              <Button onClick={handleFulfillmentAction} disabled={isProcessingFulfillment || !fulfillmentNotes.trim()}>
+                {isProcessingFulfillment ? 'Processing...' : 'Log Contact'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Skip Modal */}
+      {manageOrderDialog && fulfillmentAction === 'skip' && (
+        <Dialog open={!!manageOrderDialog} onOpenChange={(open) => !open && (setManageOrderDialog(null), setFulfillmentAction(''))}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <SkipForward className="h-5 w-5 text-amber-600" />
+                Skip Item
+              </DialogTitle>
+              <DialogDescription>
+                Skipping: {manageOrderDialog.crop}<br />
+                For: {manageOrderDialog.customerName} - {manageOrderDialog.deliveryDate}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Reason</Label>
+                <Textarea
+                  value={fulfillmentNotes}
+                  onChange={(e) => setFulfillmentNotes(e.target.value)}
+                  placeholder="Customer agreed to receive 3-variety box this week."
+                  rows={3}
+                />
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-xs text-green-800">✅ Item will be removed from At-Risk</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setManageOrderDialog(null); setFulfillmentAction(''); setFulfillmentNotes(''); }}>
+                Cancel
+              </Button>
+              <Button onClick={handleFulfillmentAction} disabled={isProcessingFulfillment || !fulfillmentNotes.trim()}>
+                {isProcessingFulfillment ? 'Processing...' : 'Skip Item'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Substitute Modal */}
+      {manageOrderDialog && fulfillmentAction === 'substitute' && (
+        <Dialog open={!!manageOrderDialog} onOpenChange={(open) => !open && (setManageOrderDialog(null), setFulfillmentAction(''), setSelectedSubstitute(null))}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-green-600" />
+                Substitute Item
+              </DialogTitle>
+              <DialogDescription>
+                Replace: {manageOrderDialog.crop}<br />
+                For: {manageOrderDialog.customerName} - {manageOrderDialog.deliveryDate}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Substitute with</Label>
+                <Select value={selectedSubstitute?.toString() || ''} onValueChange={(value) => setSelectedSubstitute(parseInt(value))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select variety..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableSubstitutes.map((sub) => (
+                      <SelectItem key={sub.recipe_id} value={sub.recipe_id.toString()}>
+                        {sub.recipe_name} ({sub.trays_ready} {sub.trays_ready === 1 ? 'tray' : 'trays'} ready)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes (optional)</Label>
+                <Textarea
+                  value={fulfillmentNotes}
+                  onChange={(e) => setFulfillmentNotes(e.target.value)}
+                  placeholder="Marie prefers sunflower as backup option."
+                  rows={3}
+                />
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-xs text-green-800">✅ Item will be removed from At-Risk</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setManageOrderDialog(null); setFulfillmentAction(''); setSelectedSubstitute(null); setFulfillmentNotes(''); }}>
+                Cancel
+              </Button>
+              <Button onClick={handleFulfillmentAction} disabled={isProcessingFulfillment || !selectedSubstitute}>
+                {isProcessingFulfillment ? 'Processing...' : 'Substitute'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Note Modal */}
+      {manageOrderDialog && fulfillmentAction === 'note' && (
+        <Dialog open={!!manageOrderDialog} onOpenChange={(open) => !open && (setManageOrderDialog(null), setFulfillmentAction(''))}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-slate-600" />
+                Add Note
+              </DialogTitle>
+              <DialogDescription>
+                {manageOrderDialog.crop} — {manageOrderDialog.customerName}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Note</Label>
+                <Textarea
+                  value={fulfillmentNotes}
+                  onChange={(e) => setFulfillmentNotes(e.target.value)}
+                  placeholder="Checking if we can source from another farm."
+                  rows={4}
+                />
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">⚠️ Item will remain in At-Risk list</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setManageOrderDialog(null); setFulfillmentAction(''); setFulfillmentNotes(''); }}>
+                Cancel
+              </Button>
+              <Button onClick={handleFulfillmentAction} disabled={isProcessingFulfillment || !fulfillmentNotes.trim()}>
+                {isProcessingFulfillment ? 'Processing...' : 'Save Note'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -2652,7 +3406,7 @@ const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCar
     const name = stepName.toLowerCase();
     if (name.includes('germination')) return <Sprout className="h-6 w-6 text-slate-500" />;
     if (name.includes('blackout')) return <Sun className="h-6 w-6 text-slate-500" />;
-    if (name.includes('growing')) return <Droplets className="h-6 w-6 text-slate-500" />;
+    if (name.includes('growing') || name === 'grow') return <Droplets className="h-6 w-6 text-slate-500" />;
     return <Clock className="h-6 w-6 text-slate-500" />;
   };
 
@@ -2679,6 +3433,151 @@ const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCar
           <Eye className="h-4 w-4 mr-2" />
           View Details
         </Button>
+      </div>
+    </Card>
+  );
+};
+
+// --- SUB-COMPONENT: At-Risk Task Card with Action Buttons ---
+interface AtRiskTaskCardProps {
+  task: DailyTask;
+  onAction: (task: DailyTask, actionType: FulfillmentActionType) => void;
+  actionHistory?: any[];
+  onViewDetails?: (task: DailyTask) => void;
+  isAnimatingOut?: boolean;
+}
+
+const AtRiskTaskCard = ({ task, onAction, actionHistory = [], onViewDetails, isAnimatingOut = false }: AtRiskTaskCardProps) => {
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return 'N/A';
+    // Parse date string (YYYY-MM-DD) as local date to avoid UTC timezone shift
+    const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const [year, month, day] = dateOnly.split('-').map(Number);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+      // Fallback to standard parsing if format is unexpected
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    // Create date in local timezone (month is 0-indexed)
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const formatActionType = (type: string) => {
+    const labels: Record<string, string> = {
+      'contacted': 'Contacted',
+      'note': 'Note',
+      'skip': 'Skipped',
+      'substitute': 'Substituted',
+      'partial': 'Partial'
+    };
+    return labels[type] || type;
+  };
+
+  return (
+    <Card className={cn(
+      "bg-amber-50 border-2 border-amber-200 hover:border-amber-300 transition-all",
+      isAnimatingOut && "opacity-0 -translate-x-full scale-95 transition-all duration-500 ease-in-out"
+    )}>
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <span className="text-xs font-semibold text-amber-900 uppercase">At Risk</span>
+            </div>
+            <h4 className="font-semibold text-slate-900 text-sm mb-1">{task.crop}</h4>
+            <p className="text-xs text-slate-600">{task.customerName}</p>
+          </div>
+          {onViewDetails && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onViewDetails(task)}
+              className="h-6 w-6 p-0"
+            >
+              <Eye className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+
+        {/* Order Details */}
+        <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+          <div>
+            <span className="text-amber-700">Delivery:</span>
+            <span className="ml-1 font-semibold">{formatDate(task.deliveryDate || '')}</span>
+          </div>
+          <div>
+            <span className="text-amber-700">Need:</span>
+            <span className="ml-1 font-semibold">{task.traysNeeded || 0} tray{task.traysNeeded !== 1 ? 's' : ''}</span>
+          </div>
+          <div>
+            <span className="text-amber-700">Have:</span>
+            <span className="ml-1 font-semibold text-red-600">{task.traysReady || 0} tray{task.traysReady !== 1 ? 's' : ''}</span>
+          </div>
+          <div>
+            <span className="text-amber-700">Missing:</span>
+            <span className="ml-1 font-semibold text-red-600">{task.trays || 0}</span>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="grid grid-cols-4 gap-1 mb-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAction(task, 'contacted')}
+            className="h-8 text-xs bg-white hover:bg-blue-50 border-blue-200"
+            title="Log customer contact"
+          >
+            <Phone className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAction(task, 'skip')}
+            className="h-8 text-xs bg-white hover:bg-amber-50 border-amber-200"
+            title="Skip this item"
+          >
+            <SkipForward className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAction(task, 'substitute')}
+            className="h-8 text-xs bg-white hover:bg-green-50 border-green-200"
+            title="Substitute with different recipe"
+          >
+            <RefreshCw className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAction(task, 'note')}
+            className="h-8 text-xs bg-white hover:bg-slate-50 border-slate-200"
+            title="Add note"
+          >
+            <FileText className="h-3 w-3" />
+          </Button>
+        </div>
+
+        {/* Action History */}
+        {actionHistory.length > 0 && (
+          <div className="pt-2 border-t border-amber-200">
+            <p className="text-xs font-medium text-amber-900 mb-1">Action History:</p>
+            <div className="space-y-1">
+              {actionHistory.slice(0, 2).map((action, idx) => (
+                <div key={idx} className="text-xs text-amber-800">
+                  • {formatDate(action.created_at)}: {formatActionType(action.action_type)}
+                  {action.notes && (
+                    <span className="text-amber-600 ml-1">- {action.notes.substring(0, 30)}{action.notes.length > 30 ? '...' : ''}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -2825,11 +3724,49 @@ const TaskCard = ({
             <Calendar size={14} className="text-slate-400" />
             <span>Day <span className="text-slate-900 font-semibold">{task.dayCurrent}</span>/{task.dayTotal}</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <MapPin size={14} className="text-slate-400" />
-            <span className="truncate">{task.location}</span>
-          </div>
+          {/* For seeding tasks, show customer info instead of location (trays don't exist yet) */}
+          {variant === 'seed' ? (
+            task.customerName ? (
+              <div className="flex items-center gap-1.5">
+                <User size={14} className="text-slate-400" />
+                <span className="truncate">{task.customerName}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <MapPin size={14} className="text-slate-400" />
+                <span className="truncate text-slate-400">No customer</span>
+              </div>
+            )
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <MapPin size={14} className="text-slate-400" />
+              <span className="truncate">{task.location}</span>
+            </div>
+          )}
         </div>
+        
+        {/* Show delivery date for seeding tasks with customers */}
+        {variant === 'seed' && task.customerName && task.deliveryDate && (() => {
+          // Parse date string as local date to avoid UTC timezone shift
+          const dateOnly = task.deliveryDate.includes('T') ? task.deliveryDate.split('T')[0] : task.deliveryDate;
+          const [year, month, day] = dateOnly.split('-').map(Number);
+          const deliveryDate = !isNaN(year) && !isNaN(month) && !isNaN(day) 
+            ? new Date(year, month - 1, day)
+            : new Date(task.deliveryDate);
+          return (
+            <div className="text-xs text-slate-500 mb-2 flex items-center gap-1.5">
+              <Calendar size={12} className="text-slate-400" />
+              <span>Delivery: {deliveryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+            </div>
+          );
+        })()}
+        
+        {/* Show weight info for seeding tasks with germination step requiring weight */}
+        {variant === 'seed' && task.requiresWeight && task.weightLbs != null && task.weightLbs > 0 && (
+          <div className="text-xs text-slate-600 mb-2 font-medium">
+            Stack with {task.weightLbs}lb weight
+          </div>
+        )}
 
         {/* Progress Bar (Subtle) */}
         <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1">
@@ -2858,8 +3795,8 @@ const TaskCard = ({
         <div className="p-3 bg-white border-t border-slate-50 mt-auto">
           <div className="flex gap-2">
             <Button
-              onClick={() => onComplete(task)}
-              disabled={isCompleting}
+              onClick={() => onComplete && onComplete(task)}
+              disabled={isCompleting || !onComplete}
               className={cn(
                 "flex-1 shadow-sm transition-all active:scale-95 font-semibold text-xs h-9",
                 style.btn
@@ -2867,7 +3804,8 @@ const TaskCard = ({
             >
               {isCompleting ? 'Processing...' : (
                 <span className="flex items-center gap-2">
-                  {variant === 'seed' ? 'Start Seeding' : 
+                  {task.action.toLowerCase().includes('at risk') ? 'Manage Order' :
+                   variant === 'seed' ? 'Start Seeding' : 
                    variant === 'prep' ? 'Begin Soak' : 'Mark Done'} 
                   <ArrowRight size={14} />
                 </span>

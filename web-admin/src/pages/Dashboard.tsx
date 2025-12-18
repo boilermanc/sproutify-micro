@@ -385,20 +385,49 @@ const Dashboard = () => {
         supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid),
         // Active Trays
         supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).is('harvest_date', null),
-        // Varieties
-        supabase.from('varieties_view').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).then(r => r, () => ({ count: 0, error: null })),
+        // Varieties (global table, no farm filter)
+        supabase.from('varieties').select('*', { count: 'exact', head: true }).then(r => {
+          console.log('[DEBUG] Varieties query result:', { count: r.count, error: r.error });
+          return r;
+        }, () => ({ count: 0, error: null })),
         // Recent Harvests
         supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).not('harvest_date', 'is', null).gte('harvest_date', sevenDaysAgo.toISOString()),
-        // Upcoming Harvests
-        supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).is('harvest_date', null).gte('sow_date', today.toISOString()).lte('sow_date', nextWeek.toISOString()),
+        // Harvest Soon - use the database view
+        supabase
+          .from('harvest_soon_view')
+          .select('*', { count: 'exact', head: true })
+          .eq('farm_uuid', farmUuid)
+          .then(r => {
+            console.log('[DEBUG] Harvest Soon query result:', { count: r.count, error: r.error });
+            return r;
+          }),
         // Products
         supabase.from('products').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => r, () => ({ count: 0, error: null })),
         // Standing Orders
-        supabase.from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => r, () => ({ count: 0, error: null })),
-        // Orders
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).then(r => r, () => ({ count: 0, error: null })),
-        // Tasks (Pending this week)
-        supabase.from('weekly_tasks').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('status', 'pending').then(r => r, () => ({ count: 0, error: null }))
+        supabase.from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
+          console.log('[DEBUG] Standing Orders query result:', { count: r.count, error: r.error });
+          return r;
+        }, () => ({ count: 0, error: null })),
+        // Active Orders (standing_orders where is_active = true)
+        supabase.from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
+          console.log('[DEBUG] Active Orders query result:', { count: r.count, error: r.error });
+          return r;
+        }, () => ({ count: 0, error: null })),
+        // Today's Tasks (pending tray_steps scheduled for today)
+        supabase
+          .from('tray_steps')
+          .select(`
+            tray_step_id,
+            trays!tray_steps_tray_id_fkey(farm_uuid)
+          `)
+          .eq('trays.farm_uuid', farmUuid)
+          .eq('scheduled_date', today.toISOString().split('T')[0])
+          .eq('status', 'Pending')
+          .then(r => {
+            const count = r.data?.length || 0;
+            console.log('[DEBUG] Today\'s Tasks query result:', { count, errorMessage: r.error?.message, scheduledDate: today.toISOString().split('T')[0] });
+            return { ...r, count };
+          }, () => ({ count: 0, error: null }))
       ]);
 
       setStats({
@@ -702,7 +731,7 @@ const Dashboard = () => {
           bg="bg-amber-100" 
         />
         <StatCard 
-          title="Weekly Tasks" 
+          title="Today's Tasks" 
           value={stats.weeklyTasks} 
           subtitle="Pending" 
           icon={AlertCircle} 

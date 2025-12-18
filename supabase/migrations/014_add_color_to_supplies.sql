@@ -25,3 +25,7 @@ COMMENT ON COLUMN supplies.color IS 'Color of the supply item (e.g., Black, Whit
 
 
 
+
+
+
+

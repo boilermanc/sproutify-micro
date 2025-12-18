@@ -21,3 +21,7 @@ COMMENT ON COLUMN steps.water_frequency IS 'Watering frequency: 1x daily, 2x dai
 
 
 
+
+
+
+

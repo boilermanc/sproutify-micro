@@ -1,7 +1,9 @@
 import { supabase } from '../lib/supabaseClient';
 import type { OrderFulfillmentStatus } from './orderFulfillmentService';
 
-export type FulfillmentActionType = 'skipped' | 'substituted' | 'contacted' | 'partial' | 'log';
+// Action types match the database function parameter names
+// Note: 'skip' maps to 'skipped' status, 'substitute' maps to 'substituted' status in order_schedules
+export type FulfillmentActionType = 'skip' | 'substitute' | 'contacted' | 'partial' | 'note';
 
 export interface FulfillmentAction {
   action_id: number;
@@ -9,7 +11,7 @@ export interface FulfillmentAction {
   standing_order_id: number | null;
   delivery_date: string;
   recipe_id: number;
-  action_type: FulfillmentActionType;
+  action_type: FulfillmentActionType; // 'contacted' | 'note' | 'skip' | 'partial' | 'substitute'
   action_reason: string | null;
   original_quantity: number | null;
   fulfilled_quantity: number | null;
@@ -19,33 +21,39 @@ export interface FulfillmentAction {
   created_by: string | null;
 }
 
+export interface RecordActionResponse {
+  success: boolean;
+  action_id: number;
+  schedule_id: number | null;
+  resolved: boolean;
+}
+
+export interface RecordActionParams {
+  p_farm_uuid: string;
+  p_standing_order_id: number;
+  p_delivery_date: string;
+  p_recipe_id: number;
+  p_action_type: FulfillmentActionType;
+  p_notes?: string | null;
+  p_original_quantity?: number | null;
+  p_fulfilled_quantity?: number | null;
+  p_substitute_recipe_id?: number | null;
+  p_created_by?: string | null;
+}
+
+/**
+ * Record a fulfillment action using the database RPC function.
+ * This handles both logging to order_fulfillment_actions and
+ * inserting into order_schedules for resolving actions.
+ */
 export async function recordFulfillmentAction(
-  farmUuid: string,
-  item: OrderFulfillmentStatus,
-  actionType: FulfillmentActionType,
-  details: {
-    reason?: string;
-    notes?: string;
-    substituteRecipeId?: number;
-    fulfilledQuantity?: number;
-    userId?: string;
-  }
-): Promise<void> {
-  const { error } = await supabase.from('order_fulfillment_actions').insert({
-    farm_uuid: farmUuid,
-    standing_order_id: item.standing_order_id,
-    delivery_date: item.delivery_date,
-    recipe_id: item.recipe_id,
-    action_type: actionType,
-    action_reason: details.reason || null,
-    original_quantity: item.trays_needed,
-    fulfilled_quantity: details.fulfilledQuantity || 0,
-    substitute_recipe_id: details.substituteRecipeId || null,
-    notes: details.notes || null,
-    created_by: details.userId || null,
-  });
+  params: RecordActionParams
+): Promise<RecordActionResponse> {
+  const { data, error } = await supabase.rpc('record_fulfillment_action', params);
 
   if (error) throw error;
+  
+  return data as RecordActionResponse;
 }
 
 export async function getItemAction(
@@ -64,3 +72,7 @@ export async function getItemAction(
   if (error && (error as any).code !== 'PGRST116') throw error;
   return data as FulfillmentAction | null;
 }
+
+
+
+

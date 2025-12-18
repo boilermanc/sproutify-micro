@@ -153,3 +153,7 @@ const TowerCard: React.FC<TowerCardProps> = ({ data, index }) => {
 };
 
 export default TowerCard;
+
+
+
+

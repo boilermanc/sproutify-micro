@@ -12,3 +12,7 @@ WHERE maintenance_task_id IS NOT NULL;
 
 -- Add comment
 COMMENT ON COLUMN task_completions.maintenance_task_id IS 'Links maintenance task completions to their source maintenance_tasks record';
+
+
+
+

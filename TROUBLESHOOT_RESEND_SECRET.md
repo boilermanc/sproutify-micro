@@ -60,3 +60,7 @@ Check function logs after sending email:
 
 
 
+
+
+
+

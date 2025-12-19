@@ -47,7 +47,7 @@ export const checkSupplyStock = async (supplyId: number) => {
     // Check if it's now low stock or out of stock
     if (stock === 0) {
       // Check if we already have a recent notification for this item
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -72,7 +72,7 @@ export const checkSupplyStock = async (supplyId: number) => {
       }
     } else if (stock > 0 && stock <= threshold) {
       // Check if we already have a recent notification for this item
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -128,7 +128,7 @@ export const checkLowStockNotifications = async () => {
       name?: string;
     }
 
-    const { data: supplies, error } = await supabase
+    const { data: supplies, error } = await getSupabaseClient()
       .from('supplies')
       .select('*')
       .eq('farm_uuid', farmUuid)
@@ -156,7 +156,7 @@ export const checkLowStockNotifications = async () => {
       const moreText = lowStockItems.length > 5 ? ` and ${lowStockItems.length - 5} more` : '';
 
       // Check if we already have a recent low stock notification
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -189,7 +189,7 @@ export const checkLowStockNotifications = async () => {
       const moreText = outOfStockItems.length > 5 ? ` and ${outOfStockItems.length - 5} more` : '';
 
       // Check if we already have a recent out of stock notification
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -244,7 +244,7 @@ export const checkHarvestReminders = async () => {
       tray_unique_id: string;
     }
 
-    const { data: trays, error } = await supabase
+    const { data: trays, error } = await getSupabaseClient()
       .from('trays')
       .select('*, recipes(*)')
       .eq('farm_uuid', farmUuid)
@@ -302,7 +302,7 @@ export const checkHarvestReminders = async () => {
           : `${upcomingHarvests.length} trays are ready for harvest`;
 
       // Check if we already have a recent harvest reminder
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -333,7 +333,6 @@ export const checkHarvestReminders = async () => {
  * Create notification when a new order (tray with customer) is created
  */
 export const notifyNewOrder = async (trayId: number, customerName?: string) => {
-  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -379,7 +378,6 @@ export const notifyNewOrder = async (trayId: number, customerName?: string) => {
  * Check for order updates and create notifications
  */
 export const checkOrderUpdates = async () => {
-  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -420,7 +418,7 @@ export const checkOrderUpdates = async () => {
           : `${newOrders.length} new orders from ${customerNames.slice(0, 3).join(', ')}${customerNames.length > 3 ? ' and more' : ''}`;
 
       // Check if we already have a recent order update notification
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('farm_uuid', farmUuid)

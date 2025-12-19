@@ -108,12 +108,32 @@ function App() {
     checkSession();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_session');
         setIsAuthenticated(false);
       } else if (event === 'SIGNED_IN' && session) {
-        setIsAuthenticated(true);
+        // Skip for admin users
+        if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
+          return;
+        }
+
+        // Build session payload BEFORE setting authenticated
+        // This prevents the race condition where Dashboard loads before session is ready
+        const { data: profile, error: profileError } = await supabase
+          .from('profile')
+          .select('*, farms(*)')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profile && !profileError) {
+          const sessionPayload = await buildSessionPayload(profile, {
+            email: session.user.email,
+            userId: session.user.id,
+          });
+          localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+          setIsAuthenticated(true);
+        }
       }
     });
 

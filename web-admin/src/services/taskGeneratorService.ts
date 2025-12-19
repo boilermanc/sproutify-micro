@@ -95,7 +95,7 @@ export const fetchWeeklyTasks = async (
         .in('recipe_id', recipeIds);
       
       // Fetch all completed sowing tasks for these recipes
-      const { data: completedSowingTasks } = await supabase
+      const { data: completedSowingTasks } = await getSupabaseClient()
         .from('task_completions')
         .select('recipe_id, task_date')
         .eq('farm_uuid', farmUuid)
@@ -361,7 +361,7 @@ export const updateTaskStatus = async (
     
     if (status === 'pending') {
       // Remove completion record
-      await supabase
+      await getSupabaseClient()
         .from('task_completions')
         .delete()
         .eq('farm_uuid', farmUuid)

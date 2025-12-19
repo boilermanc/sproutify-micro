@@ -51,7 +51,7 @@ export async function fetchOrderFulfillmentDetails(
   deliveryDate: string,
   customerName: string
 ): Promise<OrderFulfillmentStatus[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('order_fulfillment_status')
     .select('*')
     .eq('farm_uuid', farmUuid)

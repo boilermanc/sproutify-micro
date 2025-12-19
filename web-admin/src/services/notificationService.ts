@@ -15,7 +15,6 @@ interface NotificationPreferences {
  * Check a specific supply for low stock and create notification if needed
  */
 export const checkSupplyStock = async (supplyId: number) => {
-  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -106,7 +105,6 @@ export const checkSupplyStock = async (supplyId: number) => {
  * Check for low stock items and create notifications
  */
 export const checkLowStockNotifications = async () => {
-  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -223,7 +221,6 @@ export const checkLowStockNotifications = async () => {
  * Check for upcoming harvests and create reminder notifications
  */
 export const checkHarvestReminders = async () => {
-  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -261,7 +258,7 @@ export const checkHarvestReminders = async () => {
 
     for (const tray of trays || []) {
       // Get recipe steps to calculate harvest date
-      const { data: steps } = await supabase
+      const { data: steps } = await getSupabaseClient()
         .from('steps')
         .select('*')
         .eq('recipe_id', tray.recipe_id);
@@ -353,7 +350,7 @@ export const notifyNewOrder = async (trayId: number, customerName?: string) => {
     if (!orderUpdatesEnabled) return;
 
     // Fetch tray details
-    const { data: tray, error } = await supabase
+    const { data: tray, error } = await getSupabaseClient()
       .from('trays')
       .select('*, customers(*)')
       .eq('tray_id', trayId)
@@ -406,7 +403,7 @@ export const checkOrderUpdates = async () => {
       customers?: { name?: string } | null;
     }
 
-    const { data: newOrders, error } = await supabase
+    const { data: newOrders, error } = await getSupabaseClient()
       .from('trays')
       .select('*, customers(*)')
       .eq('farm_uuid', farmUuid)

@@ -940,7 +940,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 // Group trays by recipe and check conditions
                 // Use Sets to track unique tray_ids per recipe (same tray can have multiple scheduled_dates)
                 const uniqueTrayIdsByRecipe: Record<number, Set<number>> = {};
-                const trayStepInfoByRecipe: Record<number, Map<number, { tray_id: number; step: any }>> = {};
+                const trayStepInfoByRecipe: Record<number, Map<number, { tray_id: number; step: any; growStepScheduledDate?: Date }>> = {};
                 
                 // Debug counters
                 let totalTraySteps = 0;
@@ -1016,7 +1016,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 });
 
                 // Convert Sets/Maps back to arrays for compatibility with existing code
-                const traysByRecipe: Record<number, Array<{ tray_id: number; step: any }>> = {};
+                const traysByRecipe: Record<number, Array<{ tray_id: number; step: any; growStepScheduledDate?: Date }>> = {};
                 Object.keys(uniqueTrayIdsByRecipe).forEach((recipeIdStr) => {
                   const recipeId = Number(recipeIdStr);
                   traysByRecipe[recipeId] = Array.from(trayStepInfoByRecipe[recipeId].values());

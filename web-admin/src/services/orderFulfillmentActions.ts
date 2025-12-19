@@ -1,5 +1,4 @@
 import { getSupabaseClient } from '../lib/supabaseClient';
-import type { OrderFulfillmentStatus } from './orderFulfillmentService';
 
 // Action types match the database function parameter names
 // Note: 'skip' maps to 'skipped' status, 'substitute' maps to 'substituted' status in order_schedules

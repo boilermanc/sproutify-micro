@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 export interface OrderFulfillmentStatus {
   delivery_date: string;
@@ -34,7 +34,7 @@ export async function fetchOrderFulfillmentSummary(
   startDate: string,
   endDate: string
 ): Promise<OrderFulfillmentSummary[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('order_fulfillment_summary')
     .select('*')
     .eq('farm_uuid', farmUuid)
@@ -67,7 +67,7 @@ export async function getSowDateForOrder(
   recipeId: number,
   deliveryDate: string
 ): Promise<string | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('planting_schedule_view')
     .select('sow_date')
     .eq('farm_uuid', farmUuid)

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import type { OrderFulfillmentStatus } from './orderFulfillmentService';
 
 // Action types match the database function parameter names
@@ -49,7 +49,7 @@ export interface RecordActionParams {
 export async function recordFulfillmentAction(
   params: RecordActionParams
 ): Promise<RecordActionResponse> {
-  const { data, error } = await supabase.rpc('record_fulfillment_action', params);
+  const { data, error } = await getSupabaseClient().rpc('record_fulfillment_action', params);
 
   if (error) throw error;
   
@@ -61,7 +61,7 @@ export async function getItemAction(
   deliveryDate: string,
   recipeId: number
 ): Promise<FulfillmentAction | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('order_fulfillment_actions')
     .select('*')
     .eq('farm_uuid', farmUuid)

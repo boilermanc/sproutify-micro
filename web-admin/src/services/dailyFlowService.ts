@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 /**
  * Parse a date string (YYYY-MM-DD) as a local date, not UTC
@@ -2978,7 +2978,7 @@ export const completeSoakTask = async (
     const { userId: sessionUserId } = JSON.parse(sessionData);
     const userToUse = userId || sessionUserId;
 
-    const { data, error } = await supabase.rpc('complete_soak_task', {
+    const { data, error } = await getSupabaseClient().rpc('complete_soak_task', {
       p_request_id: requestId,
       p_seedbatch_id: seedbatchId,
       p_quantity_grams: quantityGrams,
@@ -3010,7 +3010,7 @@ export const completeSeedTask = async (
     const { userId: sessionUserId } = JSON.parse(sessionData);
     const userToUse = userId || sessionUserId;
 
-    const { data, error } = await supabase.rpc('complete_seed_task', {
+    const { data, error } = await getSupabaseClient().rpc('complete_seed_task', {
       p_request_id: requestId,
       p_quantity_completed: quantityCompleted,
       p_seedbatch_id: seedbatchId,
@@ -3042,7 +3042,7 @@ export const useLeftoverSoakedSeed = async (
     const { userId: sessionUserId } = JSON.parse(sessionData);
     const userToUse = userId || sessionUserId;
 
-    const { data, error } = await supabase.rpc('use_leftover_soaked_seed', {
+    const { data, error } = await getSupabaseClient().rpc('use_leftover_soaked_seed', {
       p_soaked_id: soakedId,
       p_quantity_trays: quantityTrays,
       p_request_id: requestId,
@@ -3080,7 +3080,7 @@ export const discardSoakedSeed = async (
       .eq('soaked_seed_id', soakedId)
       .single();
 
-    const { data, error } = await supabase.rpc('discard_soaked_seed', {
+    const { data, error } = await getSupabaseClient().rpc('discard_soaked_seed', {
       p_soaked_id: soakedId,
       p_reason: reason,
       p_user_id: userToUse || null,
@@ -3129,10 +3129,10 @@ const logActivity = async (
 
     const { farmUuid } = JSON.parse(sessionData);
     
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await getSupabaseClient().auth.getUser();
     const userId = user?.id || null;
 
-    await supabase.from('activity_log').insert({
+    await getSupabaseClient().from('activity_log').insert({
       farm_uuid: farmUuid,
       activity_type: activityType,
       description,

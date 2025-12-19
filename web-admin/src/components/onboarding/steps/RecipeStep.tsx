@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { supabase } from '../../../lib/supabaseClient';
+import { getSupabaseClient } from '../../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import './steps.css';
@@ -41,7 +41,7 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
   useEffect(() => {
     // Fetch step descriptions
     const fetchStepDescriptions = async () => {
-      const { data } = await supabase
+      const { data } = await getSupabaseClient()
         .from('step_descriptions')
         .select('description_id, description_name, description_details')
         .order('description_name', { ascending: true });
@@ -55,7 +55,7 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
 
     if (varietyId) {
       const fetchVariety = async () => {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name')
           .eq('varietyid', varietyId)
@@ -133,7 +133,7 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
       const { farmUuid, userId } = JSON.parse(sessionData);
 
       // Create recipe with variety_id (FK) and variety_name (for backward compatibility)
-      const { data: recipe, error: recipeError } = await supabase
+      const { data: recipe, error: recipeError } = await getSupabaseClient()
         .from('recipes')
         .insert({
           recipe_name: recipeName.trim(),
@@ -165,7 +165,7 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
         };
       });
 
-      const { error: stepsError } = await supabase.from('steps').insert(stepsData);
+      const { error: stepsError } = await getSupabaseClient().from('steps').insert(stepsData);
 
       if (stepsError) throw stepsError;
 

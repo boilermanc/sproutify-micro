@@ -94,7 +94,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
     // Query daily_flow_aggregated view for today's tasks
     // Note: The view may not include recipe_id directly, so we'll fetch it from requests when needed
-    const { data: tasksData, error: tasksError } = await supabase
+    const { data: tasksData, error: tasksError } = await getSupabaseClient()
       .from('daily_flow_aggregated')
       .select('*')
       .eq('farm_uuid', farmUuid)
@@ -122,7 +122,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     console.log('[fetchDailyTasks] Supplementing with direct tray queries to ensure completeness...');
       try {
         // Fetch active trays directly
-        const { data: activeTrays, error: traysError } = await supabase
+        const { data: activeTrays, error: traysError } = await getSupabaseClient()
           .from('trays')
           .select(`
             tray_id,
@@ -147,7 +147,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           
           if (recipeIds.length > 0) {
             // Fetch steps for these recipes
-            const { data: allSteps, error: stepsError } = await supabase
+            const { data: allSteps, error: stepsError } = await getSupabaseClient()
               .from('steps')
               .select('*')
               .in('recipe_id', recipeIds);
@@ -173,7 +173,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
               // Fetch tray_steps to check completion status
               const trayIds = traysWithRecipes.map((t: any) => t.tray_id);
-              const { data: trayStepsData } = await supabase
+              const { data: trayStepsData } = await getSupabaseClient()
                 .from('tray_steps')
                 .select('tray_id, step_id, completed, skipped, scheduled_date')
                 .in('tray_id', trayIds)
@@ -280,50 +280,6 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 // Determine action from step
                 const stepName = currentStep.step_name || currentStep.description_name || 'Unknown Step';
                 
-                // Handle recurring tasks (water/mist) during steps
-                const daysIntoCurrentStep = daysSinceSow - daysIntoRecipe;
-                const waterFreq = currentStep.water_frequency;
-                const mistingFreq = currentStep.misting_frequency || 'none';
-                const waterMethod = currentStep.water_method;
-                
-                // Check if we need water/mist today based on frequency
-                let needsWateringToday = false;
-                let wateringAction = '';
-                
-                if (isToday && (waterFreq || (mistingFreq !== 'none' && !currentStep.water_type))) {
-                  // Handle water_frequency values: '1x daily', '2x daily', '3x daily', 'custom', 'daily', etc.
-                  if (waterFreq === 'daily' || waterFreq === '1x daily' || waterFreq === 'custom') {
-                    needsWateringToday = true;
-                  } else if (waterFreq === '2x daily') {
-                    needsWateringToday = true; // Show both times
-                  } else if (waterFreq === '3x daily') {
-                    needsWateringToday = true; // Show all times
-                  } else if (waterFreq === 'every other day') {
-                    needsWateringToday = (daysIntoCurrentStep % 2 === 1);
-                  } else if (waterFreq === 'twice per week') {
-                    // Monday and Thursday pattern
-                    const dayOfWeek = today.getDay();
-                    needsWateringToday = (dayOfWeek === 1 || dayOfWeek === 4);
-                  }
-                  
-                  if (mistingFreq !== 'none' && !currentStep.water_type) {
-                    if (mistingFreq === '1x daily' || mistingFreq === '2x daily' || mistingFreq === '3x daily') {
-                      needsWateringToday = true;
-                    }
-                  }
-                  
-                  if (needsWateringToday) {
-                    if (mistingFreq !== 'none' && !currentStep.water_type) {
-                      const mistingCount = mistingFreq === '2x daily' ? '2x' : mistingFreq === '3x daily' ? '3x' : '1x';
-                      wateringAction = `Mist ${mistingCount}`;
-                    } else if (waterMethod) {
-                      wateringAction = `Water (${waterMethod})`;
-                    } else {
-                      wateringAction = 'Water';
-                    }
-                  }
-                }
-
                 // Only add if it's scheduled for today and not already in tasksData
                 if (isToday && currentStep && !isStepCompleted && !isStepSkipped) {
                   // Add the step task itself (unless the step is just watering or seeding-related)
@@ -427,7 +383,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     if (targetDate) {
       try {
         // Fetch schedules for seeding (sow_date = today) and soaking (sow_date - soak_duration = today)
-        const { data: allSchedules, error: scheduleError } = await supabase
+        const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
           .from('planting_schedule_view')
           .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, delivery_date')
           .eq('farm_uuid', farmUuid);
@@ -436,7 +392,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         const recipeIds = allSchedules ? [...new Set(allSchedules.map((s: any) => s.recipe_id).filter(Boolean))] : [];
         
         // Fetch variety_name from recipes table for seeding tasks
-        const { data: recipesData, error: recipesError } = recipeIds.length > 0 ? await supabase
+        const { data: recipesData, error: recipesError } = recipeIds.length > 0 ? await getSupabaseClient()
           .from('recipes')
           .select('recipe_id, variety_name')
           .in('recipe_id', recipeIds)
@@ -452,7 +408,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           });
         }
         
-        const { data: allSteps, error: stepsError } = recipeIds.length > 0 ? await supabase
+        const { data: allSteps, error: stepsError } = recipeIds.length > 0 ? await getSupabaseClient()
           .from('steps')
           .select('*')
           .in('recipe_id', recipeIds) : { data: null, error: null };
@@ -493,7 +449,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         }
         
         // Fetch completed seeding/soaking tasks to filter them out
-        const { data: completedTasks, error: completedTasksError } = await supabase
+        const { data: completedTasks, error: completedTasksError } = await getSupabaseClient()
           .from('task_completions')
           .select('recipe_id, task_type, task_date')
           .eq('farm_uuid', farmUuid)
@@ -512,7 +468,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
         // Fetch existing tray_creation_requests to avoid duplicates
         // If a request exists for a recipe/date, we should show it from seed_request tasks only
-        const { data: existingRequests, error: requestsError } = await supabase
+        const { data: existingRequests, error: requestsError } = await getSupabaseClient()
           .from('tray_creation_requests')
           .select('recipe_id, seed_date, requested_at, farm_uuid')
           .eq('farm_uuid', farmUuid)
@@ -654,7 +610,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
           if (harvestSchedules && harvestSchedules.length > 0) {
             // Fetch all active trays with recipes to check if they're ready to harvest
-            const { data: activeTrays } = await supabase
+            const { data: activeTrays } = await getSupabaseClient()
               .from('trays')
               .select(`
                 tray_id,
@@ -760,7 +716,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         const targetDateStr = formatDateString(targetDate);
 
         // Fetch active trays with recipes
-        const { data: activeTrays, error: traysError } = await supabase
+        const { data: activeTrays, error: traysError } = await getSupabaseClient()
           .from('trays')
           .select(`
             tray_id,
@@ -791,9 +747,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             });
 
             // Fetch all tray_steps for these trays
-            // Note: We can't filter on nested relation fields directly in Supabase,
+            // Note: We can't filter on nested relation fields directly in getSupabaseClient(),
             // so we fetch all tray_steps and filter in JavaScript
-            const { data: trayStepsRaw, error: trayStepsError } = await supabase
+            const { data: trayStepsRaw, error: trayStepsError } = await getSupabaseClient()
               .from('tray_steps')
               .select(`
                 tray_id,
@@ -851,14 +807,14 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
             if (!trayStepsError && traySteps && traySteps.length > 0) {
               // Fetch all steps to find harvest steps
-              const { data: allRecipeSteps, error: stepsError } = await supabase
+              const { data: allRecipeSteps, error: stepsError } = await getSupabaseClient()
                 .from('steps')
                 .select('step_id, step_name, recipe_id, sequence_order')
                 .in('recipe_id', recipeIds);
 
               if (!stepsError && allRecipeSteps) {
                 // Fetch ALL tray_steps for these trays (including harvest steps) to check future harvest dates
-                const { data: allTrayStepsForTrays, error: allTrayStepsError } = await supabase
+                const { data: allTrayStepsForTrays, error: allTrayStepsError } = await getSupabaseClient()
                   .from('tray_steps')
                   .select(`
                     tray_id,
@@ -1063,7 +1019,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 });
 
                 // Check for completed watering tasks in task_completions
-                const { data: completedWateringTasks, error: completedWateringError } = await supabase
+                const { data: completedWateringTasks, error: completedWateringError } = await getSupabaseClient()
                   .from('task_completions')
                   .select('recipe_id')
                   .eq('farm_uuid', farmUuid)
@@ -1201,7 +1157,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         // Get orders ONLY for today's delivery date
         // Note: order_fulfillment_status view filters out skipped items correctly
         // Daily Flow shows only today's at-risk items
-        const { data: orderDetails, error: orderError } = await supabase
+        const { data: orderDetails, error: orderError } = await getSupabaseClient()
           .from('order_fulfillment_status')
           .select('*')
           .eq('farm_uuid', farmUuid)
@@ -1452,7 +1408,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     if (trayStepTasksNeedingIds.length > 0) {
       try {
         // First, get all active trays for this farm to filter tray_steps
-        const { data: farmTrays, error: traysError } = await supabase
+        const { data: farmTrays, error: traysError } = await getSupabaseClient()
           .from('trays')
           .select('tray_id, recipe_id, farm_uuid')
           .eq('farm_uuid', farmUuid)
@@ -1466,7 +1422,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
           // Query tray_steps for these trays (both pending and recently completed)
           // Include completed tasks in case the view is still showing them
-          const { data: allTraySteps, error: trayStepsError } = await supabase
+          const { data: allTraySteps, error: trayStepsError } = await getSupabaseClient()
             .from('tray_steps')
             .select('tray_step_id, tray_id, step_id, scheduled_date, status, completed')
             .in('tray_id', farmTrayIds)
@@ -1479,7 +1435,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           } else if (allTraySteps && allTraySteps.length > 0) {
             // Get unique step_ids and fetch step details
             const stepIds = [...new Set(allTraySteps.map((ts: any) => ts.step_id))];
-            const { data: stepsData, error: stepsError } = await supabase
+            const { data: stepsData, error: stepsError } = await getSupabaseClient()
               .from('steps')
               .select('step_id, step_name, description_name')
               .in('step_id', stepIds);
@@ -1533,7 +1489,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 } else {
                   // If no pending tasks found, check if there are completed tasks for this step
                   // This handles the case where tasks were just completed but view hasn't refreshed
-                  const { data: allTrayStepsForMatching, error: allStepsError } = await supabase
+                  const { data: allTrayStepsForMatching, error: allStepsError } = await getSupabaseClient()
                     .from('tray_steps')
                     .select('tray_step_id, tray_id, step_id, scheduled_date, status, completed')
                     .in('tray_id', farmTrayIds)
@@ -1605,7 +1561,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     }
 
     // Fetch completed seeding/soaking tasks for today to filter out completed seed_request tasks
-    const { data: todayCompletedTasks, error: todayCompletedTasksError } = await supabase
+    const { data: todayCompletedTasks, error: todayCompletedTasksError } = await getSupabaseClient()
       .from('task_completions')
       .select('recipe_id, task_type, task_date')
       .eq('farm_uuid', farmUuid)
@@ -1633,7 +1589,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     const seedRequestRecipeIds: number[] = [];
     const requestIdToRecipeIdMap: Record<number, number> = {}; // Map request_id -> recipe_id for lookup
     try {
-      const { data: seedRequests, error: seedRequestsError } = await supabase
+      const { data: seedRequests, error: seedRequestsError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .select('recipe_id, request_id')
         .eq('farm_uuid', farmUuid)
@@ -1660,7 +1616,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     // Combine recipe IDs from view and seed_request tasks
     const allRecipeIds = [...new Set([...allRecipeIdsFromTasks, ...seedRequestRecipeIds])];
     
-    const { data: allRecipesData, error: allRecipesError } = allRecipeIds.length > 0 ? await supabase
+    const { data: allRecipesData, error: allRecipesError } = allRecipeIds.length > 0 ? await getSupabaseClient()
       .from('recipes')
       .select('recipe_id, variety_name')
       .in('recipe_id', allRecipeIds)
@@ -1683,7 +1639,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     let plantingScheduleRecipeIds: number[] = [];
     try {
       // Fetch recipe IDs from planting_schedule that will have seeding tasks today
-      const { data: plantingSchedules, error: plantingScheduleError } = await supabase
+      const { data: plantingSchedules, error: plantingScheduleError } = await getSupabaseClient()
         .from('planting_schedule_view')
         .select('recipe_id, sow_date')
         .eq('farm_uuid', farmUuid);
@@ -1710,8 +1666,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     const seedingRecipeIds = [...new Set([...allRecipeIds, ...plantingScheduleRecipeIds])];
 
     // Fetch ALL steps for these recipes (we'll filter for Germination in JavaScript)
-    // This is more reliable than case-sensitive Supabase queries
-    const { data: allStepsForSeedingRecipes, error: stepsError } = seedingRecipeIds.length > 0 ? await supabase
+    // This is more reliable than case-sensitive getSupabaseClient() queries
+    const { data: allStepsForSeedingRecipes, error: stepsError } = seedingRecipeIds.length > 0 ? await getSupabaseClient()
       .from('steps')
       .select('recipe_id, requires_weight, weight_lbs, description_name, step_name')
       .in('recipe_id', seedingRecipeIds) : { data: null, error: null };
@@ -1999,13 +1955,13 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         const allRecipeIdsForEnrichment = [...new Set(trayStepTasksToEnrich.map(t => t.recipeId).filter(Boolean))];
 
         // Fetch tray data (sow_date, recipe_id, location, customer_id, batch_id)
-        const { data: trayData, error: trayError } = await supabase
+        const { data: trayData, error: trayError } = await getSupabaseClient()
           .from('trays')
           .select('tray_id, sow_date, recipe_id, location, customer_id, batch_id')
           .in('tray_id', allTrayIdsForEnrichment);
 
         // Fetch recipe steps to calculate total days
-        const { data: recipeSteps, error: stepsError } = await supabase
+        const { data: recipeSteps, error: stepsError } = await getSupabaseClient()
           .from('steps')
           .select('recipe_id, duration, duration_unit')
           .in('recipe_id', allRecipeIdsForEnrichment);
@@ -2015,7 +1971,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           const customerIds = [...new Set(trayData.map((t: any) => t.customer_id).filter(Boolean))];
           const customerMap: Record<number, string> = {};
           if (customerIds.length > 0) {
-            const { data: customersData, error: customersError } = await supabase
+            const { data: customersData, error: customersError } = await getSupabaseClient()
               .from('customers')
               .select('customerid, name')
               .in('customerid', customerIds);
@@ -2116,7 +2072,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
       const allTrayIds = [...new Set(trayStepTasksToCheck.flatMap(t => t.trayIds))];
       const allStepIds = [...new Set(trayStepTasksToCheck.map(t => t.stepId!).filter(Boolean))];
       
-      const { data: allTrayStepsStatus, error: statusError } = await supabase
+      const { data: allTrayStepsStatus, error: statusError } = await getSupabaseClient()
         .from('tray_steps')
         .select('tray_id, step_id, completed, scheduled_date')
         .in('tray_id', allTrayIds)
@@ -2294,7 +2250,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       console.log('[DailyFlow] Upserting watering completion:', completionData);
 
       // Try upsert with the full constraint first
-      const { error: completionError } = await supabase
+      const { error: completionError } = await getSupabaseClient()
         .from('task_completions')
         .upsert(completionData, {
           onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
@@ -2303,7 +2259,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       // If that fails, try without customer_name and product_name in the conflict
       if (completionError) {
         console.log('[DailyFlow] First upsert failed, trying alternative:', completionError);
-        const { error: altError } = await supabase
+        const { error: altError } = await getSupabaseClient()
           .from('task_completions')
           .upsert(completionData, {
             onConflict: 'farm_uuid,task_type,task_date,recipe_id'
@@ -2341,7 +2297,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
         }
 
         // Get recipe to find variety
-        const { data: recipeData, error: recipeError } = await supabase
+        const { data: recipeData, error: recipeError } = await getSupabaseClient()
           .from('recipes')
           .select('recipe_id, recipe_name, variety_id, variety_name')
           .eq('recipe_id', task.recipeId)
@@ -2391,7 +2347,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
           batchId
         });
 
-        const { error: requestError } = await supabase
+        const { error: requestError } = await getSupabaseClient()
           .from('tray_creation_requests')
           .insert(requests);
 
@@ -2429,7 +2385,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       console.log('[DailyFlow] Upserting completion:', completionData);
 
       // Try upsert with the full constraint first
-      const { error: completionError } = await supabase
+      const { error: completionError } = await getSupabaseClient()
         .from('task_completions')
         .upsert(completionData, {
           onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
@@ -2438,7 +2394,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       // If that fails, try without customer_name and product_name in the conflict
       if (completionError) {
         console.log('[DailyFlow] First upsert failed, trying alternative:', completionError);
-        const { error: altError } = await supabase
+        const { error: altError } = await getSupabaseClient()
           .from('task_completions')
           .upsert(completionData, {
             onConflict: 'farm_uuid,task_type,task_date,recipe_id'
@@ -2465,7 +2421,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
         updateData.yield = yieldPerTray;
       }
 
-      const { error: harvestError } = await supabase
+      const { error: harvestError } = await getSupabaseClient()
         .from('trays')
         .update(updateData)
         .in('tray_id', task.trayIds)
@@ -2493,7 +2449,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       for (const trayId of task.trayIds) {
         // Check if record exists using composite key (tray_id, step_id, scheduled_date)
         // For recurring tasks, scheduled_date is critical to track completion per day
-        const { data: existing, error: checkError } = await supabase
+        const { data: existing, error: checkError } = await getSupabaseClient()
           .from('tray_steps')
           .select('tray_id, step_id, scheduled_date')
           .eq('tray_id', trayId)
@@ -2508,7 +2464,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
 
         if (!existing) {
           // Insert if doesn't exist - include scheduled_date for recurring tasks
-          const { error: insertError } = await supabase
+          const { error: insertError } = await getSupabaseClient()
             .from('tray_steps')
             .insert({
               tray_id: trayId,
@@ -2525,7 +2481,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
           console.log('[DailyFlow] Inserted tray_steps for tray:', trayId, 'step:', task.stepId, 'date:', taskDateStr);
         } else {
           // Update using composite key including scheduled_date
-          const { error: updateError } = await supabase
+          const { error: updateError } = await getSupabaseClient()
             .from('tray_steps')
             .update({
               completed: true,
@@ -2557,7 +2513,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       if (task.trayIds.length > 0 && task.recipeId) {
         try {
           // Fetch the recipe steps to find the current step
-          const { data: stepsData, error: stepsError } = await supabase
+          const { data: stepsData, error: stepsError } = await getSupabaseClient()
             .from('steps')
             .select('step_id, step_order, sequence_order, description_name, step_description')
             .eq('recipe_id', task.recipeId)
@@ -2576,7 +2532,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
               console.log('[DailyFlow] Found matching step for task without stepId:', matchingStep.step_id);
               // Update tray_steps with the found stepId
               for (const trayId of task.trayIds) {
-                const { data: existing, error: checkError } = await supabase
+                const { data: existing, error: checkError } = await getSupabaseClient()
                   .from('tray_steps')
                   .select('tray_id, step_id')
                   .eq('tray_id', trayId)
@@ -2589,7 +2545,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
                 }
 
                 if (!existing) {
-                  const { error: insertError } = await supabase
+                  const { error: insertError } = await getSupabaseClient()
                     .from('tray_steps')
                     .insert({
                       tray_id: trayId,
@@ -2604,7 +2560,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
                     console.log('[DailyFlow] Inserted tray_steps (fallback) for tray:', trayId, 'step:', matchingStep.step_id);
                   }
                 } else {
-                  const { error: updateError } = await supabase
+                  const { error: updateError } = await getSupabaseClient()
                     .from('tray_steps')
                     .update({
                       completed: true,
@@ -2632,7 +2588,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
   } catch (error: any) {
     console.error('Error completing task:', error);
     // Re-throw the error so the caller can display the error message
-    // The error message from Supabase is in error.message
+    // The error message from getSupabaseClient() is in error.message
     throw error;
   }
 };
@@ -2649,7 +2605,7 @@ export const skipTask = async (task: DailyTask): Promise<boolean> => {
     // Mark the step as skipped for all affected trays
     for (const trayId of task.trayIds) {
       // Check if record exists using composite key (tray_id, step_id)
-      const { data: existing, error: checkError } = await supabase
+      const { data: existing, error: checkError } = await getSupabaseClient()
         .from('tray_steps')
         .select('tray_id, step_id')
         .eq('tray_id', trayId)
@@ -2663,7 +2619,7 @@ export const skipTask = async (task: DailyTask): Promise<boolean> => {
 
       if (!existing) {
         // Insert if doesn't exist
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('tray_steps')
           .insert({
             tray_id: trayId,
@@ -2678,7 +2634,7 @@ export const skipTask = async (task: DailyTask): Promise<boolean> => {
         }
       } else {
         // Update using composite key
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('tray_steps')
           .update({
             skipped: true,
@@ -2726,7 +2682,7 @@ export const skipMissedStep = async (missedStep: MissedStep): Promise<boolean> =
 
     for (const trayId of missedStep.trayIds) {
       // Check if record exists using composite key (tray_id, step_id)
-      const { data: existing, error: checkError } = await supabase
+      const { data: existing, error: checkError } = await getSupabaseClient()
         .from('tray_steps')
         .select('tray_id, step_id')
         .eq('tray_id', trayId)
@@ -2739,7 +2695,7 @@ export const skipMissedStep = async (missedStep: MissedStep): Promise<boolean> =
       }
 
       if (!existing) {
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('tray_steps')
           .insert({
             tray_id: trayId,
@@ -2751,7 +2707,7 @@ export const skipMissedStep = async (missedStep: MissedStep): Promise<boolean> =
         if (insertError) throw insertError;
       } else {
         // Update using composite key
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('tray_steps')
           .update({
             skipped: true,
@@ -2794,7 +2750,7 @@ export const completeMissedStep = async (missedStep: MissedStep): Promise<boolea
 
     for (const trayId of missedStep.trayIds) {
       // Check if record exists using composite key (tray_id, step_id)
-      const { data: existing, error: checkError } = await supabase
+      const { data: existing, error: checkError } = await getSupabaseClient()
         .from('tray_steps')
         .select('tray_id, step_id')
         .eq('tray_id', trayId)
@@ -2807,7 +2763,7 @@ export const completeMissedStep = async (missedStep: MissedStep): Promise<boolea
       }
 
       if (!existing) {
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('tray_steps')
           .insert({
             tray_id: trayId,
@@ -2819,7 +2775,7 @@ export const completeMissedStep = async (missedStep: MissedStep): Promise<boolea
         if (insertError) throw insertError;
       } else {
         // Update using composite key
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('tray_steps')
           .update({
             completed: true,
@@ -2866,7 +2822,7 @@ export const getActiveTraysCount = async (): Promise<number> => {
 
     const { farmUuid } = JSON.parse(sessionData);
 
-    const { count, error } = await supabase
+    const { count, error } = await getSupabaseClient()
       .from('trays')
       .select('*', { count: 'exact', head: true })
       .eq('farm_uuid', farmUuid)
@@ -2913,13 +2869,13 @@ export const markTraysAsLost = async (
     const now = new Date().toISOString();
 
     // Get tray details before marking as lost for activity log
-    const { data: trayData } = await supabase
+    const { data: trayData } = await getSupabaseClient()
       .from('trays')
       .select('tray_id, variety_name, recipe_name, customer_name, sow_date')
       .in('tray_id', trayIds)
       .eq('farm_uuid', farmUuid);
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('trays')
       .update({
         status: 'lost',
@@ -3074,7 +3030,7 @@ export const discardSoakedSeed = async (
     const userToUse = userId || sessionUserId;
 
     // Get soaked seed details before discarding for activity log
-    const { data: soakedData } = await supabase
+    const { data: soakedData } = await getSupabaseClient()
       .from('soaked_seeds')
       .select('soaked_seed_id, variety_name, quantity_remaining, unit, request_id')
       .eq('soaked_seed_id', soakedId)
@@ -3155,13 +3111,13 @@ export const cancelSeedingRequest = async (
 ): Promise<void> => {
   try {
     // Get request details before cancelling for activity log
-    const { data: requestData } = await supabase
+    const { data: requestData } = await getSupabaseClient()
       .from('tray_creation_requests')
       .select('recipe_name, variety_name, seed_date, customer_name, farm_uuid')
       .eq('request_id', requestId)
       .single();
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('tray_creation_requests')
       .update({
         status: 'cancelled',
@@ -3215,7 +3171,7 @@ export const fetchPassiveTrayStatus = async (): Promise<PassiveTrayStatusItem[]>
     today.setHours(0, 0, 0, 0);
 
     // Step 1: Get active trays with sow_date and recipe info
-    const { data: activeTraysData, error: activeTraysError } = await supabase
+    const { data: activeTraysData, error: activeTraysError } = await getSupabaseClient()
       .from('trays')
       .select(`
         tray_id,
@@ -3245,7 +3201,7 @@ export const fetchPassiveTrayStatus = async (): Promise<PassiveTrayStatusItem[]>
     // Step 2: Get all recipe IDs and fetch their steps
     const recipeIds = [...new Set(activeTraysData.map((t: any) => t.recipe_id).filter(Boolean))];
     
-    const { data: stepsData, error: stepsError } = await supabase
+    const { data: stepsData, error: stepsError } = await getSupabaseClient()
       .from('steps')
       .select('step_id, step_name, recipe_id, duration, duration_unit, sequence_order')
       .in('recipe_id', recipeIds)
@@ -3386,7 +3342,7 @@ export const rescheduleSeedingRequest = async (
   originalDate: string
 ): Promise<void> => {
   try {
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('tray_creation_requests')
       .update({
         seed_date: newSeedDate,

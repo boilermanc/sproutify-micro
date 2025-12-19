@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,27 +54,27 @@ const AdminDashboard = () => {
         batchesTotal
       ] = await Promise.all([
         // Total Farms
-        supabase.from('farms').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('farms').select('*', { count: 'exact', head: true }),
         // Active Farms
-        supabase.from('farms').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        getSupabaseClient().from('farms').select('*', { count: 'exact', head: true }).eq('is_active', true),
         // Total Users
-        supabase.from('profile').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('profile').select('*', { count: 'exact', head: true }),
         // New Users Today
-        supabase.from('profile').select('*', { count: 'exact', head: true }).gte('created_at', todayStr),
+        getSupabaseClient().from('profile').select('*', { count: 'exact', head: true }).gte('created_at', todayStr),
         // Total Trays
-        supabase.from('trays').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }),
         // Active Trays (no harvest date)
-        supabase.from('trays').select('*', { count: 'exact', head: true }).is('harvest_date', null),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).is('harvest_date', null),
         // Total Recipes
-        supabase.from('recipes').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('recipes').select('*', { count: 'exact', head: true }),
         // Total Varieties
-        supabase.from('varieties').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('varieties').select('*', { count: 'exact', head: true }),
         // Total Customers
-        supabase.from('customers').select('*', { count: 'exact', head: true }),
+        getSupabaseClient().from('customers').select('*', { count: 'exact', head: true }),
         // Total Orders
-        supabase.from('orders').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
+        getSupabaseClient().from('orders').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
         // Total Batches
-        supabase.from('seedbatches').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
+        getSupabaseClient().from('seedbatches').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
       ]);
 
       setStats({

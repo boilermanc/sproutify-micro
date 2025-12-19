@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +31,7 @@ const AdminEmailBroadcast = () => {
     if (mode === 'test') return;
 
     try {
-      let query = supabase
+      let query = getSupabaseClient()
         .from(targetTable)
         .select('*', { count: 'exact', head: true })
         .not('email', 'is', null);
@@ -124,7 +124,7 @@ const AdminEmailBroadcast = () => {
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       // Get current session for auth
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
       if (!session) {
         throw new Error('Not authenticated');
       }

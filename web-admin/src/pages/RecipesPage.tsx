@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, ClipboardList, Plus, Search, Trash2, Globe, Copy } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -59,7 +59,7 @@ const RecipesPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch farm's own recipes
-      const { data: farmRecipesData, error } = await supabase
+      const { data: farmRecipesData, error } = await getSupabaseClient()
         .from('recipes')
         .select(`
           recipe_id,
@@ -87,7 +87,7 @@ const RecipesPage = () => {
       if (error) throw error;
 
       // Fetch enabled global recipes for this farm
-      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+      const { data: enabledGlobalRecipes, error: globalError } = await getSupabaseClient()
         .from('farm_global_recipes')
         .select(`
           global_recipe_id,
@@ -111,7 +111,7 @@ const RecipesPage = () => {
       // Process farm recipes
       const farmRecipesWithSteps = await Promise.all(
         (farmRecipesData || []).map(async (recipe) => {
-          const { data: steps } = await supabase
+          const { data: steps } = await getSupabaseClient()
             .from('steps')
             .select('*')
             .eq('recipe_id', recipe.recipe_id);
@@ -208,7 +208,7 @@ const RecipesPage = () => {
     try {
       // Fetch all varieties (no farm filtering - varieties are global)
       // DB columns: varietyid, name
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('varieties')
         .select('*');
 
@@ -242,7 +242,7 @@ const RecipesPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('supplies')
         .select('supply_id, supply_name, unit, stock, category, low_stock_threshold')
         .eq('farm_uuid', farmUuid)
@@ -263,7 +263,7 @@ const RecipesPage = () => {
   const fetchStepDescriptions = async () => {
     try {
       // Fetch all available step descriptions
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('step_descriptions')
         .select('description_id, description_name, description_details')
         .order('description_name', { ascending: true });
@@ -289,7 +289,7 @@ const RecipesPage = () => {
 
   const fetchGlobalRecipes = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('global_recipes')
         .select('global_recipe_id, recipe_name, variety_name')
         .eq('is_active', true)
@@ -320,7 +320,7 @@ const RecipesPage = () => {
       setRecipeSteps(sortedSteps);
     } else {
       // Fetch steps for farm recipe
-      const { data: steps } = await supabase
+      const { data: steps } = await getSupabaseClient()
         .from('steps')
         .select(`
           *,
@@ -386,7 +386,7 @@ const RecipesPage = () => {
 
     try {
       // Fetch the global recipe with its steps
-      const { data: globalRecipe, error } = await supabase
+      const { data: globalRecipe, error } = await getSupabaseClient()
         .from('global_recipes')
         .select(`
           *,
@@ -478,7 +478,7 @@ const RecipesPage = () => {
         is_active: true
       };
 
-      const { data: createdRecipe, error } = await supabase
+      const { data: createdRecipe, error } = await getSupabaseClient()
         .from('recipes')
         .insert([payload])
         .select()
@@ -512,7 +512,7 @@ const RecipesPage = () => {
           };
         });
 
-        const { error: stepsError } = await supabase.from('steps').insert(stepsData);
+        const { error: stepsError } = await getSupabaseClient().from('steps').insert(stepsData);
         if (stepsError) throw stepsError;
       }
 
@@ -579,7 +579,7 @@ const RecipesPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Check for active trays using this recipe
-      const { data: activeTrays, error: traysError } = await supabase
+      const { data: activeTrays, error: traysError } = await getSupabaseClient()
         .from('trays')
         .select('tray_id, tray_unique_id')
         .eq('farm_uuid', farmUuid)
@@ -596,7 +596,7 @@ const RecipesPage = () => {
       }
 
       // Check for any trays (including harvested) - optional, but good to warn
-      const { data: allTrays, error: allTraysError } = await supabase
+      const { data: allTrays, error: allTraysError } = await getSupabaseClient()
         .from('trays')
         .select('tray_id', { count: 'exact', head: true })
         .eq('farm_uuid', farmUuid)
@@ -626,7 +626,7 @@ const RecipesPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // First, delete all steps associated with this recipe
-      const { error: stepsDeleteError } = await supabase
+      const { error: stepsDeleteError } = await getSupabaseClient()
         .from('steps')
         .delete()
         .eq('recipe_id', recipeToDelete.recipe_id);
@@ -637,7 +637,7 @@ const RecipesPage = () => {
       }
 
       // Then delete the recipe
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await getSupabaseClient()
         .from('recipes')
         .delete()
         .eq('recipe_id', recipeToDelete.recipe_id)
@@ -698,7 +698,7 @@ const RecipesPage = () => {
         notes: editingRecipe.notes || null,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('recipes')
         .update(payload)
         .eq('recipe_id', editingRecipe.recipe_id);
@@ -712,7 +712,7 @@ const RecipesPage = () => {
 
       // Delete removed steps
       if (stepsToDelete.length > 0) {
-        const { error: deleteError } = await supabase
+        const { error: deleteError } = await getSupabaseClient()
           .from('steps')
           .delete()
           .in('step_id', stepsToDelete);
@@ -725,7 +725,7 @@ const RecipesPage = () => {
         if (step.isNew) {
           // Insert new step
           const selectedDescription = stepDescriptions.find(sd => sd.description_id === step.description_id);
-          const { error: insertError } = await supabase
+          const { error: insertError } = await getSupabaseClient()
             .from('steps')
             .insert({
               recipe_id: editingRecipe.recipe_id,
@@ -752,7 +752,7 @@ const RecipesPage = () => {
         } else if (step.step_id) {
           // Update existing step
           const selectedDescription = stepDescriptions.find(sd => sd.description_id === step.description_id);
-          const { error: updateError } = await supabase
+          const { error: updateError } = await getSupabaseClient()
             .from('steps')
             .update({
               sequence_order: step.sequence_order,
@@ -885,7 +885,7 @@ const RecipesPage = () => {
                       if (!selectedGlobalRecipeId) return;
                       
                       // Fetch global recipe steps
-                      const { data: globalRecipe } = await supabase
+                      const { data: globalRecipe } = await getSupabaseClient()
                         .from('global_recipes')
                         .select(`
                           *,

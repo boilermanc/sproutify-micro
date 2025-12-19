@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -68,7 +68,7 @@ const SettingsPage = () => {
       const { farmUuid, userId } = JSON.parse(sessionData);
 
       // Fetch farm data
-      const { data: farm, error: farmError } = await supabase
+      const { data: farm, error: farmError } = await getSupabaseClient()
         .from('farms')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -82,7 +82,7 @@ const SettingsPage = () => {
       }
 
       // Fetch profile data
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await getSupabaseClient()
         .from('profile')
         .select('*')
         .eq('id', userId)
@@ -121,7 +121,7 @@ const SettingsPage = () => {
     setMessage(null);
 
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('farms')
         .update({ 
           farm_name: farmName,
@@ -156,7 +156,7 @@ const SettingsPage = () => {
     setMessage(null);
 
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('profile')
         .update({ name: userName })
         .eq('id', profileData.id);
@@ -194,9 +194,9 @@ const SettingsPage = () => {
     setMessage(null);
 
     try {
-      // Send password reset email via Supabase Auth
+      // Send password reset email via getSupabaseClient() Auth
       // The email will contain a link that redirects to the login page with a token
-      const { error } = await supabase.auth.resetPasswordForEmail(profileData.email, {
+      const { error } = await getSupabaseClient().auth.resetPasswordForEmail(profileData.email, {
         redirectTo: `${window.location.origin}/login`,
       });
 
@@ -225,13 +225,13 @@ const SettingsPage = () => {
 
       // Fetch all farm data (varieties are global, no farm_uuid filter)
       const [varieties, recipes, batches, trays, customers, vendors, supplies] = await Promise.all([
-        supabase.from('varieties').select('*'),
-        supabase.from('recipes').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('seedbatches').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('trays').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('customers').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('vendors').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('supplies').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('varieties').select('*'),
+        getSupabaseClient().from('recipes').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('seedbatches').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('trays').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('customers').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('vendors').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('supplies').select('*').eq('farm_uuid', farmUuid),
       ]);
 
       const exportData = {

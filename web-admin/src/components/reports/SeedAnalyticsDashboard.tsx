@@ -34,7 +34,7 @@ type Props = {
   transactionTypeData: PieDatum[];
   varietyData: PieDatum[];
   varietySeries: { name: string; data: { date: string; value: number }[] }[];
-  totalVolume: number;
+  totalVolume?: number;
   loading?: boolean;
   usedMock?: boolean;
 };
@@ -66,33 +66,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const formatTotal = (grams: number) => {
-  if (grams >= 1000) return `${(grams / 1000).toFixed(1)}kg`;
-  return `${Math.round(grams)}g`;
-};
-
 export default function SeedAnalyticsDashboard({
   chartData,
   transactionTypeData,
   varietyData,
   varietySeries,
-  totalVolume,
   loading,
   usedMock,
 }: Props) {
-  const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
   const [activeVariety, setActiveVariety] = useState<number | undefined>(undefined);
 
-  const onPieEnter = (_: any, index: number) => setActiveIndex(index);
   const onVarietyEnter = (_: any, index: number) => setActiveVariety(index);
-
-  const pieWithColors =
-    transactionTypeData.length === 0
-      ? []
-      : transactionTypeData.map((d, i) => ({
-          ...d,
-          color: d.color || COLORS[i % COLORS.length],
-        }));
 
   const varietyWithColors =
     varietyData.length === 0

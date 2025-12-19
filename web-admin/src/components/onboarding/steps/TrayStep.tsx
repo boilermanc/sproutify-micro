@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../lib/supabaseClient';
+import { getSupabaseClient } from '../../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import './steps.css';
 
@@ -28,7 +28,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch all recipes with varieties join
-      const { data: allRecipesData } = await supabase
+      const { data: allRecipesData } = await getSupabaseClient()
         .from('recipes')
         .select(`
           recipe_id,
@@ -44,7 +44,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       if (!allRecipesData) return;
 
       // Fetch all seedbatches with quantity and variety info
-      const { data: batchesData } = await supabase
+      const { data: batchesData } = await getSupabaseClient()
         .from('seedbatches')
         .select('batchid, varietyid, quantity, lot_number, purchasedate')
         .eq('farm_uuid', farmUuid)
@@ -111,7 +111,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       }
 
       // Fetch batches for this variety with sufficient quantity
-      const { data: batchesData } = await supabase
+      const { data: batchesData } = await getSupabaseClient()
         .from('seedbatches')
         .select('batchid, varietyid, quantity, lot_number, purchasedate')
         .eq('farm_uuid', farmUuid)
@@ -123,7 +123,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
 
       if (batchesData) {
         // Fetch variety name
-        const { data: varietyData } = await supabase
+        const { data: varietyData } = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name')
           .eq('varietyid', varietyId)
@@ -179,7 +179,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       // Get variety name from join or fallback to text field
       const varietyName = selectedRecipe.varieties?.name || selectedRecipe.variety_name || '';
       
-      const { error: requestError } = await supabase
+      const { error: requestError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .insert({
           customer_name: null,
@@ -194,7 +194,7 @@ const TrayStep = ({ onNext, onBack, recipeId, batchId, onDataCreated }: TrayStep
       if (requestError) throw requestError;
 
       // Query for the newly created tray (trigger creates it)
-      let query = supabase
+      let query = getSupabaseClient()
         .from('trays')
         .select('tray_id')
         .eq('farm_uuid', farmUuid)

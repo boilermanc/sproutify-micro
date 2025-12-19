@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Package, Scissors, ClipboardList, Filter, Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,7 @@ const Activity = () => {
       if (!sessionData) return;
       const { farmUuid } = JSON.parse(sessionData);
 
-      let query = supabase
+      let query = getSupabaseClient()
         .from('recent_activity')
         .select('*')
         .eq('farm_uuid', farmUuid)

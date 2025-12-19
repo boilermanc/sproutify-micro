@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import { getSupabaseClient } from '../../lib/supabaseClient';
 import SeedAnalyticsDashboard from './SeedAnalyticsDashboard';
 
 type Props = {
@@ -46,7 +46,7 @@ const SeedUsageReport = ({ startDate, endDate }: Props) => {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
 
-        const { data: txData, error } = await supabase
+        const { data: txData, error } = await getSupabaseClient()
           .from('seed_transactions')
           .select(`
             created_at,
@@ -68,7 +68,11 @@ const SeedUsageReport = ({ startDate, endDate }: Props) => {
           throw error;
         }
 
-        const rows: TxRow[] = txData || [];
+        // Map the raw data to handle Supabase's array-style joins
+        const rows: TxRow[] = (txData || []).map((row: any) => ({
+          ...row,
+          seedbatches: Array.isArray(row.seedbatches) ? row.seedbatches[0] : row.seedbatches,
+        }));
         const toNum = (v: any) => Math.abs(parseFloat(String(v ?? 0))) || 0;
 
         const dailyMap: Record<string, { date: string; sowing: number; harvest: number; waste: number }> = {};

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,7 @@ const AdminRecipesVarieties = () => {
     setIsLoading(true);
     try {
       // Fetch recipes with farm names
-      const { data: recipesData, error: recipesError } = await supabase
+      const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
         .select(`
           *,
@@ -77,7 +77,7 @@ const AdminRecipesVarieties = () => {
       setRecipes(recipesWithFarmNames);
 
       // Fetch varieties with farm names
-      const { data: varietiesData, error: varietiesError } = await supabase
+      const { data: varietiesData, error: varietiesError } = await getSupabaseClient()
         .from('varieties')
         .select(`
           *,
@@ -103,7 +103,7 @@ const AdminRecipesVarieties = () => {
       setVarieties(varietiesWithFarmNames);
 
       // Fetch global recipes
-      const { data: globalRecipesData, error: globalRecipesError } = await supabase
+      const { data: globalRecipesData, error: globalRecipesError } = await getSupabaseClient()
         .from('global_recipes')
         .select('*')
         .eq('is_active', true)

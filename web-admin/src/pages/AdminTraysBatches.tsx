@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,7 +64,7 @@ const AdminTraysBatches = () => {
     setIsLoading(true);
     try {
       // Fetch all farms
-      const { data: farmsData, error: farmsError } = await supabase
+      const { data: farmsData, error: farmsError } = await getSupabaseClient()
         .from('farms')
         .select('farm_uuid, farmname')
         .order('farmname', { ascending: true });
@@ -76,7 +76,7 @@ const AdminTraysBatches = () => {
       }
 
       // Fetch trays with farm and recipe names (only if farm is selected)
-      const traysQuery = supabase
+      const traysQuery = getSupabaseClient()
         .from('trays')
         .select(`
           *,
@@ -112,7 +112,7 @@ const AdminTraysBatches = () => {
       setTrays(traysWithNames);
 
       // Fetch batches with farm names (only if farm is selected)
-      const batchesQuery = supabase
+      const batchesQuery = getSupabaseClient()
         .from('seedbatches')
         .select(`
           *,

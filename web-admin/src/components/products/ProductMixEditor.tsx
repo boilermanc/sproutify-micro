@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Save, Plus, Trash2 } from 'lucide-react';
-import { supabase } from '../../lib/supabaseClient';
+import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -63,7 +63,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch existing mappings
-      const { data: mappingsData, error: mappingsError } = await supabase
+      const { data: mappingsData, error: mappingsError } = await getSupabaseClient()
         .from('product_recipe_mapping')
         .select(`
           *,
@@ -86,7 +86,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
       setMappings(normalizedMappings);
 
       // Fetch farm's own recipes
-      const { data: farmRecipesData, error: recipesError } = await supabase
+      const { data: farmRecipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_name, variety_id')
         .eq('farm_uuid', farmUuid)
@@ -96,7 +96,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
       if (recipesError) throw recipesError;
 
       // Fetch enabled global recipes for this farm
-      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+      const { data: enabledGlobalRecipes, error: globalError } = await getSupabaseClient()
         .from('farm_global_recipes')
         .select(`
           global_recipe_id,
@@ -162,7 +162,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
 
       // Fetch varieties from varieties_view (farm-specific catalog)
       // This shows only varieties that have been added to your farm's catalog
-      const { data: varietiesData, error: varietiesError } = await supabase
+      const { data: varietiesData, error: varietiesError } = await getSupabaseClient()
         .from('varieties_view')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -291,7 +291,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
         const { farmUuid, userId } = JSON.parse(sessionData);
         
         // Call the copy function to create a farm recipe from the global recipe
-        const { data: copiedRecipeId, error: copyError } = await supabase.rpc(
+        const { data: copiedRecipeId, error: copyError } = await getSupabaseClient().rpc(
           'copy_global_recipe_to_farm',
           {
             p_global_recipe_id: recipe.global_recipe_id,
@@ -311,7 +311,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
         
         // Refresh recipes list to include the newly copied recipe
         // Re-fetch both farm and global recipes to ensure we have the latest data
-        const { data: recipesData } = await supabase
+        const { data: recipesData } = await getSupabaseClient()
           .from('recipes')
           .select('recipe_id, recipe_name, variety_name, variety_id')
           .eq('farm_uuid', farmUuid)
@@ -319,7 +319,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
           .order('recipe_name', { ascending: true });
 
         // Re-fetch global recipes
-        const { data: enabledGlobalRecipesRefresh } = await supabase
+        const { data: enabledGlobalRecipesRefresh } = await getSupabaseClient()
           .from('farm_global_recipes')
           .select(`
             global_recipe_id,
@@ -408,7 +408,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
     setSaving(true);
     try {
       // Delete existing mappings
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await getSupabaseClient()
         .from('product_recipe_mapping')
         .delete()
         .eq('product_id', product.product_id);
@@ -424,7 +424,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
           ratio: m.ratio,
         }));
 
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('product_recipe_mapping')
           .insert(payload);
 

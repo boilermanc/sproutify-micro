@@ -4,12 +4,11 @@ import { format, parseISO } from 'date-fns';
 import { AlertTriangle, Calendar, Check, CheckCircle2, ChevronDown, Clock, FileText, Info, Loader2, RefreshCw, Sprout, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import {
   fetchOrderFulfillmentDetails,
   fetchOrderFulfillmentSummary,
@@ -29,7 +28,15 @@ type RecipeOption = {
   recipe_id: number;
   recipe_name: string;
   variety_name?: string | null;
-  varieties?: { name?: string | null };
+  varieties?: { name?: string | null } | { name?: string | null }[] | null;
+};
+
+const getVarietyName = (varieties: RecipeOption['varieties']): string | null => {
+  if (!varieties) return null;
+  if (Array.isArray(varieties)) {
+    return varieties[0]?.name || null;
+  }
+  return varieties.name || null;
 };
 
 const statusColors = {
@@ -39,16 +46,12 @@ const statusColors = {
 };
 
 const statusDisplay = {
-  ready: { label: 'Ready', icon: CheckCircle2 },
-  plantable: { label: 'Pending', icon: Clock },
-  at_risk: { label: 'At Risk', icon: XCircle },
+  ready: { label: 'Ready', icon: CheckCircle2, bg: 'bg-green-50', color: 'text-green-700' },
+  plantable: { label: 'Pending', icon: Clock, bg: 'bg-blue-50', color: 'text-blue-700' },
+  at_risk: { label: 'At Risk', icon: XCircle, bg: 'bg-red-50', color: 'text-red-700' },
+  missed: { label: 'Missed', icon: XCircle, bg: 'bg-gray-50', color: 'text-gray-700' },
 };
 
-const itemStatusLabel: Record<OrderFulfillmentStatus['fulfillment_status'], string> = {
-  fulfilled: 'Fulfilled',
-  partial: 'Partial',
-  no_trays: 'No Trays',
-};
 
 const formatDate = (iso: string) => {
   if (!iso) return '—';
@@ -152,7 +155,7 @@ const WeeklyTasksPage = () => {
 
   const loadRecipes = async (farmId: string) => {
     setRecipesLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('recipes')
       .select('recipe_id, recipe_name, variety_name, varieties(name)')
       .eq('farm_uuid', farmId)
@@ -257,10 +260,10 @@ const WeeklyTasksPage = () => {
     const recipeIdNum = parseInt(addTrayForm.recipeId, 10);
     const recipe = recipes.find((r) => r.recipe_id === recipeIdNum);
     const recipeName = recipe?.recipe_name || addTrayForm.recipeName || 'Recipe';
-    const varietyName = recipe?.varieties?.name || recipe?.variety_name || '';
+    const varietyName = getVarietyName(recipe?.varieties) || recipe?.variety_name || '';
 
     try {
-      const { error } = await supabase.from('tray_creation_requests').insert({
+      const { error } = await getSupabaseClient().from('tray_creation_requests').insert({
         farm_uuid: farmUuid,
         recipe_id: recipeIdNum,
         recipe_name: recipeName,
@@ -292,10 +295,15 @@ const WeeklyTasksPage = () => {
     if (!farmUuid || !actionDialog.item || !actionDialog.type) return;
     try {
       setActionSaving(true);
-      await recordFulfillmentAction(farmUuid, actionDialog.item, actionDialog.type, {
-        reason: actionReason,
-        notes: actionNotes,
-        userId,
+      await recordFulfillmentAction({
+        p_farm_uuid: farmUuid,
+        p_standing_order_id: actionDialog.item.standing_order_id,
+        p_delivery_date: actionDialog.item.delivery_date,
+        p_recipe_id: actionDialog.item.recipe_id,
+        p_action_type: actionDialog.type,
+        p_notes: actionNotes || actionReason || null,
+        p_original_quantity: actionDialog.item.trays_needed,
+        p_created_by: userId,
       });
       setActionDialog({ type: null, item: null });
       setActionReason('');
@@ -369,66 +377,6 @@ const WeeklyTasksPage = () => {
     harvesting: 'Harvesting',
     delivery: 'Delivery',
     maintenance: 'Maintenance',
-  };
-
-  type EnrichedItemStatus = OrderFulfillmentStatus & {
-    canStillPlant: boolean;
-    isMissed: boolean;
-    status: 'fulfilled' | 'plantable' | 'at_risk' | 'missed';
-    daysUntilHarvest: number;
-  };
-
-  const statusConfig: Record<EnrichedItemStatus['status'], { label: string; color: string; icon: string }> = {
-    fulfilled: { label: 'Ready', color: 'bg-green-100 text-green-800', icon: '✓' },
-    plantable: { label: 'No Trays', color: 'bg-amber-100 text-amber-800', icon: '⚠️' },
-    at_risk: { label: 'At Risk', color: 'bg-orange-100 text-orange-800', icon: '⏰' },
-    missed: { label: 'Missed', color: 'bg-red-100 text-red-800', icon: '✗' },
-  };
-
-  const calculateOrderItemStatus = (item: OrderFulfillmentStatus): EnrichedItemStatus => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const canStillPlant = todayStr <= item.sow_date;
-    const isAtRisk = todayStr > item.sow_date && todayStr <= item.harvest_date;
-    const isMissed = todayStr > item.harvest_date;
-    const daysUntilHarvest = Math.ceil(
-      (new Date(item.harvest_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    let status: EnrichedItemStatus['status'];
-    if ((item.trays_ready || 0) >= (item.trays_needed || 0)) {
-      status = 'fulfilled';
-    } else if (isMissed) {
-      status = 'missed';
-    } else if (isAtRisk) {
-      status = 'at_risk';
-    } else {
-      status = 'plantable';
-    }
-
-    return {
-      ...item,
-      canStillPlant,
-      isMissed,
-      status,
-      daysUntilHarvest,
-    };
-  };
-
-  const statusBadge = (status: OrderFulfillmentStatus['fulfillment_status']) => {
-    const color =
-      status === 'fulfilled'
-        ? 'bg-green-100 text-green-700 border-green-200'
-        : status === 'partial'
-        ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
-        : 'bg-red-100 text-red-700 border-red-200';
-
-    const icon = status === 'fulfilled' ? '✅' : status === 'partial' ? '🟡' : '⚠️';
-    return (
-      <Badge className={`flex items-center gap-1 border ${color}`}>
-        <span>{icon}</span>
-        {itemStatusLabel[status]}
-      </Badge>
-    );
   };
 
   return (
@@ -804,16 +752,16 @@ const WeeklyTasksPage = () => {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => setActionDialog({ type: 'skipped', item })}>
+                                <DropdownMenuItem onClick={() => setActionDialog({ type: 'skip', item })}>
                                   <XCircle className="h-4 w-4 mr-2" />
                                   Skip
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setActionDialog({ type: 'substituted', item })}>
+                                <DropdownMenuItem onClick={() => setActionDialog({ type: 'substitute', item })}>
                                   <RefreshCw className="h-4 w-4 mr-2" />
                                   Check substitutes
                                 </DropdownMenuItem>
                                 {itemStatus === 'missed' && (
-                                  <DropdownMenuItem onClick={() => setActionDialog({ type: 'log', item })}>
+                                  <DropdownMenuItem onClick={() => setActionDialog({ type: 'note', item })}>
                                     <FileText className="h-4 w-4 mr-2" />
                                     Log issue
                                   </DropdownMenuItem>
@@ -867,7 +815,7 @@ const WeeklyTasksPage = () => {
                 ) : (
                   recipes.map((recipe) => (
                     <option key={recipe.recipe_id} value={recipe.recipe_id}>
-                      {recipe.recipe_name} {recipe.varieties?.name ? `(${recipe.varieties.name})` : ''}
+                      {recipe.recipe_name} {getVarietyName(recipe.varieties) ? `(${getVarietyName(recipe.varieties)})` : ''}
                     </option>
                   ))
                 )}
@@ -937,9 +885,9 @@ const WeeklyTasksPage = () => {
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>
-              {actionDialog.type === 'skipped' && 'Skip Delivery'}
-              {actionDialog.type === 'substituted' && 'Check Substitute'}
-              {actionDialog.type === 'log' && 'Log Issue'}
+              {actionDialog.type === 'skip' && 'Skip Delivery'}
+              {actionDialog.type === 'substitute' && 'Check Substitute'}
+              {actionDialog.type === 'note' && 'Log Issue'}
             </DialogTitle>
             <DialogDescription>
               {actionDialog.item

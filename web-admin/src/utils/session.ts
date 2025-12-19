@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 type ProfileRecord = {
   id?: string;
@@ -42,8 +42,8 @@ export const buildSessionPayload = async (
   let farmName = getFarmNameFromProfile(profile);
   let trialEndDate = profile.farms?.trial_end_date ?? null;
 
-  if ((!farmName || !farmName.trim()) && farmUuid && supabase) {
-    const { data: farm } = await supabase
+  if ((!farmName || !farmName.trim()) && farmUuid && getSupabaseClient()) {
+    const { data: farm } = await getSupabaseClient()
       .from('farms')
       .select('farm_name, farmname, trial_end_date')
       .eq('farm_uuid', farmUuid)

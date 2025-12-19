@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Sprout, Edit, Trash2, Plus, Search, ArrowUp, ArrowDown, Package } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -55,7 +55,7 @@ const VarietiesPage = () => {
       // Fallback to varieties table if view doesn't exist
       let data, error;
       try {
-        const result = await supabase
+        const result = await getSupabaseClient()
           .from('varieties_view')
           .select('*')
           .eq('farm_uuid', farmUuid)
@@ -65,7 +65,7 @@ const VarietiesPage = () => {
       } catch (viewError) {
         // If varieties_view doesn't exist, fallback to varieties table
         console.warn('varieties_view not found, using varieties table:', viewError);
-        const result = await supabase
+        const result = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name, description, stock, stock_unit')
           .order('name', { ascending: true });
@@ -100,7 +100,7 @@ const VarietiesPage = () => {
   const fetchAllVarieties = async () => {
     try {
       // Fetch all varieties from the global catalog (not filtered by farm)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('varieties')
         .select('varietyid, name, description')
         .order('name', { ascending: true });
@@ -138,7 +138,7 @@ const VarietiesPage = () => {
       const varietyId = variety.variety_id;
 
       // Check if variety is already in farm catalog
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('farm_varieties')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -151,7 +151,7 @@ const VarietiesPage = () => {
       }
 
       // Add variety to farm catalog by creating farm_varieties entry
-      const { error: insertError } = await supabase
+      const { error: insertError } = await getSupabaseClient()
         .from('farm_varieties')
         .insert({
           farm_uuid: farmUuid,
@@ -198,7 +198,7 @@ const VarietiesPage = () => {
         // No farm_uuid - varieties are global
       };
 
-      const { data: newVarietyData, error } = await supabase
+      const { data: newVarietyData, error } = await getSupabaseClient()
         .from('varieties')
         .insert([payload])
         .select()
@@ -209,7 +209,7 @@ const VarietiesPage = () => {
       // Add the new variety to this farm's catalog
       const varietyId = newVarietyData.varietyid || newVarietyData.variety_id;
       if (varietyId) {
-        const { error: catalogError } = await supabase
+        const { error: catalogError } = await getSupabaseClient()
           .from('farm_varieties')
           .insert({
             farm_uuid: farmUuid,
@@ -262,7 +262,7 @@ const VarietiesPage = () => {
         stock_unit: editingVariety.stock_unit || 'g',
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('varieties')
         .update(payload)
         .eq('varietyid', varietyId);
@@ -305,7 +305,7 @@ const VarietiesPage = () => {
       }
 
       // Check if a farm_varieties record already exists
-      const { data: existingRecord, error: checkError } = await supabase
+      const { data: existingRecord, error: checkError } = await getSupabaseClient()
         .from('farm_varieties')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -318,7 +318,7 @@ const VarietiesPage = () => {
 
       if (existingRecord) {
         // Update existing record
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('farm_varieties')
           .update({ is_active: newActiveStatus })
           .eq('farm_uuid', farmUuid)
@@ -327,7 +327,7 @@ const VarietiesPage = () => {
         if (updateError) throw updateError;
       } else {
         // Insert new record
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('farm_varieties')
           .insert({
             farm_uuid: farmUuid,
@@ -353,7 +353,7 @@ const VarietiesPage = () => {
     try {
       const varietyId = variety.varietyid || variety.variety_id;
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('varieties')
         .delete()
         .eq('varietyid', varietyId);

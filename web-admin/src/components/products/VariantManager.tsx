@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit, Trash2, DollarSign } from 'lucide-react';
-import { supabase } from '../../lib/supabaseClient';
+import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -48,7 +48,7 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
   const fetchVariants = useCallback(async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('product_variants')
         .select('*')
         .eq('product_id', product.product_id)
@@ -83,7 +83,7 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
         is_active: true,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('product_variants')
         .insert([payload]);
 
@@ -118,7 +118,7 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
         unit: editingVariant.unit,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('product_variants')
         .update(payload)
         .eq('variant_id', editingVariant.variant_id);
@@ -142,7 +142,7 @@ const VariantManager = ({ product, open, onOpenChange, onUpdate }: VariantManage
 
     try {
       // Soft delete
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('product_variants')
         .update({ is_active: false })
         .eq('variant_id', variant.variant_id);

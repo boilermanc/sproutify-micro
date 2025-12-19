@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -135,7 +135,7 @@ const BatchesPage = () => {
       // Don't fetch vendors here - fetchFormData handles it with proper normalization
       // This prevents overwriting normalized vendors
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('seedbatches')
         .select('*')
         .eq('farm_uuid', farmUuid);
@@ -156,7 +156,7 @@ const BatchesPage = () => {
       // Fetch varieties if not already loaded (needed for batch normalization)
       let varietiesList = varieties;
       if (varietiesList.length === 0) {
-        const { data: varietiesData } = await supabase
+        const { data: varietiesData } = await getSupabaseClient()
           .from('varieties')
           .select('*');
         varietiesList = (varietiesData || []).map((v: any) => ({
@@ -169,7 +169,7 @@ const BatchesPage = () => {
       // Fetch vendors if not already loaded (needed for batch normalization)
       let vendorsList = vendors;
       if (vendorsList.length === 0) {
-        const { data: vendorsData } = await supabase
+        const { data: vendorsData } = await getSupabaseClient()
           .from('vendors')
           .select('*')
           .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
@@ -193,7 +193,7 @@ const BatchesPage = () => {
       const batchesWithTrayCounts = await Promise.all(
         sortedBatches.map(async (batch) => {
           const batchId = batch.batchid || batch.batch_id;
-          const { count } = await supabase
+          const { count } = await getSupabaseClient()
             .from('trays')
             .select('*', { count: 'exact', head: true })
             .eq('batch_id', batchId)
@@ -245,7 +245,7 @@ const BatchesPage = () => {
   const checkVarietiesColumns = async () => {
     try {
       // Fetch one row without any filters to see actual column names
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('varieties')
         .select('*')
         .limit(1);
@@ -290,7 +290,7 @@ const BatchesPage = () => {
       const fetchVarieties = async () => {
         try {
           // Fetch all varieties (no farm filtering since column doesn't exist)
-          const { data, error } = await supabase
+          const { data, error } = await getSupabaseClient()
             .from('varieties')
             .select('*');
           
@@ -307,7 +307,7 @@ const BatchesPage = () => {
 
       // Fetch vendors - include vendors for this farm OR vendors with null farm_uuid (global vendors)
       const fetchVendors = async () => {
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('vendors')
           .select('*')
           .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
@@ -444,7 +444,7 @@ const BatchesPage = () => {
         payload.low_stock_threshold = parseFloat(newBatch.low_stock_threshold);
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('seedbatches')
         .insert([payload]);
 
@@ -454,7 +454,7 @@ const BatchesPage = () => {
       const varietyId = parseInt(newBatch.variety_id);
       try {
         // Check if variety is already in farm catalog
-        const { data: existingCatalogEntry } = await supabase
+        const { data: existingCatalogEntry } = await getSupabaseClient()
           .from('farm_varieties')
           .select('*')
           .eq('farm_uuid', farmUuid)
@@ -463,7 +463,7 @@ const BatchesPage = () => {
 
         // If not in catalog, add it
         if (!existingCatalogEntry) {
-          const { error: catalogError } = await supabase
+          const { error: catalogError } = await getSupabaseClient()
             .from('farm_varieties')
             .insert({
               farm_uuid: farmUuid,
@@ -566,7 +566,7 @@ const BatchesPage = () => {
         payload.low_stock_threshold = parseFloat(editingBatch.low_stock_threshold);
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('seedbatches')
         .update(payload)
         .eq('batchid', batchId)
@@ -579,7 +579,7 @@ const BatchesPage = () => {
       if (varietyId) {
         try {
           // Check if variety is already in farm catalog
-          const { data: existingCatalogEntry } = await supabase
+          const { data: existingCatalogEntry } = await getSupabaseClient()
             .from('farm_varieties')
             .select('*')
             .eq('farm_uuid', farmUuid)
@@ -588,7 +588,7 @@ const BatchesPage = () => {
 
           // If not in catalog, add it
           if (!existingCatalogEntry) {
-            const { error: catalogError } = await supabase
+            const { error: catalogError } = await getSupabaseClient()
               .from('farm_varieties')
               .insert({
                 farm_uuid: farmUuid,

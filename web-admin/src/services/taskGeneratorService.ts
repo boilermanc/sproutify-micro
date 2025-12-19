@@ -24,9 +24,9 @@ const formatDateString = (date: Date): string => {
  * Parse a date string (YYYY-MM-DD) as a local date, not UTC
  * This prevents timezone shifts that cause dates to display as the previous day
  */
-const parseLocalDate = (dateStr: string | null | undefined): Date | null => {
+const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null => {
   if (!dateStr) return null;
-  
+
   // If it's already a Date object, return it
   if (dateStr instanceof Date) return dateStr;
   
@@ -200,7 +200,7 @@ export const fetchWeeklyTasks = async (
       ? [...new Set(seedingTasks.map((t: any) => t.recipe_id).filter(Boolean))] 
       : [];
     
-    const { data: seedingRecipesData, error: seedingRecipesError } = seedingRecipeIds.length > 0 ? await supabase
+    const { data: seedingRecipesData, error: seedingRecipesError } = seedingRecipeIds.length > 0 ? await getSupabaseClient()
       .from('recipes')
       .select('recipe_id, variety_name')
       .in('recipe_id', seedingRecipeIds)
@@ -257,7 +257,6 @@ export const fetchWeeklyTasks = async (
     for (const schedule of (schedules || [])) {
       const sowDate = parseLocalDate(schedule.sow_date) || new Date();
       sowDate.setHours(0, 0, 0, 0);
-      const sowDateStr = formatDateString(sowDate);
       const harvestDate = parseLocalDate(schedule.harvest_date) || new Date();
       harvestDate.setHours(0, 0, 0, 0);
       const harvestDateStr = formatDateString(harvestDate);

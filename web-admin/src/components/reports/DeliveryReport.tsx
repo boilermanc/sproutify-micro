@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 
@@ -33,7 +33,7 @@ const DeliveryReport = ({ startDate, endDate }: DeliveryReportProps) => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch orders with delivery dates in range
-      const { data: ordersData, error } = await supabase
+      const { data: ordersData, error } = await getSupabaseClient()
         .from('orders')
         .select(`
           order_id,

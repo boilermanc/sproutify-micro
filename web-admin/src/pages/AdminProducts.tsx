@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +46,7 @@ const AdminProducts = () => {
     setIsLoading(true);
     try {
       // Fetch all farms
-      const { data: farmsData, error: farmsError } = await supabase
+      const { data: farmsData, error: farmsError } = await getSupabaseClient()
         .from('farms')
         .select('farm_uuid, farmname')
         .order('farmname', { ascending: true });
@@ -58,7 +58,7 @@ const AdminProducts = () => {
       }
 
       // Fetch products with farm names (only if farm is selected)
-      const productsQuery = supabase
+      const productsQuery = getSupabaseClient()
         .from('products')
         .select(`
           *,

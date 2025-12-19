@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { runNotificationChecks } from '../services/notificationService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -496,7 +496,7 @@ const Dashboard = () => {
       if (!farmUuid) return;
 
       // 1. Basic Farm Info
-      const { data: farmRecord } = await supabase
+      const { data: farmRecord } = await getSupabaseClient()
         .from('farms')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -528,18 +528,18 @@ const Dashboard = () => {
         tasksCount
       ] = await Promise.all([
         // Total Trays
-        supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid),
         // Active Trays
-        supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).is('harvest_date', null),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).is('harvest_date', null),
         // Varieties (global table, no farm filter)
-        supabase.from('varieties').select('*', { count: 'exact', head: true }).then(r => {
+        getSupabaseClient().from('varieties').select('*', { count: 'exact', head: true }).then(r => {
           console.log('[DEBUG] Varieties query result:', { count: r.count, error: r.error });
           return r;
         }, () => ({ count: 0, error: null })),
         // Recent Harvests
-        supabase.from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).not('harvest_date', 'is', null).gte('harvest_date', sevenDaysAgo.toISOString()),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).not('harvest_date', 'is', null).gte('harvest_date', sevenDaysAgo.toISOString()),
         // Harvest Soon - use the database view
-        supabase
+        getSupabaseClient()
           .from('harvest_soon_view')
           .select('*', { count: 'exact', head: true })
           .eq('farm_uuid', farmUuid)
@@ -548,19 +548,19 @@ const Dashboard = () => {
             return r;
           }),
         // Products
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => r, () => ({ count: 0, error: null })),
+        getSupabaseClient().from('products').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => r, () => ({ count: 0, error: null })),
         // Standing Orders
-        supabase.from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
+        getSupabaseClient().from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
           console.log('[DEBUG] Standing Orders query result:', { count: r.count, error: r.error });
           return r;
         }, () => ({ count: 0, error: null })),
         // Active Orders (standing_orders where is_active = true)
-        supabase.from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
+        getSupabaseClient().from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
           console.log('[DEBUG] Active Orders query result:', { count: r.count, error: r.error });
           return r;
         }, () => ({ count: 0, error: null })),
         // Today's Tasks (pending tray_steps scheduled for today)
-        supabase
+        getSupabaseClient()
           .from('tray_steps')
           .select(`
             tray_step_id,
@@ -590,7 +590,7 @@ const Dashboard = () => {
 
       // 3. Process Chart Data
       // Harvest Chart
-      const { data: harvestRaw } = await supabase
+      const { data: harvestRaw } = await getSupabaseClient()
         .from('trays')
         .select('harvest_date, yield')
         .eq('farm_uuid', farmUuid)
@@ -610,7 +610,7 @@ const Dashboard = () => {
       }
 
       // Variety Distribution
-      const { data: varietyRaw } = await supabase
+      const { data: varietyRaw } = await getSupabaseClient()
         .from('trays')
         .select(`recipes!inner(varieties!inner(name))`)
         .eq('farm_uuid', farmUuid)
@@ -635,7 +635,7 @@ const Dashboard = () => {
       }
 
       // Fetch Recent Activity
-      const { data: activityData } = await supabase
+      const { data: activityData } = await getSupabaseClient()
         .from('recent_activity')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -653,7 +653,7 @@ const Dashboard = () => {
         console.log('[DEBUG] Querying daily_insights for date:', todayStr, 'farm_uuid:', farmUuid);
         
         // Query for today's insight
-        const { data: insightData, error: insightError } = await supabase
+        const { data: insightData, error: insightError } = await getSupabaseClient()
           .from('daily_insights')
           .select('content, date')
           .eq('farm_uuid', farmUuid)
@@ -686,7 +686,7 @@ const Dashboard = () => {
           console.log('[DEBUG] Insight data received:', insightData);
           
           if (insightData && insightData.content) {
-            // content is jsonb, so Supabase returns it as an object already
+            // content is jsonb, so getSupabaseClient() returns it as an object already
             // Just cast it to InsightData type
             const content = insightData.content as InsightData;
             console.log('[DEBUG] Setting briefing data:', content);
@@ -694,7 +694,7 @@ const Dashboard = () => {
           } else {
             // No data for today - try to get the most recent insight as fallback
             console.log('[DEBUG] No insight data for today, fetching most recent');
-            const { data: recentData, error: recentError } = await supabase
+            const { data: recentData, error: _recentError } = await getSupabaseClient()
               .from('daily_insights')
               .select('content, date')
               .eq('farm_uuid', farmUuid)

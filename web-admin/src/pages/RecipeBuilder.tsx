@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { RecipeStack } from '../components/recipes/builder/RecipeStack';
 import { StepComposer } from '../components/recipes/builder/StepComposer';
 import { ErrorModal } from '../components/ui/ErrorModal';
@@ -48,8 +48,8 @@ export const RecipeBuilderPage: React.FC = () => {
     setLoading(true);
     try {
       // 1. Fetch Reference Tables
-      const { data: descData } = await supabase.from('step_descriptions').select('*').order('description_name');
-      const { data: varData } = await supabase.from('varieties').select('varietyid, name').order('name');
+      const { data: descData } = await getSupabaseClient().from('step_descriptions').select('*').order('description_name');
+      const { data: varData } = await getSupabaseClient().from('varieties').select('varietyid, name').order('name');
       
       setDescriptions(descData || []);
       
@@ -117,8 +117,8 @@ export const RecipeBuilderPage: React.FC = () => {
 
       // 3. Fetch Existing Recipe (if editing)
       if (recipeId) {
-        const { data: recipe } = await supabase.from('recipes').select('*').eq('recipe_id', recipeId).single();
-        const { data: existingSteps } = await supabase.from('steps').select('*').eq('recipe_id', recipeId).order('sequence_order');
+        const { data: recipe } = await getSupabaseClient().from('recipes').select('*').eq('recipe_id', recipeId).single();
+        const { data: existingSteps } = await getSupabaseClient().from('steps').select('*').eq('recipe_id', recipeId).order('sequence_order');
         
         if (recipe) {
           setMetadata({
@@ -286,12 +286,12 @@ export const RecipeBuilderPage: React.FC = () => {
 
       if (currentRecipeId) {
         // Update
-        await supabase.from('recipes').update(recipePayload).eq('recipe_id', currentRecipeId);
+        await getSupabaseClient().from('recipes').update(recipePayload).eq('recipe_id', currentRecipeId);
         // Delete old steps to replace with new sequence (Simpler than diffing)
-        await supabase.from('steps').delete().eq('recipe_id', currentRecipeId);
+        await getSupabaseClient().from('steps').delete().eq('recipe_id', currentRecipeId);
       } else {
         // Insert
-        const { data: newRecipe, error } = await supabase.from('recipes').insert([recipePayload]).select().single();
+        const { data: newRecipe, error } = await getSupabaseClient().from('recipes').insert([recipePayload]).select().single();
         if (error) throw error;
         currentRecipeId = newRecipe.recipe_id;
       }
@@ -327,7 +327,7 @@ export const RecipeBuilderPage: React.FC = () => {
         console.log('Has created_by in payload?', 'created_by' in stepsPayload[0]);
       }
 
-      const { error: stepError } = await supabase.from('steps').insert(stepsPayload);
+      const { error: stepError } = await getSupabaseClient().from('steps').insert(stepsPayload);
       if (stepError) throw stepError;
 
       setErrorModal({

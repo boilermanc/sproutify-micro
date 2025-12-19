@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +57,7 @@ const AdminNotifications = () => {
     setIsLoading(true);
     try {
       // Fetch notifications with farm info (user_id references auth.users, not profile directly)
-      const { data: notificationsData, error: notificationsError } = await supabase
+      const { data: notificationsData, error: notificationsError } = await getSupabaseClient()
         .from('notifications')
         .select(`
           *,
@@ -78,7 +78,7 @@ const AdminNotifications = () => {
 
       // Fetch users for dropdown and to map user_id to user info
       // Note: Using select('*') to avoid column name issues
-      const { data: usersData, error: usersError } = await supabase
+      const { data: usersData, error: usersError } = await getSupabaseClient()
         .from('profile')
         .select('*')
         .limit(1000);
@@ -132,7 +132,7 @@ const AdminNotifications = () => {
 
       if (sendToAll) {
         // Get all users
-        const { data: allUsers, error } = await supabase
+        const { data: allUsers, error } = await getSupabaseClient()
           .from('profile')
           .select('id, farm_uuid')
           .eq('is_active', true)
@@ -147,7 +147,7 @@ const AdminNotifications = () => {
           return;
         }
         // Get selected user's farm
-        const { data: user, error } = await supabase
+        const { data: user, error } = await getSupabaseClient()
           .from('profile')
           .select('id, farm_uuid')
           .eq('id', selectedUserId)
@@ -172,7 +172,7 @@ const AdminNotifications = () => {
           is_read: false
         }));
 
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('notifications')
           .insert(notificationsToInsert);
 

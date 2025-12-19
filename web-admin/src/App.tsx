@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { supabase } from './lib/supabaseClient';
+import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
@@ -47,10 +47,10 @@ function App() {
 
   useEffect(() => {
     const checkSession = async () => {
-      if (!supabase) return;
+      if (!getSupabaseClient()) return;
       try {
-        // Check for Supabase session
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Check for getSupabaseClient() session
+        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
         
         if (session && !error) {
           // Skip profile check for admin users (team@sproutify.app)
@@ -68,7 +68,7 @@ function App() {
           }
 
           // Regular user - verify session and get user profile
-          const { data: profile, error: profileError } = await supabase
+          const { data: profile, error: profileError } = await getSupabaseClient()
             .from('profile')
             .select('*, farms(*)')
             .eq('id', session.user.id)
@@ -109,8 +109,8 @@ function App() {
     checkSession();
 
     // Listen for auth state changes
-    if (!supabase) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    if (!getSupabaseClient()) return;
+    const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_session');
         setIsAuthenticated(false);
@@ -146,7 +146,7 @@ function App() {
         <Route path="/admin-portal" element={
           <RequireAdmin>
             <AdminLayout onLogout={async () => {
-              if (supabase) await supabase.auth.signOut();
+              if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
               localStorage.removeItem('sproutify_admin_session');
             }} />
           </RequireAdmin>
@@ -169,7 +169,7 @@ function App() {
 
         <Route path="/" element={
           isAuthenticated ? <Layout onLogout={async () => {
-            if (supabase) await supabase.auth.signOut();
+            if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
             localStorage.removeItem('sproutify_session');
             setIsAuthenticated(false);
           }} /> : <Navigate to="/login" />

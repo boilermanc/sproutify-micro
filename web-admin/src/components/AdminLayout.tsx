@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -26,7 +26,7 @@ const AdminLayout = ({ onLogout }: AdminLayoutProps) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut();
+    if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
     localStorage.removeItem('sproutify_admin_session');
     onLogout();
     navigate('/admin-portal/login');

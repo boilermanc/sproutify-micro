@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Package, Edit, Trash2, Plus, Search, Tag } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -66,7 +66,7 @@ const ProductsPage = () => {
       }
 
       // Fetch products with variants
-      const { data: productsData, error: productsError } = await supabase
+      const { data: productsData, error: productsError } = await getSupabaseClient()
         .from('products')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -77,7 +77,7 @@ const ProductsPage = () => {
       // Fetch variants for each product
       if (productsData && productsData.length > 0) {
         const productIds = productsData.map(p => p.product_id);
-        const { data: variantsData, error: variantsError } = await supabase
+        const { data: variantsData, error: variantsError } = await getSupabaseClient()
           .from('product_variants')
           .select('*')
           .in('product_id', productIds)
@@ -124,7 +124,7 @@ const ProductsPage = () => {
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabaseClient().auth.getUser();
 
       const payload = {
         farm_uuid: farmUuid,
@@ -135,7 +135,7 @@ const ProductsPage = () => {
         created_by: user?.id || null,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .insert([payload]);
 
@@ -173,7 +173,7 @@ const ProductsPage = () => {
         product_type: editingProduct.product_type,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .update(payload)
         .eq('product_id', editingProduct.product_id)
@@ -202,7 +202,7 @@ const ProductsPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Soft delete by setting is_active to false
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .update({ is_active: false })
         .eq('product_id', product.product_id)

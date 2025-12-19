@@ -385,54 +385,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                     }
                   }
                   
-                  // Add a separate watering task if needed
-                  if (needsWateringToday && wateringAction) {
-                    // Check if this watering task already exists
-                    const wateringExistsInView = tasksData?.some((t: any) => {
-                      const tRecipeId = t.recipe_id || t.recipeId;
-                      const tAction = t.task_name || t.action;
-                      const tTrayIds = Array.isArray(t.tray_ids) ? t.tray_ids : (t.tray_id ? [t.tray_id] : []);
-                      return tRecipeId === recipeId && 
-                             tAction === wateringAction &&
-                             t.task_source === 'tray_step' &&
-                             tTrayIds.includes(tray.tray_id);
-                    });
-                    
-                    if (!wateringExistsInView) {
-                      // Find or create aggregated watering task
-                      const existingWateringTask = supplementalTasks.find(t => 
-                        t.recipeId === recipeId && 
-                        t.action === wateringAction &&
-                        t.stepId === currentStep.step_id
-                      );
-
-                      if (existingWateringTask) {
-                        // Add tray to existing watering task
-                        existingWateringTask.trayIds.push(tray.tray_id);
-                        existingWateringTask.trays += 1;
-                        existingWateringTask.traysRemaining = (existingWateringTask.traysRemaining || 0) + 1;
-                      } else {
-                        // Create new aggregated watering task
-                        supplementalTasks.push({
-                          id: `tray_step-${wateringAction}-${recipe.variety_name || recipe.recipe_name || 'Unknown'}-${taskDate}`,
-                          action: wateringAction,
-                          crop: recipe.variety_name || recipe.recipe_name || 'Unknown',
-                          batchId: tray.batch_id ? `B-${tray.batch_id}` : 'N/A',
-                          location: tray.location || 'Not set',
-                          dayCurrent: daysSinceSow,
-                          dayTotal: totalDays,
-                          trays: 1,
-                          traysRemaining: 1,
-                          status: 'pending',
-                          trayIds: [tray.tray_id],
-                          recipeId: recipeId,
-                          stepId: currentStep.step_id,
-                          stepDescription: `${stepName} - ${wateringAction}`,
-                          taskSource: 'tray_step',
-                        });
-                      }
-                    }
-                  }
+                  // NOTE: Watering tasks are NOT generated here in supplemental tasks.
+                  // They are generated separately in the dedicated watering task logic below
+                  // (around line 799+) which properly checks for Growing phase and water_frequency.
                 }
               }
             }
@@ -918,22 +873,37 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                   .in('tray_id', trayIds);
 
                 // Create a map of tray_id -> future harvest step exists
+                // Also create maps for day calculation: min (seeding) and max (harvest) scheduled dates
                 const trayHasFutureHarvest = new Map<number, boolean>();
+                const trayMinDates = new Map<number, Date>(); // tray_id -> MIN(scheduled_date) = seeding/first step
+                const trayMaxDates = new Map<number, Date>(); // tray_id -> MAX(scheduled_date) = harvest step
                 if (!allTrayStepsError && allTrayStepsForTrays) {
                   allTrayStepsForTrays.forEach((ts: any) => {
                     const step = ts.steps;
                     if (!step) return;
 
+                    const scheduledDate = parseLocalDate(ts.scheduled_date);
+                    if (!scheduledDate) return;
+
                     const stepName = (step.step_name || '').trim().toLowerCase();
                     const isHarvestStep = stepName.includes('harvest');
 
+                    // Track min and max scheduled dates for each tray (for day calculation)
+                    const currentMin = trayMinDates.get(ts.tray_id);
+                    const currentMax = trayMaxDates.get(ts.tray_id);
+                    
+                    if (!currentMin || scheduledDate < currentMin) {
+                      trayMinDates.set(ts.tray_id, scheduledDate);
+                    }
+                    if (!currentMax || scheduledDate > currentMax) {
+                      trayMaxDates.set(ts.tray_id, scheduledDate);
+                    }
+
+                    // Track future harvest for filtering
                     if (isHarvestStep) {
-                      const scheduledDate = parseLocalDate(ts.scheduled_date);
-                      if (scheduledDate) {
-                        const scheduledDateStr = formatDateString(scheduledDate);
-                        if (scheduledDateStr > todayStr) {
-                          trayHasFutureHarvest.set(ts.tray_id, true);
-                        }
+                      const scheduledDateStr = formatDateString(scheduledDate);
+                      if (scheduledDateStr > todayStr) {
+                        trayHasFutureHarvest.set(ts.tray_id, true);
                       }
                     }
                   });
@@ -1039,7 +1009,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                     uniqueTrayIdsByRecipe[recipeId].add(ts.tray_id);
                     trayStepInfoByRecipe[recipeId].set(ts.tray_id, {
                       tray_id: ts.tray_id,
-                      step: step
+                      step: step,
+                      growStepScheduledDate: scheduledDate // Store grow step scheduled_date for day calculation
                     });
                   }
                 });
@@ -1143,6 +1114,46 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                     ? `${waterFrequency} - ${waterMethod}`
                     : waterFrequency;
 
+                  // Calculate day progress for each tray (from seeding to harvest)
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const dayProgress: Array<{ dayCurrent: number; dayTotal: number }> = [];
+                  
+                  recipeTrays.forEach((rt: any) => {
+                    const minDate = trayMinDates.get(rt.tray_id); // First step/seeding date
+                    const maxDate = trayMaxDates.get(rt.tray_id); // Harvest date
+                    
+                    if (minDate && maxDate) {
+                      // Calculate day_current: CURRENT_DATE - MIN(scheduled_date) + 1 (days since seeding)
+                      const daysSinceSeeding = Math.max(1, Math.floor((today.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+                      
+                      // Calculate day_total: MAX(scheduled_date) - MIN(scheduled_date) (seed to harvest)
+                      const totalDays = Math.max(1, Math.floor((maxDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24)));
+                      
+                      dayProgress.push({
+                        dayCurrent: daysSinceSeeding,
+                        dayTotal: totalDays
+                      });
+                    }
+                  });
+                  
+                  // Aggregate day progress: use minimum values (earliest day) if trays vary
+                  let dayCurrent: number;
+                  let dayTotal: number;
+                  
+                  if (dayProgress.length === 0) {
+                    // Fallback if no progress calculated
+                    dayCurrent = 0;
+                    dayTotal = 0;
+                  } else {
+                    const dayCurrents = dayProgress.map(p => p.dayCurrent);
+                    const dayTotals = dayProgress.map(p => p.dayTotal);
+                    
+                    // Use minimum values (earliest day) as requested
+                    dayCurrent = Math.min(...dayCurrents);
+                    dayTotal = Math.min(...dayTotals);
+                  }
+
                   // Group by recipe and create task
                   const trayIds = recipeTrays.map((rt: any) => rt.tray_id);
                   const taskId = `water-${recipeId}-${recipeName}-${targetDateStr}`;
@@ -1153,8 +1164,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                     crop: recipeName,
                     batchId: 'N/A',
                     location: 'Not set',
-                    dayCurrent: 0,
-                    dayTotal: 0,
+                    dayCurrent: dayCurrent,
+                    dayTotal: dayTotal,
                     trays: recipeTrays.length,
                     status: 'pending',
                     trayIds: trayIds,

@@ -28,7 +28,8 @@ import {
   X,
   ArrowRight,
   AlertTriangle,
-  Sparkles
+  Sparkles,
+  ChevronDown
 } from 'lucide-react';
 import { useOnboarding } from '../hooks/useOnboarding';
 import WelcomeModal from '../components/onboarding/WelcomeModal';
@@ -54,7 +55,14 @@ interface InsightData {
 }
 
 const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightData | null, isVisible: boolean, onClose: () => void, navigate: (path: string) => void }) => {
-  const hasData = data && (data.opportunity || data.risk || data.inventory);
+  const [expandedAction, setExpandedAction] = useState<string | null>(null);
+  
+  // Debug: Log the data being received (only when data actually changes)
+  useEffect(() => {
+    if (data) {
+      console.log('[DEBUG] SageBriefing received data:', data);
+    }
+  }, [data]);
   
   // Use real data or show empty state
   const insights = {
@@ -76,6 +84,168 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
     }
   };
 
+  // Expandable Action Button Component with Popup Modal
+  const ExpandableActionButton = ({ 
+    action, 
+    actionUrl, 
+    type, 
+    colorClasses 
+  }: { 
+    action: string; 
+    actionUrl?: string; 
+    type: 'opportunity' | 'risk' | 'inventory';
+    colorClasses: {
+      bg: string;
+      border: string;
+      text: string;
+      hoverBg: string;
+      hoverText: string;
+    };
+  }) => {
+    const isExpanded = expandedAction === type;
+
+    const handleClick = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setExpandedAction(prev => prev === type ? null : type);
+    }, [type]);
+
+    const handleClose = useCallback((e?: React.MouseEvent) => {
+      if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      setExpandedAction(prev => prev === type ? null : prev);
+    }, [type]);
+
+    return (
+      <>
+        <motion.div
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ duration: 0.2 }}
+        >
+          <Button 
+            variant="outline" 
+            className={`w-full justify-center ${colorClasses.bg} ${colorClasses.border} ${colorClasses.text} ${colorClasses.hoverBg} ${colorClasses.hoverText} border-dashed py-2 px-3 cursor-pointer transition-all duration-300`}
+            size="sm"
+            onClick={handleClick}
+          >
+            <span className="font-medium">Action</span>
+            <motion.div
+              animate={{ rotate: isExpanded ? 180 : 0 }}
+              transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+              className="ml-2"
+            >
+              <ChevronDown size={14} />
+            </motion.div>
+          </Button>
+        </motion.div>
+
+        {/* Popup Modal - styled like Daily Briefing, positioned over the briefing */}
+        <AnimatePresence mode="wait">
+          {isExpanded && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
+                onClick={handleClose}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+              
+              {/* Modal - positioned over daily briefing */}
+              <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  transition={{ 
+                    duration: 0.35,
+                    ease: [0.4, 0, 0.2, 1],
+                    type: "spring",
+                    stiffness: 300,
+                    damping: 30
+                  }}
+                  className="w-full max-w-2xl pointer-events-auto"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="relative rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden"
+                  >
+                    {/* Background Decor - matching Daily Briefing */}
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
+
+                    {/* Header - matching Daily Briefing style */}
+                    <div className="p-6 border-b border-white/5 flex justify-between items-start bg-white/5">
+                      <div className="flex gap-4">
+                        <div className={`h-12 w-12 rounded-2xl ${colorClasses.bg} flex items-center justify-center shadow-lg`}>
+                          <Sparkles className={`${colorClasses.text} h-6 w-6`} />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-bold text-white tracking-tight">Action Required</h2>
+                          <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
+                            <span>Click to take action</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        onClick={handleClose}
+                        className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+                      >
+                        <X size={20} />
+                      </Button>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6">
+                      <p className={`${colorClasses.text} text-sm leading-relaxed mb-6`}>
+                        {action}
+                      </p>
+                      
+                      {actionUrl && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                        >
+                          <Button
+                            variant="outline"
+                            size="lg"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClose();
+                              navigate(actionUrl);
+                            }}
+                            className={`w-full ${colorClasses.bg} ${colorClasses.border} ${colorClasses.text} ${colorClasses.hoverBg} ${colorClasses.hoverText} border-solid`}
+                          >
+                            Take Action
+                            <ArrowRight size={16} className="ml-2" />
+                          </Button>
+                        </motion.div>
+                      )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              </div>
+            </>
+          )}
+        </AnimatePresence>
+      </>
+    );
+  };
+
   if (!isVisible) return (
     <div className="flex justify-end mb-6 animate-in fade-in slide-in-from-top-2">
       <Button 
@@ -84,7 +254,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
         onClick={onClose} // Actually re-opens it in this logic context
         className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 gap-2"
       >
-        <Sprout size={16} /> Show Morning Briefing
+        <Sprout size={16} /> Show Daily Briefing
       </Button>
     </div>
   );
@@ -107,7 +277,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
             <Sparkles className="text-white h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">Morning Briefing</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">Daily Briefing</h2>
             <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
               <span>{insights.date}</span>
               <span className="w-1 h-1 rounded-full bg-slate-600" />
@@ -128,28 +298,8 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
         </Button>
       </div>
 
-      {/* Insights Grid or Empty State */}
-      {!hasData ? (
-        <div className="p-12 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800/50 mb-4">
-            <Sparkles className="h-8 w-8 text-slate-400" />
-          </div>
-          <h3 className="text-lg font-semibold text-slate-200 mb-2">No insights for today</h3>
-          <p className="text-sm text-slate-400 mb-6 max-w-md mx-auto leading-relaxed">
-            Daily insights will appear here once you start tracking trays, harvests, and orders. 
-            This is normal for new farms and will populate as you use the system.
-          </p>
-          <Button 
-            variant="outline" 
-            className="bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200"
-            onClick={() => navigate('/trays')}
-          >
-            Get Started
-            <ArrowRight size={14} className="ml-2" />
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
+      {/* Insights Grid - Always show the three cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
           
           {/* 1. Opportunity */}
           <div className="p-6 group hover:bg-white/[0.02] transition-colors">
@@ -163,22 +313,18 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
             <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
               {insights.opportunity.message}
             </p>
-            <Button 
-              variant="outline" 
-              className="w-full justify-between bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
-              size="sm"
-              onClick={() => {
-                if (insights.opportunity.actionUrl) {
-                  navigate(insights.opportunity.actionUrl);
-                } else {
-                  // Default navigation based on insight type
-                  navigate('/reports');
-                }
+            <ExpandableActionButton
+              action={insights.opportunity.action}
+              actionUrl={insights.opportunity.actionUrl || '/reports'}
+              type="opportunity"
+              colorClasses={{
+                bg: 'bg-emerald-500/10',
+                border: 'border-emerald-500/20',
+                text: 'text-emerald-300',
+                hoverBg: 'hover:bg-emerald-500/20',
+                hoverText: 'hover:text-emerald-200'
               }}
-            >
-              <span className="flex-1 pr-2 break-words">{insights.opportunity.action}</span>
-              <ArrowRight size={14} className="flex-shrink-0" />
-            </Button>
+            />
           </div>
 
           {/* 2. Risk */}
@@ -193,22 +339,18 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
             <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
               {insights.risk.message}
             </p>
-            <Button 
-              variant="outline" 
-              className="w-full justify-between bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
-              size="sm"
-              onClick={() => {
-                if (insights.risk.actionUrl) {
-                  navigate(insights.risk.actionUrl);
-                } else {
-                  // Default navigation based on insight type
-                  navigate('/trays');
-                }
+            <ExpandableActionButton
+              action={insights.risk.action}
+              actionUrl={insights.risk.actionUrl || '/trays'}
+              type="risk"
+              colorClasses={{
+                bg: 'bg-amber-500/10',
+                border: 'border-amber-500/20',
+                text: 'text-amber-300',
+                hoverBg: 'hover:bg-amber-500/20',
+                hoverText: 'hover:text-amber-200'
               }}
-            >
-              <span className="flex-1 pr-2 break-words">{insights.risk.action}</span>
-              <ArrowRight size={14} className="flex-shrink-0" />
-            </Button>
+            />
           </div>
 
           {/* 3. Inventory */}
@@ -223,26 +365,21 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
             <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
               {insights.inventory.message}
             </p>
-            <Button 
-              variant="outline" 
-              className="w-full justify-between bg-blue-500/10 border-blue-500/20 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 border-dashed whitespace-normal text-left h-auto py-2 px-3 cursor-pointer"
-              size="sm"
-              onClick={() => {
-                if (insights.inventory.actionUrl) {
-                  navigate(insights.inventory.actionUrl);
-                } else {
-                  // Default navigation based on insight type
-                  navigate('/supplies');
-                }
+            <ExpandableActionButton
+              action={insights.inventory.action}
+              actionUrl={insights.inventory.actionUrl || '/supplies'}
+              type="inventory"
+              colorClasses={{
+                bg: 'bg-blue-500/10',
+                border: 'border-blue-500/20',
+                text: 'text-blue-300',
+                hoverBg: 'hover:bg-blue-500/20',
+                hoverText: 'hover:text-blue-200'
               }}
-            >
-              <span className="flex-1 pr-2 break-words">{insights.inventory.action}</span>
-              <ArrowRight size={14} className="flex-shrink-0" />
-            </Button>
+            />
           </div>
 
         </div>
-      )}
     </motion.div>
   );
 };
@@ -302,6 +439,7 @@ const Dashboard = () => {
   const [showBriefing, setShowBriefing] = useState(true);
   const [briefingData, setBriefingData] = useState<InsightData | null>(null);
   const insightsTableExistsRef = useRef<boolean | null>(null); // null = unknown, true = exists, false = doesn't exist
+  const isFetchingRef = useRef<boolean>(false); // Prevent multiple simultaneous fetches
   
   // Refs for chart containers
   const barChartRef = useRef<HTMLDivElement>(null);
@@ -337,12 +475,20 @@ const Dashboard = () => {
 
   // --- Data Fetching Logic ---
   const fetchDashboardData = useCallback(async (showLoadingState = false) => {
+    // Prevent multiple simultaneous fetches
+    if (isFetchingRef.current) {
+      console.log('[DEBUG] Fetch already in progress, skipping...');
+      return;
+    }
+    
+    isFetchingRef.current = true;
     if (showLoadingState) setIsLoading(true);
     
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
         setIsLoading(false);
+        isFetchingRef.current = false;
         return;
       }
 
@@ -500,21 +646,22 @@ const Dashboard = () => {
         setRecentActivity(activityData);
       }
 
-      // 4. Fetch Daily Insight (gracefully handle if no data exists)
+      // 4. Fetch Daily Insight from daily_insights table (populated by n8n each morning)
       // Skip if we've already determined the table doesn't exist
       if (insightsTableExistsRef.current !== false) {
         const todayStr = new Date().toISOString().split('T')[0];
+        console.log('[DEBUG] Querying daily_insights for date:', todayStr, 'farm_uuid:', farmUuid);
+        
+        // Query for today's insight
         const { data: insightData, error: insightError } = await supabase
           .from('daily_insights')
-          .select('content')
+          .select('content, date')
           .eq('farm_uuid', farmUuid)
           .eq('date', todayStr)
-          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 when no row exists
+          .maybeSingle();
 
-        // Handle errors gracefully - 406 means table doesn't exist or isn't accessible
-        // This is expected for new farms that don't have the daily_insights feature set up yet
+        // Handle errors gracefully
         if (insightError) {
-          // Check if it's a 406 or table not found error - these are expected
           const errorMessage = insightError.message || '';
           const errorCode = insightError.code || '';
           const isExpectedError = 
@@ -524,24 +671,44 @@ const Dashboard = () => {
             errorMessage.includes('not found') ||
             errorMessage.includes('does not exist');
           
-          // Mark table as non-existent if we get a 406-related error to skip future requests
+          // Mark table as non-existent if we get a 406-related error
           if (errorMessage.includes('406') || errorMessage.includes('Not Acceptable')) {
             insightsTableExistsRef.current = false;
           }
           
           if (!isExpectedError) {
-            // Only log unexpected errors
-            console.debug('Daily insights error:', errorMessage);
+            console.error('[DEBUG] Daily insights error:', errorMessage, errorCode);
           }
           setBriefingData(null);
         } else {
           // Success - table exists
           insightsTableExistsRef.current = true;
+          console.log('[DEBUG] Insight data received:', insightData);
+          
           if (insightData && insightData.content) {
-            setBriefingData(insightData.content as InsightData);
+            // content is jsonb, so Supabase returns it as an object already
+            // Just cast it to InsightData type
+            const content = insightData.content as InsightData;
+            console.log('[DEBUG] Setting briefing data:', content);
+            setBriefingData(content);
           } else {
-            // No data for today - this is normal for new users
-            setBriefingData(null);
+            // No data for today - try to get the most recent insight as fallback
+            console.log('[DEBUG] No insight data for today, fetching most recent');
+            const { data: recentData, error: recentError } = await supabase
+              .from('daily_insights')
+              .select('content, date')
+              .eq('farm_uuid', farmUuid)
+              .order('date', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            
+            if (recentData && recentData.content) {
+              console.log('[DEBUG] Found recent insight from date:', recentData.date);
+              setBriefingData(recentData.content as InsightData);
+            } else {
+              console.log('[DEBUG] No insights found in database');
+              setBriefingData(null);
+            }
           }
         }
       } else {
@@ -608,7 +775,8 @@ const Dashboard = () => {
       if (!state.onboarding_completed && !state.wizard_started) setShowWelcomeModal(true);
       else if (state.wizard_started && !state.onboarding_completed) setShowWizard(true);
     }
-  }, [state.onboarding_completed, state.wizard_started, fetchDashboardData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.onboarding_completed, state.wizard_started]);
 
   // 2. Refetch on Focus or Route Change (Fixes the "Refresh Issue")
   useEffect(() => {
@@ -623,7 +791,8 @@ const Dashboard = () => {
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [location.pathname, fetchDashboardData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   // --- Handlers ---
   const handleManualRefresh = () => {

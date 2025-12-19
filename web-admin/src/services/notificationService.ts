@@ -15,6 +15,7 @@ interface NotificationPreferences {
  * Check a specific supply for low stock and create notification if needed
  */
 export const checkSupplyStock = async (supplyId: number) => {
+  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -105,6 +106,7 @@ export const checkSupplyStock = async (supplyId: number) => {
  * Check for low stock items and create notifications
  */
 export const checkLowStockNotifications = async () => {
+  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -221,6 +223,7 @@ export const checkLowStockNotifications = async () => {
  * Check for upcoming harvests and create reminder notifications
  */
 export const checkHarvestReminders = async () => {
+  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -333,6 +336,7 @@ export const checkHarvestReminders = async () => {
  * Create notification when a new order (tray with customer) is created
  */
 export const notifyNewOrder = async (trayId: number, customerName?: string) => {
+  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;
@@ -378,6 +382,7 @@ export const notifyNewOrder = async (trayId: number, customerName?: string) => {
  * Check for order updates and create notifications
  */
 export const checkOrderUpdates = async () => {
+  if (!supabase) return;
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return;

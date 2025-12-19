@@ -26,7 +26,7 @@ const AdminLayout = ({ onLogout }: AdminLayoutProps) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
     localStorage.removeItem('sproutify_admin_session');
     onLogout();
     navigate('/admin-portal/login');

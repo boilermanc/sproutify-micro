@@ -47,6 +47,7 @@ function App() {
 
   useEffect(() => {
     const checkSession = async () => {
+      if (!supabase) return;
       try {
         // Check for Supabase session
         const { data: { session }, error } = await supabase.auth.getSession();
@@ -108,6 +109,7 @@ function App() {
     checkSession();
 
     // Listen for auth state changes
+    if (!supabase) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_session');
@@ -144,7 +146,7 @@ function App() {
         <Route path="/admin-portal" element={
           <RequireAdmin>
             <AdminLayout onLogout={async () => {
-              await supabase.auth.signOut();
+              if (supabase) await supabase.auth.signOut();
               localStorage.removeItem('sproutify_admin_session');
             }} />
           </RequireAdmin>
@@ -167,7 +169,7 @@ function App() {
 
         <Route path="/" element={
           isAuthenticated ? <Layout onLogout={async () => {
-            await supabase.auth.signOut();
+            if (supabase) await supabase.auth.signOut();
             localStorage.removeItem('sproutify_session');
             setIsAuthenticated(false);
           }} /> : <Navigate to="/login" />

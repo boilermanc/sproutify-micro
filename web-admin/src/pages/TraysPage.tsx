@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { checkHarvestReminders } from '../services/notificationService';
 import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
 import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -44,11 +44,18 @@ const TraysPage = () => {
   const [trayDetails, setTrayDetails] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [newTray, setNewTray] = useState({
+  const [newTray, setNewTray] = useState<{
+    recipe_id: string;
+    quantity: number;
+    seed_date: string;
+    location: string;
+    batch_id?: string;
+  }>({
     recipe_id: '',
     quantity: 1,
     seed_date: new Date().toISOString().split('T')[0],
     location: '',
+    batch_id: '',
   });
   // Batch selection helpers (setter-only to avoid unused state)
   const [, setAvailableBatches] = useState<any[]>([]);
@@ -74,7 +81,7 @@ const TraysPage = () => {
 
       // Fetch trays with recipes join, and join varieties to get variety name
       // Note: seedbatches join removed - will fetch separately to avoid column name issues
-      let query = supabase
+      let query = getSupabaseClient()
         .from('trays')
         .select(`
           *,
@@ -119,7 +126,7 @@ const TraysPage = () => {
       
       let batchesMap: Record<number, any> = {};
       if (batchIds.length > 0) {
-        const { data: batchesData } = await supabase
+        const { data: batchesData } = await getSupabaseClient()
           .from('seedbatches')
           .select('batchid, varietyid')
           .in('batchid', batchIds);
@@ -131,7 +138,7 @@ const TraysPage = () => {
         
         let varietiesMap: Record<number, any> = {};
         if (varietyIds.length > 0) {
-          const { data: varietiesData } = await supabase
+          const { data: varietiesData } = await getSupabaseClient()
             .from('varieties')
             .select('varietyid, name')
             .in('varietyid', varietyIds);
@@ -159,7 +166,7 @@ const TraysPage = () => {
       
       let customersMap: Record<number, string> = {};
       if (customerIds.length > 0) {
-        const { data: customersData } = await supabase
+        const { data: customersData } = await getSupabaseClient()
           .from('customers')
           .select('customerid, name')
           .in('customerid', customerIds);
@@ -180,7 +187,7 @@ const TraysPage = () => {
         const recipeIdsForMatching = [...new Set(traysWithoutCustomer.map((t: any) => t.recipe_id))];
         
         if (recipeIdsForMatching.length > 0) {
-          const { data: stepsForMatching } = await supabase
+          const { data: stepsForMatching } = await getSupabaseClient()
             .from('steps')
             .select('recipe_id, duration, duration_unit, sequence_order')
             .in('recipe_id', recipeIdsForMatching);
@@ -219,7 +226,7 @@ const TraysPage = () => {
         }
         
         // Fetch active standing orders with their customers
-        const { data: standingOrdersData } = await supabase
+        const { data: standingOrdersData } = await getSupabaseClient()
           .from('standing_orders')
           .select(`
             standing_order_id,
@@ -231,14 +238,14 @@ const TraysPage = () => {
         
         if (standingOrdersData && standingOrdersData.length > 0) {
           // Fetch product_recipe_mapping to link recipes to products
-          const { data: productMappings } = await supabase
+          const { data: productMappings } = await getSupabaseClient()
             .from('product_recipe_mapping')
             .select('product_id, recipe_id')
             .in('recipe_id', recipeIdsForMatching);
           
           // Fetch standing_order_items to get products
           const standingOrderIds = standingOrdersData.map((so: any) => so.standing_order_id);
-          const { data: standingOrderItems } = await supabase
+          const { data: standingOrderItems } = await getSupabaseClient()
             .from('standing_order_items')
             .select('standing_order_id, product_id')
             .in('standing_order_id', standingOrderIds);
@@ -307,7 +314,7 @@ const TraysPage = () => {
       const recipeGrowTimes: Record<number, number> = {};
       
       if (recipeIds.length > 0) {
-        const { data: allSteps, error: stepsError } = await supabase
+        const { data: allSteps, error: stepsError } = await getSupabaseClient()
           .from('steps')
           .select('*')
           .in('recipe_id', recipeIds);
@@ -365,7 +372,7 @@ const TraysPage = () => {
     console.log('Active tray IDs:', activeTrayIds);
 
       if (activeTrayIds.length > 0) {
-        const { data: currentSteps, error: stepsError } = await supabase
+        const { data: currentSteps, error: stepsError } = await getSupabaseClient()
           .from('tray_steps')
           .select('tray_id, step_id, scheduled_date, status')
           .in('tray_id', activeTrayIds)
@@ -377,7 +384,7 @@ const TraysPage = () => {
 
         if (currentSteps && currentSteps.length > 0) {
           const stepIds = [...new Set(currentSteps.map((cs: any) => cs.step_id))];
-          const { data: stepsData } = await supabase
+          const { data: stepsData } = await getSupabaseClient()
             .from('steps')
             .select('step_id, step_name')
             .in('step_id', stepIds);
@@ -462,7 +469,7 @@ const TraysPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch farm's own recipes
-      const { data: farmRecipesData, error: recipesError } = await supabase
+      const { data: farmRecipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -475,7 +482,7 @@ const TraysPage = () => {
       }
 
       // Fetch enabled global recipes for this farm
-      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+      const { data: enabledGlobalRecipes, error: globalError } = await getSupabaseClient()
         .from('farm_global_recipes')
         .select(`
           global_recipe_id,
@@ -534,7 +541,7 @@ const TraysPage = () => {
 
       let recipeVarietiesMap: Record<number, any> = {};
       if (recipeVarietyIds.length > 0) {
-        const { data: varietiesData, error: varietiesError } = await supabase
+        const { data: varietiesData, error: varietiesError } = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name, seed_quantity_grams')
           .in('varietyid', recipeVarietyIds);
@@ -542,7 +549,7 @@ const TraysPage = () => {
         if (varietiesError) {
           console.error('Error fetching varieties:', varietiesError);
         } else if (varietiesData) {
-          recipeVarietiesMap = (varietiesData || []).reduce((acc, v) => {
+          recipeVarietiesMap = (varietiesData || []).reduce((acc: Record<number, any>, v: any) => {
             acc[v.varietyid] = v;
             return acc;
           }, {} as Record<number, any>);
@@ -564,7 +571,7 @@ const TraysPage = () => {
       });
 
       // Fetch all seedbatches with quantity
-      const { data: batchesData, error: batchesError } = await supabase
+      const { data: batchesData, error: batchesError } = await getSupabaseClient()
         .from('seedbatches')
         .select('batchid, varietyid, quantity, lot_number, purchasedate, status')
         .eq('farm_uuid', farmUuid)
@@ -586,13 +593,13 @@ const TraysPage = () => {
       if (batchVarietyIds.length > 0) {
         const missingVarietyIds = batchVarietyIds.filter(id => !recipeVarietiesMap[id]);
         if (missingVarietyIds.length > 0) {
-          const { data: batchVarietiesData } = await supabase
+          const { data: batchVarietiesData } = await getSupabaseClient()
             .from('varieties')
             .select('varietyid, name, seed_quantity_grams')
             .in('varietyid', missingVarietyIds);
           
           if (batchVarietiesData) {
-            batchVarietiesData.forEach(v => {
+            batchVarietiesData.forEach((v: any) => {
               recipeVarietiesMap[v.varietyid] = v;
             });
           }
@@ -693,7 +700,7 @@ const TraysPage = () => {
       setBatches(normalizedBatches);
 
       // Fetch customers
-      const { data: customersData, error: customersError } = await supabase
+      const { data: customersData, error: customersError } = await getSupabaseClient()
         .from('customers')
         .select('customerid, name')
         .eq('farm_uuid', farmUuid)
@@ -863,7 +870,7 @@ const TraysPage = () => {
 
       if (isGlobalRecipe && selectedRecipe.global_recipe_id) {
         // Copy the global recipe to create a farm recipe
-        const { data: newRecipeId, error: copyError } = await supabase.rpc('copy_global_recipe_to_farm', {
+        const { data: newRecipeId, error: copyError } = await getSupabaseClient().rpc('copy_global_recipe_to_farm', {
           p_global_recipe_id: selectedRecipe.global_recipe_id,
           p_farm_uuid: farmUuid,
           p_created_by: userId,
@@ -889,7 +896,7 @@ const TraysPage = () => {
       const varietyName = selectedRecipe.varieties?.name || selectedRecipe.variety_name || '';
 
       // Create seeding request (new workflow - creates a plan, not trays immediately)
-      const { error: requestError } = await supabase
+      const { error: requestError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .insert({
           farm_uuid: farmUuid,
@@ -942,7 +949,7 @@ const TraysPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch full tray details for editing
-      const { data: trayData, error } = await supabase
+      const { data: trayData, error } = await getSupabaseClient()
         .from('trays')
         .select(`
           *,
@@ -1013,7 +1020,7 @@ const TraysPage = () => {
         updatePayload.location = editingTray.location.trim() || null;
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('trays')
         .update(updatePayload)
         .eq('tray_id', editingTray.id)
@@ -1042,7 +1049,7 @@ const TraysPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch full tray details with recipe and steps
-      const { data: trayData, error } = await supabase
+      const { data: trayData, error } = await getSupabaseClient()
         .from('trays')
         .select(`
           *,
@@ -1068,7 +1075,7 @@ const TraysPage = () => {
       // Fetch steps for the recipe
       // Try with step_descriptions join first, fall back to simple query if it fails
       let stepsData: any[] | null = null;
-      const { data: stepsWithDescriptions, error: stepsJoinError } = await supabase
+      const { data: stepsWithDescriptions, error: stepsJoinError } = await getSupabaseClient()
         .from('steps')
         .select('*, step_descriptions!left(description_name, description_details)')
         .eq('recipe_id', trayData.recipes.recipe_id);
@@ -1076,7 +1083,7 @@ const TraysPage = () => {
       if (stepsJoinError) {
         console.warn('Could not join step_descriptions, falling back to simple query:', stepsJoinError);
         // Fall back to simple query without join
-        const { data: simpleSteps, error: simpleStepsError } = await supabase
+        const { data: simpleSteps, error: simpleStepsError } = await getSupabaseClient()
           .from('steps')
           .select('*')
           .eq('recipe_id', trayData.recipes.recipe_id);
@@ -1097,7 +1104,7 @@ const TraysPage = () => {
       }) : null;
 
       // Fetch tray_steps to see which steps are completed
-      const { data: trayStepsData, error: trayStepsError } = await supabase
+      const { data: trayStepsData, error: trayStepsError } = await getSupabaseClient()
         .from('tray_steps')
         .select('*')
         .eq('tray_id', tray.id)
@@ -1110,7 +1117,7 @@ const TraysPage = () => {
       // Fetch batch details if batch_id exists
       let batchDetails = null;
       if (trayData.batch_id) {
-        const { data: batchData } = await supabase
+        const { data: batchData } = await getSupabaseClient()
           .from('seedbatches')
           .select('batchid, varietyid, quantity, lot_number, purchasedate')
           .eq('batchid', trayData.batch_id)

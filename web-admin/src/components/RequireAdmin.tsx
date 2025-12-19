@@ -12,6 +12,11 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
 
   useEffect(() => {
     const checkAdminAccess = async () => {
+      if (!supabase) {
+        setIsAuthorized(false);
+        setIsLoading(false);
+        return;
+      }
       try {
         // Check for admin session in localStorage
         const adminSession = localStorage.getItem('sproutify_admin_session');
@@ -61,6 +66,7 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
     checkAdminAccess();
 
     // Listen for auth state changes
+    if (!supabase) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_admin_session');

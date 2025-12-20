@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 export interface Notification {
   notification_id: number;
@@ -27,7 +27,7 @@ export const useNotifications = () => {
       const { farmUuid, userId } = JSON.parse(sessionData);
 
       // Fetch notifications for the user or their farm
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('notifications')
         .select('*')
         .or(`user_id.eq.${userId},farm_uuid.eq.${farmUuid}`)
@@ -49,7 +49,7 @@ export const useNotifications = () => {
     fetchNotifications();
 
     // Set up real-time subscription for new notifications
-    const channel = supabase
+    const channel = getSupabaseClient()
       .channel('notifications')
       .on(
         'postgres_changes',
@@ -66,13 +66,13 @@ export const useNotifications = () => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      getSupabaseClient().removeChannel(channel);
     };
   }, [fetchNotifications]);
 
   const markAsRead = async (notificationId: number) => {
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('notifications')
         .update({ is_read: true })
         .eq('notification_id', notificationId);
@@ -99,7 +99,7 @@ export const useNotifications = () => {
 
       const { farmUuid, userId } = JSON.parse(sessionData);
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('notifications')
         .update({ is_read: true })
         .or(`user_id.eq.${userId},farm_uuid.eq.${farmUuid}`)
@@ -129,7 +129,7 @@ export const useNotifications = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { error } = await supabase.from('notifications').insert({
+      const { error } = await getSupabaseClient().from('notifications').insert({
         farm_uuid: farmUuid,
         user_id: userId || null,
         type,

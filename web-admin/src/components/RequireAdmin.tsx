@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 interface RequireAdminProps {
   children: React.ReactNode;
@@ -12,6 +12,11 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
 
   useEffect(() => {
     const checkAdminAccess = async () => {
+      if (!getSupabaseClient()) {
+        setIsAuthorized(false);
+        setIsLoading(false);
+        return;
+      }
       try {
         // Check for admin session in localStorage
         const adminSession = localStorage.getItem('sproutify_admin_session');
@@ -21,8 +26,8 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
           return;
         }
 
-        // Check Supabase session
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Check getSupabaseClient() session
+        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
         
         if (error || !session) {
           localStorage.removeItem('sproutify_admin_session');
@@ -33,7 +38,7 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
 
         // Verify email is team@sproutify.app
         if (session.user.email?.toLowerCase() !== 'team@sproutify.app') {
-          await supabase.auth.signOut();
+          await getSupabaseClient().auth.signOut();
           localStorage.removeItem('sproutify_admin_session');
           setIsAuthorized(false);
           setIsLoading(false);
@@ -44,7 +49,7 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
         const userRole = session.user.app_metadata?.role;
         if (userRole !== 'admin') {
           // Update role if needed
-          await supabase.auth.updateUser({
+          await getSupabaseClient().auth.updateUser({
             data: { role: 'admin' }
           });
         }
@@ -61,7 +66,8 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
     checkAdminAccess();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    if (!getSupabaseClient()) return;
+    const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_admin_session');
         setIsAuthorized(false);

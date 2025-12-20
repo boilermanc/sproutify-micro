@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { X } from 'lucide-react';
@@ -25,8 +25,8 @@ const AdminLogin = () => {
         return;
       }
 
-      // Authenticate with Supabase
-      const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
+      // Authenticate with getSupabaseClient()
+      const { data: { user, session }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
         email,
         password,
       });
@@ -43,7 +43,7 @@ const AdminLogin = () => {
       const userRole = user.app_metadata?.role;
       if (userRole !== 'admin') {
         // Set admin role if not already set (for initial setup)
-        await supabase.auth.updateUser({
+        await getSupabaseClient().auth.updateUser({
           data: { role: 'admin' }
         });
       }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from '../../../lib/supabaseClient';
+import { getSupabaseClient } from '../../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import './steps.css';
 
@@ -55,7 +55,7 @@ const VarietyStep = ({ onNext, onDataCreated }: VarietyStepProps) => {
         // No farm_uuid - varieties are global
       };
 
-      const { data, error: insertError } = await supabase
+      const { data, error: insertError } = await getSupabaseClient()
         .from('varieties')
         .insert(payload)
         .select()

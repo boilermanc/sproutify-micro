@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +45,7 @@ const AdminFarmsUsers = () => {
     setIsLoading(true);
     try {
       // Fetch farms with user counts
-      const { data: farmsData, error: farmsError } = await supabase
+      const { data: farmsData, error: farmsError } = await getSupabaseClient()
         .from('farms')
         .select('*')
         .limit(100);
@@ -62,7 +62,7 @@ const AdminFarmsUsers = () => {
       // Fetch user counts for each farm
       const farmsWithCounts: Farm[] = await Promise.all(
         (farmsData || []).map(async (farm: Record<string, unknown>) => {
-          const { count } = await supabase
+          const { count } = await getSupabaseClient()
             .from('profile')
             .select('*', { count: 'exact', head: true })
             .eq('farm_uuid', farm.farm_uuid as string);
@@ -82,7 +82,7 @@ const AdminFarmsUsers = () => {
       setFarms(farmsWithCounts);
 
       // Fetch users with farm names
-      const { data: usersData, error: usersError } = await supabase
+      const { data: usersData, error: usersError } = await getSupabaseClient()
         .from('profile')
         .select(`
           *,

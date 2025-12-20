@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Calculator } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -94,7 +94,7 @@ const MixCalculatorPage = () => {
       console.log('Fetching products for farm:', farmUuid);
 
       // Don't filter by is_active - let users see all products (matching ProductsPage behavior)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .select('product_id, product_name, product_type')
         .eq('farm_uuid', farmUuid)
@@ -132,7 +132,7 @@ const MixCalculatorPage = () => {
 
       // Fetch farm recipes with steps to calculate total days
       // Include global_recipe_id to look up expected_yield_oz
-      const { data: farmRecipesData, error: recipesError } = await supabase
+      const { data: farmRecipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_name, global_recipe_id')
         .eq('farm_uuid', farmUuid)
@@ -145,7 +145,7 @@ const MixCalculatorPage = () => {
       }
 
       // Fetch enabled global recipes with expected_yield_oz
-      const { data: enabledGlobalRecipes, error: globalError } = await supabase
+      const { data: enabledGlobalRecipes, error: globalError } = await getSupabaseClient()
         .from('farm_global_recipes')
         .select(`
           global_recipe_id,
@@ -166,7 +166,7 @@ const MixCalculatorPage = () => {
       }
 
       // Fetch all global recipes with expected_yield_oz for lookup by global_recipe_id
-      const { data: allGlobalRecipes, error: allGlobalError } = await supabase
+      const { data: allGlobalRecipes, error: allGlobalError } = await getSupabaseClient()
         .from('global_recipes')
         .select('global_recipe_id, recipe_name, variety_name, expected_yield_oz')
         .eq('is_active', true);
@@ -188,7 +188,7 @@ const MixCalculatorPage = () => {
       for (const recipe of farmRecipesData || []) {
         try {
           // Fetch steps using actual schema (duration, duration_unit, sequence_order)
-          const { data: stepsData, error: stepsError } = await supabase
+          const { data: stepsData, error: stepsError } = await getSupabaseClient()
             .from('steps')
             .select('duration, duration_unit, sequence_order')
             .eq('recipe_id', recipe.recipe_id);
@@ -304,7 +304,7 @@ const MixCalculatorPage = () => {
 
   const fetchProductMix = async (productId: number) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('product_recipe_mapping')
         .select(`
           *,

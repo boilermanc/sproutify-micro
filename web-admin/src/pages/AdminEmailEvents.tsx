@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ const AdminEmailEvents = () => {
     try {
       // Note: This assumes an email_events table exists
       // If it doesn't exist yet, this will show an empty state
-      const { data: eventsData, error: eventsError } = await supabase
+      const { data: eventsData, error: eventsError } = await getSupabaseClient()
         .from('email_events')
         .select('*')
         .order('created_at', { ascending: false })

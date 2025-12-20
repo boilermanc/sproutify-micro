@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 
@@ -32,7 +32,7 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
 
       // Fetch harvested trays with recipe and variety information
       // Note: order_items is not directly linked to trays, so we use recipe/variety data
-      const { data: traysData, error } = await supabase
+      const { data: traysData, error } = await getSupabaseClient()
         .from('trays')
         .select(`
           harvest_date,

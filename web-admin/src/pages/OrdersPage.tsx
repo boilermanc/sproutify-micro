@@ -9,7 +9,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { Edit, FileText, Plus, Search, Package, Calendar, DollarSign } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -209,7 +209,7 @@ const OrdersPage = () => {
       // Try to fetch from new orders table first
       let ordersFromTable: any[] = [];
       try {
-        const { data: ordersData, error: ordersError } = await supabase
+        const { data: ordersData, error: ordersError } = await getSupabaseClient()
           .from('orders')
           .select(`
             *,
@@ -246,7 +246,7 @@ const OrdersPage = () => {
       }
 
       // Also fetch legacy tray-based orders for backward compatibility
-      const { data: traysData, error } = await supabase
+      const { data: traysData, error } = await getSupabaseClient()
         .from('trays')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -261,7 +261,7 @@ const OrdersPage = () => {
       
       let customersMap: Record<number, string> = {};
       if (customerIds.length > 0) {
-        const { data: customersData } = await supabase
+        const { data: customersData } = await getSupabaseClient()
           .from('customers')
           .select('customerid, name')
           .in('customerid', customerIds);
@@ -351,7 +351,7 @@ const OrdersPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Actual DB columns: customerid, name (not customer_id, customer_name)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('customers')
         .select('*')
         .eq('farm_uuid', farmUuid);
@@ -394,7 +394,7 @@ const OrdersPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch full order details for editing
-      const { data: traysData, error } = await supabase
+      const { data: traysData, error } = await getSupabaseClient()
         .from('trays')
         .select('*')
         .in('tray_id', order.trayIds)
@@ -430,7 +430,7 @@ const OrdersPage = () => {
         : null;
 
       // Update customer_id for all trays in the order
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('trays')
         .update({ customer_id: newCustomerId })
         .in('tray_id', editingOrder.trayIds)
@@ -459,7 +459,7 @@ const OrdersPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch full tray details for this order
-      const { data: traysData, error } = await supabase
+      const { data: traysData, error } = await getSupabaseClient()
         .from('trays')
         .select(`
           *,
@@ -482,7 +482,7 @@ const OrdersPage = () => {
       }
 
       // Fetch customer details
-      const { data: customerData } = await supabase
+      const { data: customerData } = await getSupabaseClient()
         .from('customers')
         .select('*')
         .eq('customerid', order.customer_id)
@@ -510,13 +510,13 @@ const OrdersPage = () => {
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabaseClient().auth.getUser();
 
       // Calculate total amount
       const totalAmount = orderItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
 
       // Create order
-      const { data: orderData, error: orderError } = await supabase
+      const { data: orderData, error: orderError } = await getSupabaseClient()
         .from('orders')
         .insert([{
           farm_uuid: farmUuid,
@@ -546,7 +546,7 @@ const OrdersPage = () => {
           notes: item.notes || null,
         }));
 
-        const { error: itemsError } = await supabase
+        const { error: itemsError } = await getSupabaseClient()
           .from('order_items')
           .insert(itemsPayload);
 

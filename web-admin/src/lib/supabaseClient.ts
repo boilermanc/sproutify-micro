@@ -18,6 +18,15 @@ export const supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
+// Helper function to ensure supabase is not null
+// Throws an error if supabase is not configured
+export function getSupabaseClient(): SupabaseClient {
+  if (!supabase) {
+    throw new Error('Supabase client is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.');
+  }
+  return supabase;
+}
+
 export type Database = {
   public: {
     Tables: {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../lib/supabaseClient';
+import { getSupabaseClient } from '../../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import './steps.css';
 
@@ -24,7 +24,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
     if (varietyId) {
       const fetchVariety = async () => {
         // Actual DB column: varietyid, name (not variety_id, variety_name)
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name')
           .eq('varietyid', varietyId)
@@ -42,7 +42,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
-      const { data } = await supabase
+      const { data } = await getSupabaseClient()
         .from('vendors')
         .select('vendor_id, vendor_name')
         .eq('farm_uuid', farmUuid);
@@ -78,7 +78,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
         throw new Error('Variety ID is required');
       }
 
-      const { data, error: insertError } = await supabase
+      const { data, error: insertError } = await getSupabaseClient()
         .from('seedbatches')
         .insert({
           varietyid: varietyId, // Actual column: varietyid (FK to varieties.varietyid)
@@ -97,7 +97,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
       if (data && varietyId) {
         try {
           // Check if variety is already in farm catalog
-          const { data: existingCatalogEntry } = await supabase
+          const { data: existingCatalogEntry } = await getSupabaseClient()
             .from('farm_varieties')
             .select('*')
             .eq('farm_uuid', farmUuid)
@@ -106,7 +106,7 @@ const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchSt
 
           // If not in catalog, add it
           if (!existingCatalogEntry) {
-            const { error: catalogError } = await supabase
+            const { error: catalogError } = await getSupabaseClient()
               .from('farm_varieties')
               .insert({
                 farm_uuid: farmUuid,

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import SeedAnalyticsDashboard from '../components/reports/SeedAnalyticsDashboard';
 
 const SeedUsagePage = () => {
@@ -47,7 +47,7 @@ const SeedUsagePage = () => {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
 
-        const { data: txData, error } = await supabase
+        const { data: txData, error } = await getSupabaseClient()
           .from('seed_transactions')
           .select(`
             created_at,

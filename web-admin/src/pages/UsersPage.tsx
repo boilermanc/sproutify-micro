@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Trash2, UserPlus, Eye, EyeOff, Mail, Lock, User as UserIcon } from 'lucide-react';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -46,7 +46,7 @@ const UsersPage = () => {
 
         const { farmUuid } = JSON.parse(sessionData);
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('profile')
           .select('*')
           .eq('farm_uuid', farmUuid);
@@ -91,7 +91,7 @@ const UsersPage = () => {
       }
 
       const { farmUuid } = JSON.parse(sessionData);
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
 
       if (!session) {
         throw new Error('Not authenticated');

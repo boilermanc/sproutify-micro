@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Truck, Plus, Search, Building2, Mail, Phone, MapPin, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -39,7 +39,7 @@ const VendorsPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Actual DB columns likely: vendorid, vendorname (not vendor_id, vendor_name)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('vendors')
         .select('*')
         .eq('farm_uuid', farmUuid);
@@ -100,7 +100,7 @@ const VendorsPage = () => {
         is_active: true,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('vendors')
         .insert([payload]);
 
@@ -168,7 +168,7 @@ const VendorsPage = () => {
         is_active: editingVendor.is_active !== false,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('vendors')
         .update(updatePayload)
         .eq('vendorid', editingVendor.vendor_id || editingVendor.vendorid)

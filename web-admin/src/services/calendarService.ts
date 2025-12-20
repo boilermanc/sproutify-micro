@@ -1,5 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
-import { fetchOrderFulfillmentDetails, type OrderFulfillmentStatus } from './orderFulfillmentService';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 export interface CalendarDaySummary {
   farm_uuid: string;
@@ -33,9 +32,9 @@ export interface CalendarDayTask {
  * Parse a date string (YYYY-MM-DD) as a local date, not UTC
  * This prevents timezone shifts that cause dates to display as the previous day
  */
-const parseLocalDate = (dateStr: string | null | undefined): Date | null => {
+const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null => {
   if (!dateStr) return null;
-  
+
   // If it's already a Date object, return it
   if (dateStr instanceof Date) return dateStr;
   
@@ -71,7 +70,7 @@ export async function fetchCalendarMonth(
   const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
   // Fetch base calendar data from view
-  const { data: baseData, error: baseError } = await supabase
+  const { data: baseData, error: baseError } = await getSupabaseClient()
     .from('calendar_day_pivoted')
     .select('*')
     .eq('farm_uuid', farmUuid)
@@ -84,7 +83,7 @@ export async function fetchCalendarMonth(
   }
 
   // Also fetch harvest counts from planting_schedule_view
-  const { data: schedules, error: scheduleError } = await supabase
+  const { data: schedules, error: scheduleError } = await getSupabaseClient()
     .from('planting_schedule_view')
     .select('harvest_date, trays_needed')
     .eq('farm_uuid', farmUuid)
@@ -133,7 +132,7 @@ export async function fetchCalendarMonth(
     const queryEndDate = new Date(endDateObj);
     queryEndDate.setDate(queryEndDate.getDate() + 30); // Look forward 30 days for harvest dates
     
-    const { data: orderDetails } = await supabase
+    const { data: orderDetails } = await getSupabaseClient()
       .from('order_fulfillment_status')
       .select('sow_date, harvest_date, delivery_date, recipe_name, customer_name, recipe_id, trays_ready, trays_needed')
       .eq('farm_uuid', farmUuid)
@@ -227,7 +226,7 @@ export async function fetchCalendarMonth(
 
 export async function fetchDayTasks(farmUuid: string, date: string): Promise<CalendarDayTask[]> {
   // Fetch tasks from daily_flow_aggregated (tray steps, seeding requests, etc.)
-  const { data: flowTasks, error: flowError } = await supabase
+  const { data: flowTasks, error: flowError } = await getSupabaseClient()
     .from('daily_flow_aggregated')
     .select('*')
     .eq('farm_uuid', farmUuid)
@@ -251,7 +250,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
   const supplementalTasks: CalendarDayTask[] = [];
   try {
     // Fetch active trays directly
-    const { data: activeTrays, error: traysError } = await supabase
+    const { data: activeTrays, error: traysError } = await getSupabaseClient()
       .from('trays')
       .select(`
         tray_id,
@@ -276,7 +275,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
       
       if (recipeIds.length > 0) {
         // Fetch steps for these recipes
-        const { data: allSteps, error: stepsError } = await supabase
+        const { data: allSteps, error: stepsError } = await getSupabaseClient()
           .from('steps')
           .select('*')
           .in('recipe_id', recipeIds);
@@ -302,7 +301,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
 
           // Fetch tray_steps to check completion status
           const trayIds = traysWithRecipes.map((t: any) => t.tray_id);
-          const { data: trayStepsData } = await supabase
+          const { data: trayStepsData } = await getSupabaseClient()
             .from('tray_steps')
             .select('tray_id, step_id, completed, skipped, scheduled_date')
             .in('tray_id', trayIds)
@@ -447,7 +446,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
   const wateringTasks: CalendarDayTask[] = [];
   try {
     // Fetch active trays with recipes
-    const { data: activeTrays, error: traysError } = await supabase
+    const { data: activeTrays, error: traysError } = await getSupabaseClient()
       .from('trays')
       .select(`
         tray_id,
@@ -468,7 +467,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
 
       if (trayIds.length > 0 && recipeIds.length > 0) {
         // Fetch tray_steps with water_frequency
-        const { data: trayStepsRaw, error: trayStepsError } = await supabase
+        const { data: trayStepsRaw, error: trayStepsError } = await getSupabaseClient()
           .from('tray_steps')
           .select(`
             tray_id,
@@ -490,7 +489,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
 
         if (!trayStepsError && traySteps && traySteps.length > 0) {
           // Fetch all steps to find harvest steps
-          const { data: allRecipeSteps, error: stepsError } = await supabase
+          const { data: allRecipeSteps, error: stepsError } = await getSupabaseClient()
             .from('steps')
             .select('step_id, step_name, recipe_id, sequence_order')
             .in('recipe_id', recipeIds);
@@ -544,7 +543,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
             });
 
             // Check for completed watering tasks
-            const { data: completedWateringTasks, error: completedWateringError } = await supabase
+            const { data: completedWateringTasks, error: completedWateringError } = await getSupabaseClient()
               .from('task_completions')
               .select('recipe_id')
               .eq('farm_uuid', farmUuid)
@@ -571,9 +570,6 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
 
               const recipeTray = traysWithRecipes.find((t: any) => t.recipe_id === recipeId);
               const recipeName = (recipeTray?.recipes as any)?.recipe_name || 'Unknown';
-              const step = recipeTrays[0].step;
-              const waterFrequency = step.water_frequency || '';
-              const waterMethod = step.water_method || '';
 
               wateringTasks.push({
                 task_date: targetDateStr,
@@ -601,7 +597,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
   if (targetDate) {
     try {
       // Fetch schedules for seeding (sow_date = targetDate) and soaking (sow_date - soak_duration = targetDate)
-      const { data: allSchedules, error: scheduleError } = await supabase
+      const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
         .from('planting_schedule_view')
         .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, delivery_date')
         .eq('farm_uuid', farmUuid);
@@ -609,7 +605,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
       // Fetch recipe steps to calculate soak duration and total days
       const recipeIds = allSchedules ? [...new Set(allSchedules.map((s: any) => s.recipe_id).filter(Boolean))] : [];
       
-      const { data: allSteps, error: stepsError } = recipeIds.length > 0 ? await supabase
+      const { data: allSteps, error: stepsError } = recipeIds.length > 0 ? await getSupabaseClient()
         .from('steps')
         .select('*')
         .in('recipe_id', recipeIds) : { data: null, error: null };
@@ -647,7 +643,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
       }
       
       // Fetch completed seeding/soaking tasks to filter them out
-      const { data: completedTasks, error: completedTasksError } = await supabase
+      const { data: completedTasks, error: completedTasksError } = await getSupabaseClient()
         .from('task_completions')
         .select('recipe_id, task_type, task_date')
         .eq('farm_uuid', farmUuid)
@@ -664,7 +660,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
       }
       
       // Fetch existing tray_creation_requests to avoid duplicates
-      const { data: existingRequests, error: requestsError } = await supabase
+      const { data: existingRequests, error: requestsError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .select('recipe_id, seed_date, requested_at, farm_uuid')
         .eq('farm_uuid', farmUuid)
@@ -752,7 +748,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
         
         if (harvestSchedules && harvestSchedules.length > 0) {
           // Fetch active trays to validate harvest
-          const { data: activeTrays } = await supabase
+          const { data: activeTrays } = await getSupabaseClient()
             .from('trays')
             .select(`
               tray_id,
@@ -825,7 +821,7 @@ export async function fetchDayTasks(farmUuid: string, date: string): Promise<Cal
     const todayStr = formatDateString(today);
     
     // Get orders ONLY for the selected date's delivery date (aligned with daily flow)
-    const { data: orderDetails, error: orderError } = await supabase
+    const { data: orderDetails, error: orderError } = await getSupabaseClient()
       .from('order_fulfillment_status')
       .select('*')
       .eq('farm_uuid', farmUuid)

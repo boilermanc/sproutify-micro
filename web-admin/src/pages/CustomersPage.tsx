@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Building2, Mail, Phone, MapPin, Plus, Search, User, Calendar, FileText, DollarSign } from 'lucide-react';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -102,7 +102,7 @@ const CustomersPage = () => {
         farm_uuid: farmUuid,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('customers')
         .insert(insertPayload);
 
@@ -154,7 +154,7 @@ const CustomersPage = () => {
         delivery_address: editingCustomer.delivery_address || null,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('customers')
         .update(updatePayload)
         .eq('customerid', editingCustomer.customer_id)
@@ -181,7 +181,7 @@ const CustomersPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Actual DB columns: customerid, name (not customer_id, customer_name)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('customers')
         .select('*')
         .eq('farm_uuid', farmUuid);

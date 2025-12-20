@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Sprout, Package, Clock, AlertCircle, ChevronRight, Check } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { calculateStandingOrderSowDates } from '../services/predictiveScheduler';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -104,7 +104,7 @@ const PlantingSchedulePage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // 1. Fetch active standing orders with items
-      const { data: standingOrdersData, error: ordersError } = await supabase
+      const { data: standingOrdersData, error: ordersError } = await getSupabaseClient()
         .from('standing_orders')
         .select(`
           *,
@@ -124,7 +124,7 @@ const PlantingSchedulePage = () => {
       // 2. Fetch items for each standing order
       const ordersWithItems: StandingOrder[] = await Promise.all(
         standingOrdersData.map(async (order: any) => {
-          const { data: itemsData } = await supabase
+          const { data: itemsData } = await getSupabaseClient()
             .from('standing_order_items')
             .select(`
               *,
@@ -155,7 +155,7 @@ const PlantingSchedulePage = () => {
       );
 
       // 3. Fetch all recipes with their total days
-      const { data: recipesData, error: recipesError } = await supabase
+      const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_name')
         .eq('farm_uuid', farmUuid)
@@ -166,7 +166,7 @@ const PlantingSchedulePage = () => {
       // Calculate total days for each recipe
       const recipes: Recipe[] = await Promise.all(
         (recipesData || []).map(async (recipe: any) => {
-          const { data: stepsData } = await supabase
+          const { data: stepsData } = await getSupabaseClient()
             .from('steps')
             .select('duration, duration_unit, sequence_order')
             .eq('recipe_id', recipe.recipe_id);
@@ -207,7 +207,7 @@ const PlantingSchedulePage = () => {
         const productIds = [...new Set(order.items.map(item => item.product_id))];
 
         // Fetch product_recipe_mappings for these products
-        const { data: mappingsData } = await supabase
+        const { data: mappingsData } = await getSupabaseClient()
           .from('product_recipe_mapping')
           .select(`
             *,
@@ -319,7 +319,7 @@ const PlantingSchedulePage = () => {
       const recipeIds = [...new Set(allSchedules.map(s => s.recipe_id))];
       
       // Fetch all existing trays for these recipes (no date filter - we need all of them)
-      const { data: existingTrays, error: traysError } = await supabase
+      const { data: existingTrays, error: traysError } = await getSupabaseClient()
         .from('trays')
         .select('recipe_id, sow_date')
         .eq('farm_uuid', farmUuid)
@@ -330,7 +330,7 @@ const PlantingSchedulePage = () => {
       }
       
       // Fetch all completed sowing tasks for these recipes (no date filter - we need all of them)
-      const { data: completedTasks, error: tasksError } = await supabase
+      const { data: completedTasks, error: tasksError } = await getSupabaseClient()
         .from('task_completions')
         .select('recipe_id, task_date')
         .eq('farm_uuid', farmUuid)
@@ -524,7 +524,7 @@ const PlantingSchedulePage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch recipe to get variety_id and seed_quantity
-      const { data: recipeData, error: recipeError } = await supabase
+      const { data: recipeData, error: recipeError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit')
         .eq('recipe_id', schedule.recipe_id)
@@ -555,7 +555,7 @@ const PlantingSchedulePage = () => {
       }
 
       // Query available batches matching the requirements
-      let query = supabase
+      let query = getSupabaseClient()
         .from('seedbatches')
         .select(`
           batchid,
@@ -580,7 +580,7 @@ const PlantingSchedulePage = () => {
       // Fetch variety name separately
       let varietyName = recipeData.variety_name || '';
       if (recipeData.variety_id) {
-        const { data: varietyData } = await supabase
+        const { data: varietyData } = await getSupabaseClient()
           .from('varieties')
           .select('name')
           .eq('varietyid', recipeData.variety_id)
@@ -644,7 +644,7 @@ const PlantingSchedulePage = () => {
       const { farmUuid, userId } = JSON.parse(sessionData);
 
       // Fetch recipe to get variety name
-      const { data: recipeData, error: recipeError } = await supabase
+      const { data: recipeData, error: recipeError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_name, variety_name')
         .eq('recipe_id', seedingSchedule.recipe_id)
@@ -679,7 +679,7 @@ const PlantingSchedulePage = () => {
         sowDate: sowDateISO,
       });
 
-      const { error: requestError } = await supabase
+      const { error: requestError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .insert(requests);
 
@@ -692,7 +692,7 @@ const PlantingSchedulePage = () => {
 
       // Create task_completion record so daily flow knows this is done
       const sowDateStr = seedingDate; // Already in YYYY-MM-DD format from date input
-      const { error: completionError } = await supabase
+      const { error: completionError } = await getSupabaseClient()
         .from('task_completions')
         .upsert({
           farm_uuid: farmUuid,

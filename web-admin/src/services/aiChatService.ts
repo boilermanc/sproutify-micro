@@ -40,7 +40,7 @@ class AiChatService {
       const sessionId = this.sessionId || this.getOrCreateSessionId();
 
       // Send farm context in the payload (matches mobile app format)
-      // The Chat Trigger workflow needs farm_id to query Supabase correctly
+      // The Chat Trigger workflow needs farm_id to query getSupabaseClient() correctly
       const payload = [{
         message,
         farmId: farmId || '',

@@ -55,7 +55,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 import {
   fetchDailyTasks,
   completeTask,
@@ -236,7 +236,7 @@ export default function DailyFlow() {
       // Load available soaked seed
       // Note: available_soaked_seed view already filters by status='available', so we don't need to filter again
       if (farmUuid) {
-        const { data: soakedSeedData, error } = await supabase
+        const { data: soakedSeedData, error } = await getSupabaseClient()
           .from('available_soaked_seed')
           .select('*')
           .eq('farm_uuid', farmUuid)
@@ -288,7 +288,7 @@ export default function DailyFlow() {
   const pendingHistoryFetches = useRef<Set<string>>(new Set());
   
   const fetchActionHistory = async (task: DailyTask) => {
-    if (!task.standingOrderId || !task.deliveryDate || !supabase) return;
+    if (!task.standingOrderId || !task.deliveryDate || !getSupabaseClient()) return;
     
     const key = `${task.standingOrderId}-${task.deliveryDate}-${task.recipeId}`;
     
@@ -315,7 +315,7 @@ export default function DailyFlow() {
       
       const { farmUuid } = JSON.parse(sessionData);
       
-      const { data } = await supabase
+      const { data } = await getSupabaseClient()
         .from('order_fulfillment_actions')
         .select('*')
         .eq('farm_uuid', farmUuid)
@@ -354,9 +354,9 @@ export default function DailyFlow() {
       
       const { farmUuid } = JSON.parse(sessionData);
       
-      if (!supabase) return;
+      if (!getSupabaseClient()) return;
       
-      const { data } = await supabase
+      const { data } = await getSupabaseClient()
         .from('order_fulfillment_status')
         .select('recipe_id, recipe_name, trays_ready, harvest_date')
         .eq('farm_uuid', farmUuid)
@@ -435,7 +435,7 @@ export default function DailyFlow() {
         await fetchAvailableBatchesForRecipe(task);
         
         // Check if recipe has soak step
-        const { data: hasSoakData } = await supabase.rpc('recipe_has_soak', {
+        const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
           p_recipe_id: task.recipeId
         });
         
@@ -447,7 +447,7 @@ export default function DailyFlow() {
           const sessionData = localStorage.getItem('sproutify_session');
           if (sessionData) {
             const { farmUuid } = JSON.parse(sessionData);
-            const { data: soakedSeedData } = await supabase
+            const { data: soakedSeedData } = await getSupabaseClient()
               .from('available_soaked_seed')
               .select('*')
               .eq('farm_uuid', farmUuid)
@@ -465,7 +465,7 @@ export default function DailyFlow() {
       
       // For seed_request tasks, check if this is a soak variety and fetch relevant data
       if (task.requestId) {
-        const { data: requestData } = await supabase
+        const { data: requestData } = await getSupabaseClient()
           .from('tray_creation_requests')
           .select('recipe_id')
           .eq('request_id', task.requestId)
@@ -473,7 +473,7 @@ export default function DailyFlow() {
         
         if (requestData) {
           // Check if recipe has soak step
-          const { data: hasSoakData } = await supabase.rpc('recipe_has_soak', {
+          const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
             p_recipe_id: requestData.recipe_id
           });
           
@@ -486,7 +486,7 @@ export default function DailyFlow() {
             const sessionData = localStorage.getItem('sproutify_session');
             if (sessionData) {
               const { farmUuid } = JSON.parse(sessionData);
-              const { data: soakedSeedData } = await supabase
+              const { data: soakedSeedData } = await getSupabaseClient()
                 .from('available_soaked_seed')
                 .select('*')
                 .eq('farm_uuid', farmUuid)
@@ -597,7 +597,7 @@ export default function DailyFlow() {
       let requestVarietyName: string | null = null;
       
       if (task.requestId && (!recipeId || recipeId === 0)) {
-        const { data: requestData, error: requestError } = await supabase
+        const { data: requestData, error: requestError } = await getSupabaseClient()
           .from('tray_creation_requests')
           .select('recipe_id, recipe_name, variety_name')
           .eq('request_id', task.requestId)
@@ -629,7 +629,7 @@ export default function DailyFlow() {
 
       // Fetch recipe to get variety_id and seed_quantity
       // First try with is_active filter (active recipes)
-      let { data: recipeData, error: recipeError } = await supabase
+      let { data: recipeData, error: recipeError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit, is_active')
         .eq('recipe_id', recipeId)
@@ -639,7 +639,7 @@ export default function DailyFlow() {
       // If not found, try without is_active filter (in case recipe is inactive)
       if (!recipeData && !recipeError) {
         console.log('[DailyFlow] Recipe not found as active, checking if it exists as inactive...');
-        const { data: inactiveRecipe, error: inactiveError } = await supabase
+        const { data: inactiveRecipe, error: inactiveError } = await getSupabaseClient()
           .from('recipes')
           .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit, is_active')
           .eq('recipe_id', recipeId)
@@ -675,7 +675,7 @@ export default function DailyFlow() {
       } else if (requestVarietyName) {
         // Recipe not found, but we have variety_name from request - try to find variety by name
         console.log('[DailyFlow] Recipe not found, trying to find variety by name:', requestVarietyName);
-        const { data: varietyData, error: varietyError } = await supabase
+        const { data: varietyData, error: varietyError } = await getSupabaseClient()
           .from('varieties')
           .select('varietyid, name, seed_quantity_grams')
           .ilike('name', requestVarietyName)
@@ -714,7 +714,7 @@ export default function DailyFlow() {
       // This is the correct approach - batches are linked to varieties, not recipes
       console.log('[DailyFlow] Fetching batches for variety_id:', varietyId);
       
-      let query = supabase
+      let query = getSupabaseClient()
         .from('seedbatches')
         .select(`
           batchid,
@@ -740,7 +740,7 @@ export default function DailyFlow() {
       // Fetch variety name and seed_quantity_grams if we don't have them yet
       // Always fetch seed_quantity_grams from variety if we don't have it from recipe
       if (varietyId) {
-        const { data: varietyData } = await supabase
+        const { data: varietyData } = await getSupabaseClient()
           .from('varieties')
           .select('name, seed_quantity_grams')
           .eq('varietyid', varietyId)
@@ -877,7 +877,7 @@ export default function DailyFlow() {
 
     try {
       // Get original date from request
-      const { data: requestData } = await supabase
+      const { data: requestData } = await getSupabaseClient()
         .from('tray_creation_requests')
         .select('seed_date')
         .eq('request_id', rescheduleRequestDialog.task.requestId!)
@@ -1071,7 +1071,7 @@ export default function DailyFlow() {
       // For planting_schedule tasks, use recipeId directly
       recipeId = seedingTask.recipeId;
       if (recipeId) {
-        const { data: hasSoak } = await supabase.rpc('recipe_has_soak', {
+        const { data: hasSoak } = await getSupabaseClient().rpc('recipe_has_soak', {
           p_recipe_id: recipeId
         });
         
@@ -1088,7 +1088,7 @@ export default function DailyFlow() {
       }
     } else if (seedingTask.requestId) {
       // For seed_request tasks, get recipe_id from request
-      const { data: requestData } = await supabase
+      const { data: requestData } = await getSupabaseClient()
         .from('tray_creation_requests')
         .select('recipe_id')
         .eq('request_id', seedingTask.requestId)
@@ -1096,7 +1096,7 @@ export default function DailyFlow() {
       
       if (requestData) {
         recipeId = requestData.recipe_id;
-        const { data: hasSoak } = await supabase.rpc('recipe_has_soak', {
+        const { data: hasSoak } = await getSupabaseClient().rpc('recipe_has_soak', {
           p_recipe_id: recipeId
         });
         
@@ -1432,14 +1432,14 @@ export default function DailyFlow() {
       setAvailableSoakedSeed(null);
       // Check if soak variety and fetch data
       if (seedingTask.requestId) {
-        const { data: requestData } = await supabase
+        const { data: requestData } = await getSupabaseClient()
           .from('tray_creation_requests')
           .select('recipe_id')
           .eq('request_id', seedingTask.requestId)
           .single();
         
         if (requestData) {
-          const { data: hasSoakData } = await supabase.rpc('recipe_has_soak', {
+          const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
             p_recipe_id: requestData.recipe_id
           });
           
@@ -1522,23 +1522,7 @@ export default function DailyFlow() {
   // These are typically: Germination, Blackout, Growing, etc.
   // Watering and misting are NEVER passive - they're actionable tasks
   const passiveStepNames = ['Germination', 'Blackout', 'Growing', 'Growing Phase'];
-  const passiveTasks = tasks.filter(t => {
-    const actionLower = t.action.toLowerCase();
-    // Watering and misting are never passive
-    if (actionLower.startsWith('water') || actionLower.startsWith('mist')) {
-      return false;
-    }
-    // Check if action matches passive step names (case-insensitive)
-    const isPassiveStep = passiveStepNames.some(name => 
-      actionLower === name.toLowerCase() || actionLower.includes(name.toLowerCase())
-    );
-    return !actionLower.startsWith('harvest') && 
-           !actionLower.includes('at risk') &&
-           t.action !== 'Soak' && 
-           t.action !== 'Seed' &&
-           (isPassiveStep || passiveStepNames.some(name => t.stepDescription?.toLowerCase().includes(name.toLowerCase())));
-  });
-  
+
   // Active workflow tasks (exclude passive, harvest, at-risk)
   // Watering and misting tasks are ALWAYS workflow tasks (actionable)
   const workflowTasks = tasks.filter(t => {
@@ -1548,60 +1532,16 @@ export default function DailyFlow() {
       return true;
     }
     // Check if action matches passive step names (case-insensitive)
-    const isPassiveStep = passiveStepNames.some(name => 
+    const isPassiveStep = passiveStepNames.some(name =>
       actionLower === name.toLowerCase() || actionLower.includes(name.toLowerCase())
     );
-    return !actionLower.startsWith('harvest') && 
+    return !actionLower.startsWith('harvest') &&
            !actionLower.includes('at risk') &&
-           t.action !== 'Soak' && 
+           t.action !== 'Soak' &&
            t.action !== 'Seed' &&
            !isPassiveStep &&
            !passiveStepNames.some(name => t.stepDescription?.toLowerCase().includes(name.toLowerCase()));
   });
-
-  // Normalize step names to merge similar variations
-  const normalizeStepName = (stepName: string): string => {
-    const lower = stepName.toLowerCase();
-    if (lower === 'growing' || lower.includes('growing phase')) {
-      return 'Growing';
-    }
-    if (lower.includes('germination')) {
-      return 'Germination';
-    }
-    if (lower.includes('blackout')) {
-      return 'Blackout';
-    }
-    // Return original if no normalization needed
-    return stepName;
-  };
-
-  // Aggregate passive tasks by step_name (use stepDescription or action as step name)
-  const passiveSummary = passiveTasks.reduce((acc, task) => {
-    const rawStepName = task.stepDescription || task.action;
-    const stepName = normalizeStepName(rawStepName);
-    if (!acc[stepName]) {
-      acc[stepName] = { totalTrays: 0, varieties: [] };
-    }
-    const trayCount = task.traysRemaining ?? task.trays;
-    acc[stepName].totalTrays += trayCount;
-    
-    // Check if this variety already exists for this step
-    const existingVariety = acc[stepName].varieties.find(v => v.recipe === task.crop);
-    if (existingVariety) {
-      existingVariety.trays += trayCount;
-    } else {
-      acc[stepName].varieties.push({
-        recipe: task.crop, // Using crop name as recipe identifier
-        trays: trayCount
-      });
-    }
-    return acc;
-  }, {} as Record<string, { totalTrays: number; varieties: Array<{ recipe: string; trays: number }> }>);
-  
-  const passiveStepSummaries = Object.entries(passiveSummary).map(([stepName, data]) => ({
-    stepName,
-    ...data
-  }));
 
   // Tasks that have missed steps (need catch-up)
   const tasksWithMissedSteps = tasks.filter(t => t.missedSteps && t.missedSteps.length > 0);

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 interface ReportParams {
   reportType: 'harvest' | 'delivery' | 'sales' | 'seed-usage';
@@ -14,7 +14,7 @@ interface ReportResult {
 }
 
 /**
- * Generate a report via Supabase function (which calls n8n)
+ * Generate a report via getSupabaseClient() function (which calls n8n)
  */
 export const generateReport = async (params: ReportParams): Promise<ReportResult> => {
   try {
@@ -24,10 +24,10 @@ export const generateReport = async (params: ReportParams): Promise<ReportResult
     }
 
     const { farmUuid } = JSON.parse(sessionData);
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await getSupabaseClient().auth.getUser();
 
-    // Call Supabase function to generate report
-    const { data, error } = await supabase.functions.invoke('generate-report', {
+    // Call getSupabaseClient() function to generate report
+    const { data, error } = await getSupabaseClient().functions.invoke('generate-report', {
       body: {
         farm_uuid: farmUuid,
         report_type: params.reportType,
@@ -52,7 +52,7 @@ export const generateReport = async (params: ReportParams): Promise<ReportResult
     }
 
     // Save to report history
-    await supabase.from('report_history').insert({
+    await getSupabaseClient().from('report_history').insert({
       farm_uuid: farmUuid,
       report_type: params.reportType,
       parameters: {

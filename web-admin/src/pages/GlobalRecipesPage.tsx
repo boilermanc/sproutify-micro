@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Globe, Copy, Check, Search, Clock, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,7 +53,7 @@ const GlobalRecipesPage = () => {
 
   const fetchGlobalRecipes = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('global_recipes')
         .select(`
           *,
@@ -85,7 +85,7 @@ const GlobalRecipesPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('farm_global_recipes')
         .select('global_recipe_id, is_active')
         .eq('farm_uuid', farmUuid);
@@ -122,7 +122,7 @@ const GlobalRecipesPage = () => {
 
       if (currentlyEnabled) {
         // Disable: Update existing record
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('farm_global_recipes')
           .update({ is_active: false })
           .eq('farm_uuid', farmUuid)
@@ -131,7 +131,7 @@ const GlobalRecipesPage = () => {
         if (error) throw error;
       } else {
         // Enable: Upsert record
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('farm_global_recipes')
           .upsert({
             farm_uuid: farmUuid,
@@ -184,7 +184,7 @@ const GlobalRecipesPage = () => {
 
       const { farmUuid, userId } = JSON.parse(sessionData);
 
-      const { error } = await supabase.rpc('copy_global_recipe_to_farm', {
+      const { error } = await getSupabaseClient().rpc('copy_global_recipe_to_farm', {
         p_global_recipe_id: selectedRecipe.global_recipe_id,
         p_farm_uuid: farmUuid,
         p_created_by: userId,

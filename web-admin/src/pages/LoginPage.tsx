@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { buildSessionPayload } from '../utils/session';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +39,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
   const handleTokenLogin = useCallback(async (accessToken: string, refreshToken: string) => {
     try {
-      const { data, error } = await supabase.auth.setSession({
+      const { data, error } = await getSupabaseClient().auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
@@ -54,7 +54,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
         throw new Error('Invalid session tokens received.');
       }
 
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await getSupabaseClient()
         .from('profile')
         .select('*, farms(*)')
         .eq('id', sessionUser.id)
@@ -94,21 +94,21 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   const handleAutoLogin = useCallback(async (emailParam: string) => {
     try {
       // Try to find user by email and sign in
-      const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: { user }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
         email: emailParam,
         password: '', // This won't work - need proper auth flow
       });
 
       if (signInError) {
         // If sign in fails, try to get user profile
-        const { data: profile } = await supabase
+        const { data: profile } = await getSupabaseClient()
           .from('profile')
           .select('*, farms(*)')
           .eq('email', emailParam)
           .single();
 
         if (profile) {
-          const { data: { session } } = await supabase.auth.getSession();
+          const { data: { session } } = await getSupabaseClient().auth.getSession();
           if (session) {
             const sessionPayload = await buildSessionPayload(profile, {
               email: emailParam,
@@ -129,7 +129,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       }
 
       if (user) {
-        const { data: profile } = await supabase
+        const { data: profile } = await getSupabaseClient()
           .from('profile')
           .select('*, farms(*)')
           .eq('id', user.id)
@@ -207,8 +207,8 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
         return;
       }
 
-      // Authenticate with Supabase
-      const { data: { user, session }, error: signInError } = await supabase.auth.signInWithPassword({
+      // Authenticate with getSupabaseClient()
+      const { data: { user, session }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
         email,
         password,
       });
@@ -222,7 +222,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       }
 
       // Fetch user profile with farm information
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await getSupabaseClient()
         .from('profile')
         .select('*, farms(*)')
         .eq('id', user.id)

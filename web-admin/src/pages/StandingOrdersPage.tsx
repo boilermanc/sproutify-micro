@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Repeat, Plus, Edit, Trash2, Search, X } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -77,7 +77,7 @@ const StandingOrdersPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('standing_orders')
         .select(`
           *,
@@ -91,7 +91,7 @@ const StandingOrdersPage = () => {
       // Fetch items for each standing order
       const ordersWithItems = await Promise.all(
         (data || []).map(async (order: any) => {
-          const { data: itemsData } = await supabase
+          const { data: itemsData } = await getSupabaseClient()
             .from('standing_order_items')
             .select(`
               *,
@@ -123,7 +123,7 @@ const StandingOrdersPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('customers')
         .select('customerid, name')
         .eq('farm_uuid', farmUuid)
@@ -156,7 +156,7 @@ const StandingOrdersPage = () => {
         return;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .select('product_id, product_name')
         .eq('farm_uuid', farmUuid)
@@ -178,7 +178,7 @@ const StandingOrdersPage = () => {
 
   const fetchProductVariants = async (productId: number) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('product_variants')
         .select('variant_id, variant_name, size, price, unit')
         .eq('product_id', productId)
@@ -251,10 +251,10 @@ const StandingOrdersPage = () => {
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabaseClient().auth.getUser();
 
       // Create standing order
-      const { data: orderData, error: orderError } = await supabase
+      const { data: orderData, error: orderError } = await getSupabaseClient()
         .from('standing_orders')
         .insert([{
           farm_uuid: farmUuid,
@@ -283,7 +283,7 @@ const StandingOrdersPage = () => {
           notes: item.notes || null,
         }));
 
-        const { error: itemsError } = await supabase
+        const { error: itemsError } = await getSupabaseClient()
           .from('standing_order_items')
           .insert(itemsPayload);
 
@@ -326,7 +326,7 @@ const StandingOrdersPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('standing_orders')
         .update({
           order_name: editingOrder.order_name,
@@ -363,7 +363,7 @@ const StandingOrdersPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Soft delete
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('standing_orders')
         .update({ is_active: false })
         .eq('standing_order_id', order.standing_order_id)

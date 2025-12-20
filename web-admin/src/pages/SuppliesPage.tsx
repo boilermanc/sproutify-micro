@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { checkSupplyStock } from '../services/notificationService';
 import { Edit, Package, Plus, Search, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -113,8 +113,8 @@ const SuppliesPage = () => {
   const fetchSeedSupplies = async (farmUuid: string): Promise<Supply[]> => {
     try {
       const [{ data: seedBatches, error: seedError }, { data: varietiesData }] = await Promise.all([
-        supabase.from('seedbatches').select('*').eq('farm_uuid', farmUuid),
-        supabase.from('varieties').select('*'),
+        getSupabaseClient().from('seedbatches').select('*').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('varieties').select('*'),
       ]);
 
       if (seedError) {
@@ -217,7 +217,7 @@ const SuppliesPage = () => {
 
       // Fetch supplies with vendor information
       // Try both vendorid and vendor_id column names
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('supplies')
         .select(`
           *,
@@ -288,7 +288,7 @@ const SuppliesPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
 
       // Fetch global templates (Sproutify-managed) and farm-specific templates
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('supply_templates')
         .select('*')
         .eq('is_active', true)
@@ -317,7 +317,7 @@ const SuppliesPage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('vendors')
         .select('vendorid, name')
         .eq('farm_uuid', farmUuid)
@@ -370,13 +370,13 @@ const SuppliesPage = () => {
         is_active: true,
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('supplies')
         .insert([payload]);
 
       if (error) {
         if (error.code === '42P01' || error.message?.includes('does not exist') || error.message?.includes('404')) {
-          alert('The supplies table does not exist. Please run the migration file: supabase/migrations/003_create_supplies_table.sql');
+          alert('The supplies table does not exist. Please run the migration file: getSupabaseClient()/migrations/003_create_supplies_table.sql');
         } else {
           throw error;
         }
@@ -428,7 +428,7 @@ const SuppliesPage = () => {
         ? `${selectedSupply.notes}\n${adjustmentNote}`
         : adjustmentNote;
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('supplies')
         .update({ 
           stock: newStock,
@@ -482,7 +482,7 @@ const SuppliesPage = () => {
 
     setUpdating(true);
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('supplies')
         .update({
           supply_name: selectedSupply.supply_name,

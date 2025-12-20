@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 
 export interface WeeklyTask {
   task_type: 'soaking' | 'sowing' | 'harvesting' | 'delivery' | 'maintenance';
@@ -24,9 +24,9 @@ const formatDateString = (date: Date): string => {
  * Parse a date string (YYYY-MM-DD) as a local date, not UTC
  * This prevents timezone shifts that cause dates to display as the previous day
  */
-const parseLocalDate = (dateStr: string | null | undefined): Date | null => {
+const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null => {
   if (!dateStr) return null;
-  
+
   // If it's already a Date object, return it
   if (dateStr instanceof Date) return dateStr;
   
@@ -62,7 +62,7 @@ export const fetchWeeklyTasks = async (
 
   try {
     // 0. Fetch actual seeding tasks (view splits soak/seed and computes remaining)
-    const { data: seedingTasks, error: seedingError } = await supabase
+    const { data: seedingTasks, error: seedingError } = await getSupabaseClient()
       .from('seeding_request_daily_tasks')
       .select('*')
       .eq('farm_uuid', farmUuid)
@@ -73,7 +73,7 @@ export const fetchWeeklyTasks = async (
     if (seedingError) throw seedingError;
 
     // 1. Fetch planting schedules (still used for harvest/delivery projections)
-    const { data: allSchedules, error: scheduleError } = await supabase
+    const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
       .from('planting_schedule_view')
       .select('*')
       .eq('farm_uuid', farmUuid);
@@ -87,7 +87,7 @@ export const fetchWeeklyTasks = async (
     
     if (recipeIds.length > 0) {
       // Fetch all existing trays for these recipes
-      const { data: existingTrays } = await supabase
+      const { data: existingTrays } = await getSupabaseClient()
         .from('trays')
         .select('recipe_id, sow_date')
         .eq('farm_uuid', farmUuid)
@@ -95,7 +95,7 @@ export const fetchWeeklyTasks = async (
         .in('recipe_id', recipeIds);
       
       // Fetch all completed sowing tasks for these recipes
-      const { data: completedSowingTasks } = await supabase
+      const { data: completedSowingTasks } = await getSupabaseClient()
         .from('task_completions')
         .select('recipe_id, task_date')
         .eq('farm_uuid', farmUuid)
@@ -171,7 +171,7 @@ export const fetchWeeklyTasks = async (
     }
 
     // 2. Fetch completions for this week
-    const { data: completions } = await supabase
+    const { data: completions } = await getSupabaseClient()
       .from('task_completions')
       .select('*')
       .eq('farm_uuid', farmUuid)
@@ -200,7 +200,7 @@ export const fetchWeeklyTasks = async (
       ? [...new Set(seedingTasks.map((t: any) => t.recipe_id).filter(Boolean))] 
       : [];
     
-    const { data: seedingRecipesData, error: seedingRecipesError } = seedingRecipeIds.length > 0 ? await supabase
+    const { data: seedingRecipesData, error: seedingRecipesError } = seedingRecipeIds.length > 0 ? await getSupabaseClient()
       .from('recipes')
       .select('recipe_id, variety_name')
       .in('recipe_id', seedingRecipeIds)
@@ -257,7 +257,6 @@ export const fetchWeeklyTasks = async (
     for (const schedule of (schedules || [])) {
       const sowDate = parseLocalDate(schedule.sow_date) || new Date();
       sowDate.setHours(0, 0, 0, 0);
-      const sowDateStr = formatDateString(sowDate);
       const harvestDate = parseLocalDate(schedule.harvest_date) || new Date();
       harvestDate.setHours(0, 0, 0, 0);
       const harvestDateStr = formatDateString(harvestDate);
@@ -307,7 +306,7 @@ export const fetchWeeklyTasks = async (
     tasks.push(...taskMap.values());
 
     // 5. Fetch maintenance tasks
-    const { data: maintenanceTasks } = await supabase
+    const { data: maintenanceTasks } = await getSupabaseClient()
       .from('maintenance_tasks')
       .select('*')
       .eq('farm_uuid', farmUuid)
@@ -361,7 +360,7 @@ export const updateTaskStatus = async (
     
     if (status === 'pending') {
       // Remove completion record
-      await supabase
+      await getSupabaseClient()
         .from('task_completions')
         .delete()
         .eq('farm_uuid', farmUuid)
@@ -386,7 +385,7 @@ export const updateTaskStatus = async (
         completionData.maintenance_task_id = task.maintenance_task_id;
       }
       
-      await supabase
+      await getSupabaseClient()
         .from('task_completions')
         .upsert(completionData, {
           onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'

@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
+import { AuthApiError } from '@supabase/supabase-js';
 import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
 import LoginPage from './pages/LoginPage';
@@ -43,6 +44,11 @@ import AdminEmailEvents from './pages/AdminEmailEvents';
 import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
+
+const isInvalidRefreshTokenError = (error?: AuthApiError | null): error is AuthApiError => {
+  if (!error) return false;
+  return /refresh token not found|invalid refresh token/i.test(error.message);
+};
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -104,8 +110,26 @@ function App() {
         }
 
         console.log('[App] getSession result:', { hasSession: !!session, error });
-        
-        if (session && !error) {
+
+        if (error) {
+          if (isInvalidRefreshTokenError(error)) {
+            console.warn('[App] Invalid refresh token detected, clearing stored session', error.message);
+            try {
+              await client.auth.signOut();
+            } catch (signOutError) {
+              console.warn('[App] Failed to sign out while clearing session', signOutError);
+            }
+          }
+
+          localStorage.removeItem('sproutify_session');
+          setIsAuthenticated(false);
+          if (isMounted) {
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        if (session) {
           // Skip profile check for admin users (team@sproutify.app)
           // Admin users are handled by RequireAdmin component
           if (session.user.email?.toLowerCase() === 'team@sproutify.app') {

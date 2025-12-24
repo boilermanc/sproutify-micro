@@ -2429,7 +2429,7 @@ export default function DailyFlow() {
                     <div className="text-sm">
                       <p className="font-semibold text-slate-900">Tray {tray.tray_id} • {tray.recipe_name}</p>
                       <p className="text-xs text-slate-500">
-                        Sowed {new Date(tray.sow_date).toLocaleDateString()} • {tray.days_grown} days grown
+                        Sowed {tray.sow_date ? new Date(tray.sow_date).toLocaleDateString() : 'N/A'} • {tray.days_grown} days grown
                       </p>
                     </div>
                   </label>

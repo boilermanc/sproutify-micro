@@ -23,7 +23,8 @@ import {
   CheckSquare,
   BarChart3,
   Globe,
-  Plus
+  Plus,
+  HelpCircle
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -64,6 +65,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
     { to: "/reports", icon: BarChart3, label: "Reports" },
     { to: "/users", icon: Users, label: "Users" },
     { to: "/settings", icon: Settings, label: "Settings" },
+    { to: "/help", icon: HelpCircle, label: "Help Center" },
   ];
 
   return (

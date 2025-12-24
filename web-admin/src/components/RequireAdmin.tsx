@@ -6,6 +6,25 @@ interface RequireAdminProps {
   children: React.ReactNode;
 }
 
+const ALLOWED_ROLES = new Set(['admin', 'owner']);
+
+const parseAdminSession = () => {
+  const storedSession = localStorage.getItem('sproutify_admin_session');
+  if (!storedSession) return null;
+
+  try {
+    return JSON.parse(storedSession) as {
+      email?: string;
+      userId?: string;
+      role?: string;
+      farmUuid?: string;
+    };
+  } catch (error) {
+    console.error('Failed to parse admin session:', error);
+    return null;
+  }
+};
+
 const RequireAdmin = ({ children }: RequireAdminProps) => {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,40 +37,28 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
         return;
       }
       try {
-        // Check for admin session in localStorage
-        const adminSession = localStorage.getItem('sproutify_admin_session');
+        const adminSession = parseAdminSession();
         if (!adminSession) {
           setIsAuthorized(false);
           setIsLoading(false);
           return;
         }
 
-        // Check getSupabaseClient() session
-        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
-        
-        if (error || !session) {
-          localStorage.removeItem('sproutify_admin_session');
+        const normalizedRole = (adminSession.role ?? '').toLowerCase();
+        if (!ALLOWED_ROLES.has(normalizedRole)) {
           setIsAuthorized(false);
           setIsLoading(false);
           return;
         }
 
-        // Verify email is team@sproutify.app
-        if (session.user.email?.toLowerCase() !== 'team@sproutify.app') {
+        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
+
+        if (error || !session || session.user.id !== adminSession.userId) {
           await getSupabaseClient().auth.signOut();
           localStorage.removeItem('sproutify_admin_session');
           setIsAuthorized(false);
           setIsLoading(false);
           return;
-        }
-
-        // Check for admin role
-        const userRole = session.user.app_metadata?.role;
-        if (userRole !== 'admin') {
-          // Update role if needed
-          await getSupabaseClient().auth.updateUser({
-            data: { role: 'admin' }
-          });
         }
 
         setIsAuthorized(true);
@@ -72,7 +79,16 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
         localStorage.removeItem('sproutify_admin_session');
         setIsAuthorized(false);
       } else if (event === 'SIGNED_IN' && session) {
-        if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
+        const adminSession = parseAdminSession();
+        if (!adminSession) {
+          setIsAuthorized(false);
+          return;
+        }
+
+        const normalizedRole = (adminSession.role ?? '').toLowerCase();
+        const allowedRole = ALLOWED_ROLES.has(normalizedRole);
+
+        if (allowedRole && session.user.id === adminSession.userId) {
           setIsAuthorized(true);
         } else {
           setIsAuthorized(false);

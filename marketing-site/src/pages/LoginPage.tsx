@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import './LoginPage.css';
 
@@ -8,6 +9,7 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,20 +93,35 @@ const LoginPage = () => {
 
             <div className="form-group">
               <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-              />
+              <div className="password-input-wrapper">
+                <input
+                  id="password"
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setPasswordVisible((prev) => !prev)}
+                  aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                >
+                  {passwordVisible ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
             </div>
 
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+          <div className="flex justify-end text-xs text-slate-600">
+            <Link to="/reset-password" className="font-semibold text-indigo-600 hover:text-indigo-500">
+              Forgot password?
+            </Link>
+          </div>
 
           <div className="login-footer">
             <p style={{ marginBottom: '0.5rem', color: '#636E72', fontSize: '0.875rem' }}>

@@ -27,6 +27,7 @@ import DailyFlow from './components/DailyFlow';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
+import HelpCenterPage from './pages/HelpCenterPage';
 import AdminLogin from './pages/AdminLogin';
 import RequireAdmin from './components/RequireAdmin';
 import AdminLayout from './components/AdminLayout';
@@ -39,6 +40,8 @@ import AdminProducts from './pages/AdminProducts';
 import AdminNotifications from './pages/AdminNotifications';
 import AdminEmailBroadcast from './pages/AdminEmailBroadcast';
 import AdminEmailEvents from './pages/AdminEmailEvents';
+import BetaSignupPage from './pages/BetaSignupPage';
+import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
 
 function App() {
@@ -238,6 +241,8 @@ function App() {
       <Routes>
         {/* Admin Portal Routes */}
         <Route path="/admin-portal/login" element={<AdminLogin />} />
+        <Route path="/admin-portal/reset-password" element={<PasswordResetPage />} />
+        <Route path="/admin-portal/signup" element={<BetaSignupPage />} />
         
         <Route path="/admin-portal" element={
           <RequireAdmin>
@@ -293,6 +298,9 @@ function App() {
           <Route path="flow" element={<DailyFlow />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="activity" element={<Activity />} />
+          <Route path="help" element={<HelpCenterPage />} />
+          <Route path="help/:category" element={<HelpCenterPage />} />
+          <Route path="help/:category/:slug" element={<HelpCenterPage />} />
         </Route>
       </Routes>
       {isAuthenticated && <SageChat />}

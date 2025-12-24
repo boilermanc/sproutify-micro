@@ -204,7 +204,7 @@ export async function fetchNearestAssignedTray(
  * Harvest a tray immediately by updating harvest_date and status.
  */
 export async function harvestTrayNow(trayId: number): Promise<boolean> {
-  const { data, error } = await getSupabaseClient()
+  const { error } = await getSupabaseClient()
     .from('trays')
     .update({
       harvest_date: new Date().toISOString(),

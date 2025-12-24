@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { X } from 'lucide-react';
+import { Eye, EyeOff, X } from 'lucide-react';
+import { buildSessionPayload } from '@/utils/session';
 
 const AdminLogin = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -18,14 +20,7 @@ const AdminLogin = () => {
     setLoading(true);
 
     try {
-      // Check if email is team@sproutify.app
-      if (email.toLowerCase() !== 'team@sproutify.app') {
-        setError('Access denied. Only team@sproutify.app can access the admin portal.');
-        setLoading(false);
-        return;
-      }
-
-      // Authenticate with getSupabaseClient()
+      const emailLower = email.trim().toLowerCase();
       const { data: { user, session }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
         email,
         password,
@@ -39,24 +34,51 @@ const AdminLogin = () => {
         throw new Error('Authentication failed');
       }
 
-      // Check for admin role in app_metadata
-      const userRole = user.app_metadata?.role;
-      if (userRole !== 'admin') {
-        // Set admin role if not already set (for initial setup)
-        await getSupabaseClient().auth.updateUser({
-          data: { role: 'admin' }
-        });
+      const { data: profile, error: profileError } = await getSupabaseClient()
+        .from('profile')
+        .select('*, farms(*)')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        throw profileError;
       }
 
-      // Store admin session
-      localStorage.setItem('sproutify_admin_session', JSON.stringify({
+      const normalizedProfileRole = profile?.role?.toLowerCase();
+      const normalizedUserRole = user.app_metadata?.role?.toLowerCase();
+      const baseRole =
+        normalizedProfileRole ||
+        normalizedUserRole ||
+        (emailLower === 'team@sproutify.app' ? 'admin' : '');
+
+      const allowedRoles = ['admin', 'owner'];
+      if (!baseRole || !allowedRoles.includes(baseRole)) {
+        throw new Error('Access restricted to Sproutify Micro admins and farm owners.');
+      }
+
+      if (baseRole === 'admin') {
+        localStorage.setItem('sproutify_admin_session', JSON.stringify({
+          email: user.email,
+          userId: user.id,
+          role: baseRole,
+          farmUuid: profile?.farm_uuid ?? '',
+        }));
+
+        navigate('/admin-portal');
+        return;
+      }
+
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
+
+      const sessionPayload = await buildSessionPayload(profile, {
         email: user.email,
         userId: user.id,
-        role: 'admin'
-      }));
+      });
 
-      // Redirect to admin dashboard
-      navigate('/admin-portal');
+      localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+      window.location.href = '/admin/';
     } catch (error) {
       console.error('Admin login error:', error);
       setError(error instanceof Error ? error.message : 'Invalid credentials. Please try again.');
@@ -76,11 +98,11 @@ const AdminLogin = () => {
         <div className="flex items-center justify-between text-white/70">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 font-semibold text-white">
-              SA
+              SM
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify</p>
-              <p className="text-lg font-semibold text-white">Admin Portal</p>
+              <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify Micro</p>
+              <p className="text-lg font-semibold text-white">Beta Portal</p>
             </div>
           </div>
           <Button
@@ -98,8 +120,8 @@ const AdminLogin = () => {
             <span className="inline-flex items-center rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-600">
               Admin access
             </span>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Team Portal</h1>
-            <p className="text-base text-slate-500">Sign in to access admin dashboard</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Beta Portal</h1>
+            <p className="text-base text-slate-500">Sign in to access the Sproutify Micro beta dashboard</p>
           </div>
 
           {error && (
@@ -128,25 +150,47 @@ const AdminLogin = () => {
               <label htmlFor="password" className="text-sm font-medium text-slate-600">
                 Password
               </label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="pr-12"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                  onClick={() => setPasswordVisible((prev) => !prev)}
+                  aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                >
+                  {passwordVisible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
             </div>
 
             <Button type="submit" className="w-full bg-purple-600 hover:bg-purple-700" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign in'}
             </Button>
+            <div className="text-right text-xs text-slate-500">
+              <Link to="/admin-portal/reset-password" className="font-semibold text-purple-500 hover:text-purple-400">
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </div>
 
         <p className="text-center text-sm text-white/60">
           Only authorized team members can access this portal
+        </p>
+        <p className="text-center text-sm text-white/60">
+          Need to set up your beta farm?{' '}
+          <Link to="/admin-portal/signup" className="font-semibold text-purple-300 hover:text-purple-100 underline">
+            Create a farm & owner account
+          </Link>
         </p>
       </div>
     </div>

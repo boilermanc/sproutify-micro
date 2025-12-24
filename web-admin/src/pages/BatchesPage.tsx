@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -42,7 +42,7 @@ const BatchesPage = () => {
       // Fetch vendors first if not already loaded
       let vendorsList = vendors;
       if (vendorsList.length === 0) {
-        const { data: vendorsData } = await supabase
+        const { data: vendorsData } = await getSupabaseClient()
           .from('vendors')
           .select('*')
           .eq('farm_uuid', farmUuid);
@@ -50,7 +50,7 @@ const BatchesPage = () => {
         setVendors(vendorsList);
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('seedbatches')
         .select('*')
         .eq('farm_uuid', farmUuid);
@@ -71,7 +71,7 @@ const BatchesPage = () => {
       // Fetch varieties if not already loaded (needed for batch normalization)
       let varietiesList = varieties;
       if (varietiesList.length === 0) {
-        const { data: varietiesData } = await supabase
+        const { data: varietiesData } = await getSupabaseClient()
           .from('varieties')
           .select('*');
         varietiesList = (varietiesData || []).map((v: any) => ({
@@ -86,7 +86,7 @@ const BatchesPage = () => {
       const batchesWithTrayCounts = await Promise.all(
         sortedBatches.map(async (batch) => {
           const batchId = batch.batchid || batch.batch_id;
-          const { count } = await supabase
+          const { count } = await getSupabaseClient()
             .from('trays')
             .select('*', { count: 'exact', head: true })
             .eq('batch_id', batchId)
@@ -135,7 +135,7 @@ const BatchesPage = () => {
   const checkVarietiesColumns = async () => {
     try {
       // Fetch one row without any filters to see actual column names
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('varieties')
         .select('*')
         .limit(1);
@@ -180,7 +180,7 @@ const BatchesPage = () => {
       const fetchVarieties = async () => {
         try {
           // Fetch all varieties (no farm filtering since column doesn't exist)
-          const { data, error } = await supabase
+          const { data, error } = await getSupabaseClient()
             .from('varieties')
             .select('*');
           
@@ -197,7 +197,7 @@ const BatchesPage = () => {
 
       // Fetch vendors - no ordering, will sort in JavaScript
       const fetchVendors = async () => {
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('vendors')
           .select('*')
           .eq('farm_uuid', farmUuid);
@@ -267,10 +267,6 @@ const BatchesPage = () => {
       if (!sessionData) return;
       const { farmUuid } = JSON.parse(sessionData);
 
-      const selectedVariety = varieties.find(v => 
-        (v.variety_id ?? v.varietyid)?.toString() === newBatch.variety_id
-      );
-
       // Map to actual DB column names: varietyid, vendorid, purchasedate
       const payload: any = {
         varietyid: parseInt(newBatch.variety_id), // Actual DB column
@@ -291,7 +287,7 @@ const BatchesPage = () => {
         }
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('seedbatches')
         .insert([payload]);
 
@@ -374,7 +370,7 @@ const BatchesPage = () => {
         }
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('seedbatches')
         .update(payload)
         .eq('batchid', batchId)

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { buildSessionPayload } from '../utils/session';
 import { Button } from '@/components/ui/button';
@@ -282,18 +282,18 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             SM
           </div>
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify</p>
-            <p className="text-lg font-semibold text-white">Micro Admin</p>
+            <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify Micro</p>
+            <p className="text-lg font-semibold text-white">Beta Access</p>
           </div>
         </div>
 
         <div className="rounded-3xl border border-white/15 bg-white/95 p-8 shadow-2xl shadow-emerald-500/20 backdrop-blur">
           <div className="space-y-2 text-center">
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
-              Secure access
+              Beta Program
             </span>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Welcome back</h1>
-            <p className="text-base text-slate-500">Sign in to continue growing.</p>
+            <p className="text-base text-slate-500">Sign in to your beta farm account.</p>
           </div>
 
           {error && (
@@ -339,6 +339,15 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
           </form>
         </div>
 
+        <p className="text-center text-sm text-white/60">
+          New to the beta?{' '}
+          <Link
+            to="/admin-portal/signup"
+            className="font-semibold text-emerald-200 underline-offset-4 hover:text-white hover:underline"
+          >
+            Set up your farm
+          </Link>
+        </p>
         <p className="text-center text-sm text-white/60">
           Need help? Email{' '}
           <a

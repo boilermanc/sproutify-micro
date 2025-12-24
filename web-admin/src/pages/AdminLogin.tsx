@@ -4,7 +4,6 @@ import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { buildSessionPayload } from '@/utils/session';
 
 const AdminLogin = () => {
   const [email, setEmail] = useState('');
@@ -51,35 +50,20 @@ const AdminLogin = () => {
         normalizedUserRole ||
         (emailLower === 'team@sproutify.app' ? 'admin' : '');
 
-      const allowedRoles = ['admin', 'owner'];
-      if (!baseRole || !allowedRoles.includes(baseRole)) {
-        throw new Error('Access restricted to Sproutify Micro admins and farm owners.');
+      // This portal is ONLY for internal Sproutify team admins
+      if (baseRole !== 'admin') {
+        throw new Error('This portal is restricted to Sproutify team members only. Beta users should use the main login page.');
       }
 
-      if (baseRole === 'admin') {
-        localStorage.setItem('sproutify_admin_session', JSON.stringify({
-          email: user.email,
-          userId: user.id,
-          role: baseRole,
-          farmUuid: profile?.farm_uuid ?? '',
-        }));
-
-        // Use full page redirect to avoid hanging getSession() promise from App.tsx
-        window.location.href = '/admin/admin-portal';
-        return;
-      }
-
-      if (!profile) {
-        throw new Error('Profile not found');
-      }
-
-      const sessionPayload = await buildSessionPayload(profile, {
+      localStorage.setItem('sproutify_admin_session', JSON.stringify({
         email: user.email,
         userId: user.id,
-      });
+        role: baseRole,
+        farmUuid: profile?.farm_uuid ?? '',
+      }));
 
-      localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-      window.location.href = '/admin/';
+      // Use full page redirect to avoid hanging getSession() promise from App.tsx
+      window.location.href = '/admin/admin-portal';
     } catch (error) {
       console.error('Admin login error:', error);
       setError(error instanceof Error ? error.message : 'Invalid credentials. Please try again.');
@@ -103,7 +87,7 @@ const AdminLogin = () => {
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify Micro</p>
-              <p className="text-lg font-semibold text-white">Beta Portal</p>
+              <p className="text-lg font-semibold text-white">Internal Portal</p>
             </div>
           </div>
           <Button
@@ -119,10 +103,10 @@ const AdminLogin = () => {
         <div className="rounded-3xl border border-white/15 bg-white/95 p-8 shadow-2xl shadow-purple-500/20 backdrop-blur">
           <div className="space-y-2 text-center">
             <span className="inline-flex items-center rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-600">
-              Admin access
+              Team Only
             </span>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Beta Portal</h1>
-            <p className="text-base text-slate-500">Sign in to access the Sproutify Micro beta dashboard</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Internal Portal</h1>
+            <p className="text-base text-slate-500">Sproutify team access only</p>
           </div>
 
           {error && (
@@ -185,12 +169,12 @@ const AdminLogin = () => {
         </div>
 
         <p className="text-center text-sm text-white/60">
-          Only authorized team members can access this portal
+          This portal is for Sproutify team members only.
         </p>
         <p className="text-center text-sm text-white/60">
-          Need to set up your beta farm?{' '}
-          <Link to="/admin-portal/signup" className="font-semibold text-purple-300 hover:text-purple-100 underline">
-            Create a farm & owner account
+          Beta users should use the{' '}
+          <Link to="/login" className="font-semibold text-purple-300 hover:text-purple-100 underline">
+            main login page
           </Link>
         </p>
       </div>

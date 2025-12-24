@@ -85,12 +85,13 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
         }
 
         const { data: { session }, error } = await getSessionWithTimeout(client);
+        const timedOut = error?.message === 'Session check timed out';
 
-        if (error && error.message === 'Session check timed out') {
+        if (timedOut) {
           console.warn('[RequireAdmin] Session verification timed out, falling back to stored admin session');
         }
 
-        if (error || !session || session.user.id !== adminSession.userId) {
+        if (!timedOut && (error || !session || session.user.id !== adminSession.userId)) {
           await getSupabaseClient().auth.signOut();
           localStorage.removeItem('sproutify_admin_session');
           setIsAuthorized(false);

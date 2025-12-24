@@ -1319,6 +1319,30 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           timestamp: new Date().toISOString()
         });
 
+        // Fetch completed order schedules for this delivery date to suppress already-fulfilled items
+        const completedScheduleKeys = new Set<string>();
+        const { data: completedSchedules, error: completedSchedulesError } = await getSupabaseClient()
+          .from('order_schedules')
+          .select('standing_order_id, scheduled_delivery_date')
+          .eq('farm_uuid', farmUuid)
+          .eq('scheduled_delivery_date', targetDateStr)
+          .eq('status', 'completed');
+
+        if (completedSchedulesError) {
+          console.warn('[fetchDailyTasks] Error fetching completed order_schedules:', completedSchedulesError);
+        } else if (completedSchedules) {
+          completedSchedules.forEach((schedule: any) => {
+            const deliveryDate = formatDateString(parseLocalDate(schedule.scheduled_delivery_date) || new Date(schedule.scheduled_delivery_date));
+            const key = `${schedule.standing_order_id}-${deliveryDate}`;
+            completedScheduleKeys.add(key);
+          });
+          console.log('[fetchDailyTasks] Completed schedules for target date:', {
+            targetDate: targetDateStr,
+            count: completedSchedules.length,
+            keys: Array.from(completedScheduleKeys.values()),
+          });
+        }
+
         if (!orderError && orderDetails) {
           console.log('[fetchDailyTasks] Processing', orderDetails.length, 'items from order_fulfillment_status');
           
@@ -1339,6 +1363,21 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             const sowDateStr = item.sow_date ? formatDateString(parseLocalDate(item.sow_date) || new Date()) : '';
             const harvestDateStr = item.harvest_date ? formatDateString(parseLocalDate(item.harvest_date) || new Date()) : '';
             const deliveryDateStr = item.delivery_date ? formatDateString(parseLocalDate(item.delivery_date) || new Date()) : '';
+
+            // Skip items whose standing order + delivery date are already marked completed
+            const completionKey = item.standing_order_id
+              ? `${item.standing_order_id}-${deliveryDateStr}`
+              : '';
+            if (completionKey && completedScheduleKeys.has(completionKey)) {
+              console.log('[fetchDailyTasks] Skipping at-risk item (order already completed):', {
+                recipe_name: item.recipe_name,
+                recipe_id: item.recipe_id,
+                customer_name: item.customer_name,
+                delivery_date: deliveryDateStr,
+                standing_order_id: item.standing_order_id,
+              });
+              continue;
+            }
             
             // Verify delivery_date matches today (should already be filtered by query, but double-check)
             if (deliveryDateStr !== targetDateStr) {
@@ -1426,6 +1465,23 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                   item.customer_name === aggregated.customer_name &&
                   formatDateString(parseLocalDate(item.delivery_date) || new Date()) === aggregated.delivery_date
                 );
+
+                const atRiskStandingOrderId = firstMatchingItem?.standing_order_id || null;
+
+                // Do not create at-risk tasks for completed schedules (defense-in-depth)
+                const atRiskCompletionKey = atRiskStandingOrderId
+                  ? `${atRiskStandingOrderId}-${aggregated.delivery_date}`
+                  : '';
+                if (atRiskCompletionKey && completedScheduleKeys.has(atRiskCompletionKey)) {
+                  console.log('[fetchDailyTasks] Skipping at-risk task creation (order already completed):', {
+                    atRiskKey: `${aggregated.recipe_id}-${aggregated.customer_name}-${aggregated.delivery_date}`,
+                    standing_order_id: atRiskStandingOrderId,
+                    delivery_date: aggregated.delivery_date,
+                    recipe_id: aggregated.recipe_id,
+                    recipe_name: aggregated.recipe_name,
+                  });
+                  continue;
+                }
                 
                 // Debug logging for Purple Basil
                 if (aggregated.recipe_name?.toLowerCase().includes('purple basil')) {
@@ -1469,7 +1525,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                   quantity: aggregated.missing,
                   customerName: aggregated.customer_name,
                   deliveryDate: aggregated.delivery_date,
-                  standingOrderId: firstMatchingItem?.standing_order_id || null,
+                  standingOrderId: atRiskStandingOrderId,
                   traysNeeded: aggregated.trays_needed,
                   traysReady: aggregated.trays_ready,
                 });

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { AuthError, AuthApiError } from '@supabase/supabase-js';
 import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
+import { clearSupabaseAuthStorage } from './utils/authStorage';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
@@ -44,6 +45,8 @@ import AdminEmailEvents from './pages/AdminEmailEvents';
 import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
+
+const SESSION_TIMEOUT_MS = 8000;
 
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
   if (!error) {
@@ -101,15 +104,18 @@ function App() {
           setTimeout(() => {
             timedOut = true;
             activeTimeouts.delete(timeoutId!);
-            console.warn('[App] Session check timed out after 5s, clearing potentially corrupted session');
+            const clearedKeys = clearSupabaseAuthStorage();
+            console.warn(
+              `[App] Session check timed out after ${SESSION_TIMEOUT_MS / 1000}s, clearing potentially corrupted session`,
+              { clearedKeys },
+            );
             // Clear potentially corrupted Supabase auth data
-            localStorage.removeItem('sb-rmjyfdmwnmaerthcoosq-auth-token');
             localStorage.removeItem('sproutify_session');
             if (isMounted) {
               setIsAuthenticated(false);
               setIsLoading(false);
             }
-          }, 5000)
+          }, SESSION_TIMEOUT_MS)
         );
 
         const { data: { session }, error } = await client.auth.getSession();

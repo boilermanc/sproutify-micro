@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AuthError } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { clearSupabaseAuthStorage } from '../utils/authStorage';
 
 interface RequireAdminProps {
   children: React.ReactNode;
@@ -23,7 +24,7 @@ const getSessionWithTimeout = async (
     timeoutId = setTimeout(() => {
       console.warn('[RequireAdmin] Session check timed out, clearing potentially corrupted auth data');
       // Clear potentially corrupted Supabase auth data to prevent persistent hangs
-      localStorage.removeItem('sb-rmjyfdmwnmaerthcoosq-auth-token');
+      clearSupabaseAuthStorage();
       resolve({
         data: { session: null },
         error: new AuthError('Session check timed out'),

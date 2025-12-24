@@ -252,6 +252,7 @@ export default function DailyFlow() {
   const [fulfillmentQuantity, setFulfillmentQuantity] = useState<string>('');
   const [isProcessingFulfillment, setIsProcessingFulfillment] = useState(false);
   const [actionHistory, setActionHistory] = useState<Map<string, any[]>>(new Map());
+  const actionHistoryRef = useRef<Map<string, any[]>>(new Map());
   const [availableSubstitutes, setAvailableSubstitutes] = useState<any[]>([]);
   const [selectedSubstitute, setSelectedSubstitute] = useState<number | null>(null);
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
@@ -418,7 +419,7 @@ export default function DailyFlow() {
 
     if (pendingHistoryFetches.current.has(key)) return;
 
-    const currentHistory = actionHistory;
+    const currentHistory = actionHistoryRef.current;
     if (currentHistory.has(key)) return;
 
     pendingHistoryFetches.current.add(key);
@@ -456,6 +457,10 @@ export default function DailyFlow() {
     } finally {
       pendingHistoryFetches.current.delete(key);
     }
+  }, []);
+
+  useEffect(() => {
+    actionHistoryRef.current = actionHistory;
   }, [actionHistory]);
 
   // Autofill seeding quantity based on remaining trays and batch inventory
@@ -477,7 +482,14 @@ export default function DailyFlow() {
     }
   }, [seedingTask, isSoakVariety, availableBatches, selectedBatchId, seedQuantityPerTray, seedQuantityCompleted]);
 
+  const isLoadingTasksRef = useRef(false);
+
   const loadTasks = useCallback(async () => {
+    if (isLoadingTasksRef.current) {
+      console.warn('[loadTasks] Refresh already in progress, skipping');
+      return;
+    }
+    isLoadingTasksRef.current = true;
     console.log('[loadTasks] Starting task refresh...');
     setLoading(true);
     try {
@@ -589,6 +601,7 @@ export default function DailyFlow() {
       console.error('Error loading tasks:', error);
     } finally {
       setLoading(false);
+      isLoadingTasksRef.current = false;
     }
   }, [selectedDate, fetchActionHistory]);
 

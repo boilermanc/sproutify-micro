@@ -64,7 +64,8 @@ const AdminLogin = () => {
           farmUuid: profile?.farm_uuid ?? '',
         }));
 
-        navigate('/admin-portal');
+        // Use full page redirect to avoid hanging getSession() promise from App.tsx
+        window.location.href = '/admin/admin-portal';
         return;
       }
 

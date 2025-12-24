@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { AuthError } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabaseClient';
 
 interface RequireAdminProps {
@@ -7,6 +8,37 @@ interface RequireAdminProps {
 }
 
 const ALLOWED_ROLES = new Set(['admin', 'owner']);
+const ADMIN_SESSION_TIMEOUT_MS = 5000;
+
+const getSessionWithTimeout = async (
+  client: ReturnType<typeof getSupabaseClient>,
+  timeoutMs: number = ADMIN_SESSION_TIMEOUT_MS,
+) => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<{
+    data: { session: null };
+    error: AuthError;
+  }>((resolve) => {
+    timeoutId = setTimeout(() => {
+      resolve({
+        data: { session: null },
+        error: new AuthError('Session check timed out'),
+      });
+    }, timeoutMs);
+  });
+
+  const sessionResult = await Promise.race([
+    client.auth.getSession(),
+    timeoutPromise,
+  ]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  return sessionResult;
+};
 
 const parseAdminSession = () => {
   const storedSession = localStorage.getItem('sproutify_admin_session');
@@ -31,7 +63,8 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
 
   useEffect(() => {
     const checkAdminAccess = async () => {
-      if (!getSupabaseClient()) {
+      const client = getSupabaseClient();
+      if (!client) {
         setIsAuthorized(false);
         setIsLoading(false);
         return;
@@ -51,7 +84,11 @@ const RequireAdmin = ({ children }: RequireAdminProps) => {
           return;
         }
 
-        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
+        const { data: { session }, error } = await getSessionWithTimeout(client);
+
+        if (error && error.message === 'Session check timed out') {
+          console.warn('[RequireAdmin] Session verification timed out, falling back to stored admin session');
+        }
 
         if (error || !session || session.user.id !== adminSession.userId) {
           await getSupabaseClient().auth.signOut();

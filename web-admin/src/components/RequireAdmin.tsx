@@ -21,6 +21,9 @@ const getSessionWithTimeout = async (
     error: AuthError;
   }>((resolve) => {
     timeoutId = setTimeout(() => {
+      console.warn('[RequireAdmin] Session check timed out, clearing potentially corrupted auth data');
+      // Clear potentially corrupted Supabase auth data to prevent persistent hangs
+      localStorage.removeItem('sb-rmjyfdmwnmaerthcoosq-auth-token');
       resolve({
         data: { session: null },
         error: new AuthError('Session check timed out'),

@@ -101,8 +101,12 @@ function App() {
           setTimeout(() => {
             timedOut = true;
             activeTimeouts.delete(timeoutId!);
-            console.debug('[App] Session check timed out after 5s');
+            console.warn('[App] Session check timed out after 5s, clearing potentially corrupted session');
+            // Clear potentially corrupted Supabase auth data
+            localStorage.removeItem('sb-rmjyfdmwnmaerthcoosq-auth-token');
+            localStorage.removeItem('sproutify_session');
             if (isMounted) {
+              setIsAuthenticated(false);
               setIsLoading(false);
             }
           }, 5000)

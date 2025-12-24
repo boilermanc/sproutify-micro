@@ -53,6 +53,23 @@ const taskGroupStyles = {
 
 type TaskGroupColor = keyof typeof taskGroupStyles;
 
+function getTaskQuantityLabel(task: CalendarDayTask) {
+  const quantity = task.quantity;
+  if (!quantity) return null;
+
+  const trayLabel = quantity === 1 ? 'tray' : 'trays';
+
+  if (task.task_source === 'order_fulfillment') {
+    return `${quantity} ${trayLabel} at risk`;
+  }
+
+  if (task.customer_name) {
+    return `${quantity} ${trayLabel} for ${task.customer_name}`;
+  }
+
+  return `${quantity} ${trayLabel} ready (unassigned)`;
+}
+
 function getDateString(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -226,6 +243,7 @@ function TaskGroup({
         {tasks.map((task, index) => {
           // Create a unique key that includes all identifying fields
           const uniqueKey = `${task.task_name || ''}-${task.recipe_name || ''}-${task.task_date}-${task.customer_name || ''}-${task.task_source || ''}-${(task as any).standing_order_id || ''}-${index}`;
+          const quantityLabel = getTaskQuantityLabel(task);
           return (
             <div 
               key={uniqueKey} 
@@ -237,7 +255,7 @@ function TaskGroup({
             >
               <div className="flex items-center justify-between">
                 <div className="font-semibold text-slate-900">{task.recipe_name || task.task_name || 'Task'}</div>
-                {task.quantity ? <span className="text-xs text-slate-500">{task.quantity} trays missing</span> : null}
+                {quantityLabel ? <span className="text-xs text-slate-500">{quantityLabel}</span> : null}
               </div>
               <div className="text-xs text-slate-500 mt-1 space-y-1">
                 {task.task_name && task.task_name !== task.recipe_name ? <div>{task.task_name}</div> : null}
@@ -683,6 +701,8 @@ const CalendarPage = () => {
 };
 
 export default CalendarPage;
+
+
 
 
 

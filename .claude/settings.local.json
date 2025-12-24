@@ -23,7 +23,12 @@
       "Bash(git merge-base:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git merge:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)"
     ],
     "deny": [],
     "ask": []

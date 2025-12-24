@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Check,
   Droplets,
@@ -16,6 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   Scale,
+  ChevronLeft,
+  ChevronRight,
   Package,
   Trash2,
   XCircle,
@@ -73,15 +76,145 @@ import {
   cancelSeedingRequest,
   rescheduleSeedingRequest,
   fetchPassiveTrayStatus,
-  type PassiveTrayStatusItem
+  fetchOrderGapStatus,
+  type PassiveTrayStatusItem,
+  type OrderGapStatus
 } from '../services/dailyFlowService';
 import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import {
+  fetchAssignableTrays,
+  assignTrayToCustomer,
+  fetchNearestAssignedTray,
+  harvestTrayNow,
+} from '../services/trayService';
+import type { AssignableTray } from '../services/trayService';
+
+const convertQuantityValueToGrams = (
+  rawQuantity: number | string | null | undefined,
+  unit?: string | null
+): number | null => {
+  if (rawQuantity === null || rawQuantity === undefined || rawQuantity === '') {
+    return null;
+  }
+  const numericValue = typeof rawQuantity === 'string' ? parseFloat(rawQuantity) : Number(rawQuantity);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+  const normalizedUnit = (unit || 'grams').toString().trim().toLowerCase();
+  switch (normalizedUnit) {
+    case 'kg':
+    case 'kilogram':
+    case 'kilograms':
+      return numericValue * 1000;
+    case 'g':
+    case 'gram':
+    case 'grams':
+      return numericValue;
+    case 'oz':
+    case 'ounce':
+    case 'ounces':
+      return numericValue * 28.3495;
+    case 'lb':
+    case 'lbs':
+    case 'pound':
+    case 'pounds':
+      return numericValue * 453.592;
+    default:
+      return numericValue;
+  }
+};
+
+const formatQuantityDisplay = (
+  rawQuantity: number | string | null | undefined,
+  unit?: string | null
+): string => {
+  if (rawQuantity === null || rawQuantity === undefined || rawQuantity === '') {
+    return 'N/A';
+  }
+
+  const numericValue = typeof rawQuantity === 'string' ? parseFloat(rawQuantity) : Number(rawQuantity);
+  if (!Number.isFinite(numericValue)) {
+    return 'N/A';
+  }
+
+  const normalizedUnit = (unit || 'grams').toString();
+  const formattedValue =
+    Number.isInteger(numericValue) ? numericValue.toString() : numericValue.toFixed(2).replace(/\.?0+$/, '');
+  return `${formattedValue} ${normalizedUnit}`;
+};
+
+const getBatchAvailableGrams = (batch?: {
+  quantity?: number | string | null;
+  unit?: string | null;
+  quantity_grams?: number | string | null;
+}): number => {
+  if (!batch) return 0;
+  const gramsValue =
+    batch.quantity_grams ?? convertQuantityValueToGrams(batch.quantity, batch.unit);
+  if (gramsValue === null || gramsValue === undefined) return 0;
+  const parsed = typeof gramsValue === 'string' ? parseFloat(gramsValue) : Number(gramsValue);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatShortDateLabel = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  const dateOnly = value.includes('T') ? value.split('T')[0] : value;
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  if (!Number.isNaN(year) && !Number.isNaN(month) && !Number.isNaN(day)) {
+    return new Date(year, month - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  return undefined;
+};
+
+const getRelativeDayLabel = (value?: string | null): string | null => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((parsed.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'tomorrow';
+  if (diffDays > 1) return `in ${diffDays} days`;
+  if (diffDays === -1) return 'yesterday';
+  return `${Math.abs(diffDays)} days ago`;
+};
+
+const formatReadyDateLabel = (value?: string | null): string => {
+  const relative = getRelativeDayLabel(value);
+  const short = value ? formatShortDateLabel(value) : undefined;
+  if (relative && short) {
+    return `${relative} (${short})`;
+  }
+  if (relative) return relative;
+  if (short) return short;
+  return 'soon';
+};
+
+type HarvestGroup = {
+  key: string;
+  customerName?: string;
+  deliveryDate?: string;
+  tasks: DailyTask[];
+};
+
+type BatchHarvestRow = {
+  trayId: number;
+  crop: string;
+  batchId?: string;
+  taskId: string;
+};
 
 export default function DailyFlow() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [activeTraysCount, setActiveTraysCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -122,13 +255,208 @@ export default function DailyFlow() {
   const [availableSubstitutes, setAvailableSubstitutes] = useState<any[]>([]);
   const [selectedSubstitute, setSelectedSubstitute] = useState<number | null>(null);
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
+  const [orderGapStatus, setOrderGapStatus] = useState<OrderGapStatus[]>([]);
+  const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
+  const [assignModalGap, setAssignModalGap] = useState<OrderGapStatus | null>(null);
+  const [assignableTrays, setAssignableTrays] = useState<AssignableTray[]>([]);
+  const [isLoadingAssignableTrays, setIsLoadingAssignableTrays] = useState(false);
+  const [selectedAssignTrayId, setSelectedAssignTrayId] = useState<number | null>(null);
+  const [isAssigningTray, setIsAssigningTray] = useState(false);
+  const [nearReadyTrayModal, setNearReadyTrayModal] = useState<{
+    gap: OrderGapStatus;
+    tray: AssignableTray;
+  } | null>(null);
+  const [fetchingTrayKey, setFetchingTrayKey] = useState<string | null>(null);
+  const [isTrayModalProcessing, setIsTrayModalProcessing] = useState(false);
+  const [batchHarvestModalGroup, setBatchHarvestModalGroup] = useState<HarvestGroup | null>(null);
+  const [batchHarvestRows, setBatchHarvestRows] = useState<BatchHarvestRow[]>([]);
+  const [batchHarvestSelected, setBatchHarvestSelected] = useState<Record<number, boolean>>({});
+  const [batchHarvestYields, setBatchHarvestYields] = useState<Record<number, string>>({});
+  const [isBatchHarvesting, setIsBatchHarvesting] = useState(false);
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    show: boolean;
+  }>({ type: 'success', message: '', show: false });
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  });
   
   // Ref to prevent duplicate submissions (more reliable than state for this)
   const isSubmittingSeeding = useRef(false);
-  
+
+  const showNotification = useCallback(
+    (
+      type: 'success' | 'error' | 'info' | 'warning',
+      message: string,
+      title?: string
+    ) => {
+      const formattedMessage = title ? `${title}: ${message}` : message;
+      if (type === 'error') {
+        console.error('[DailyFlow Notification]', formattedMessage);
+      } else if (type === 'warning') {
+        console.warn('[DailyFlow Notification]', formattedMessage);
+      } else if (type === 'info') {
+        console.info('[DailyFlow Notification]', formattedMessage);
+      } else {
+        console.log('[DailyFlow Notification]', formattedMessage);
+      }
+
+      setNotification({
+        type: type === 'error' ? 'error' : 'success',
+        message: formattedMessage,
+        show: true,
+      });
+
+      setTimeout(() => setNotification((prev) => ({ ...prev, show: false })), 5000);
+    },
+    []
+  );
+
+  const changeSelectedDate = (offsetDays: number) => {
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      next.setDate(next.getDate() + offsetDays);
+      next.setHours(0, 0, 0, 0);
+      return next;
+    });
+  };
+
+  const getFarmUuidFromSession = useCallback(() => {
+    const sessionData = localStorage.getItem('sproutify_session');
+    if (!sessionData) return null;
+    try {
+      return JSON.parse(sessionData).farmUuid as string | null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const openAssignModal = useCallback(async (gap: OrderGapStatus) => {
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      showNotification('error', 'Unable to determine farm for assignment');
+      return;
+    }
+    setAssignModalGap(gap);
+    setIsLoadingAssignableTrays(true);
+    try {
+      const trays = await fetchAssignableTrays(farmUuid, gap.product_id);
+      setAssignableTrays(trays);
+      setSelectedAssignTrayId(trays[0]?.tray_id ?? null);
+    } catch (error) {
+      console.error('[DailyFlow] Error loading assignable trays:', error);
+      showNotification('error', 'Failed to load ready trays');
+    } finally {
+      setIsLoadingAssignableTrays(false);
+    }
+  }, [getFarmUuidFromSession, showNotification]);
+
+  const handleAssignUnassignedGap = useCallback(() => {
+    const unassignedGap = activeOrderGaps.find((gap) => gap.unassigned_ready > 0);
+    if (unassignedGap) {
+      openAssignModal(unassignedGap);
+      return;
+    }
+    showNotification('error', 'No unassigned trays currently available');
+  }, [activeOrderGaps, openAssignModal, showNotification]);
+
+  const closeAssignModal = useCallback(() => {
+    setAssignModalGap(null);
+    setAssignableTrays([]);
+    setSelectedAssignTrayId(null);
+    setIsLoadingAssignableTrays(false);
+    setIsAssigningTray(false);
+  }, []);
+
+  const viewNearReadyTray = useCallback(async (gap: OrderGapStatus) => {
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      showNotification('error', 'Unable to resolve farm for tray view');
+      return;
+    }
+    if (!gap.customer_id) {
+      showNotification('error', 'No customer specified for this gap');
+      return;
+    }
+
+    const gapKey = `${gap.customer_id}-${gap.product_id}`;
+    setFetchingTrayKey(gapKey);
+
+    try {
+      const tray = await fetchNearestAssignedTray(
+        farmUuid,
+        gap.customer_id,
+        gap.product_id,
+        gap.product_name
+      );
+      if (tray?.tray_id) {
+        setNearReadyTrayModal({ gap, tray });
+      } else {
+        showNotification('error', 'No near-ready tray found for this order');
+      }
+    } catch (error) {
+      console.error('[DailyFlow] Error fetching near-ready tray:', error);
+      showNotification('error', 'Failed to find near-ready tray');
+    } finally {
+      setFetchingTrayKey((current) => (current === gapKey ? null : current));
+    }
+  }, [getFarmUuidFromSession, showNotification]);
+
   // Track tasks that are animating out (use ref so it persists through loadTasks calls)
   const animatingOutRef = useRef<Set<string>>(new Set());
   const [animatingOut, setAnimatingOut] = useState<Set<string>>(new Set());
+
+  // Fetch action history for an at-risk task
+  const pendingHistoryFetches = useRef<Set<string>>(new Set());
+  const fetchActionHistory = useCallback(async (task: DailyTask) => {
+    if (!task.standingOrderId || !task.deliveryDate || !getSupabaseClient()) return;
+
+    const key = `${task.standingOrderId}-${task.deliveryDate}-${task.recipeId}`;
+
+    if (pendingHistoryFetches.current.has(key)) return;
+
+    const currentHistory = actionHistory;
+    if (currentHistory.has(key)) return;
+
+    pendingHistoryFetches.current.add(key);
+
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        pendingHistoryFetches.current.delete(key);
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      const { data } = await getSupabaseClient()
+        .from('order_fulfillment_actions')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .eq('standing_order_id', task.standingOrderId)
+        .eq('delivery_date', task.deliveryDate)
+        .eq('recipe_id', task.recipeId)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (data) {
+        setActionHistory(prev => {
+          if (!prev.has(key)) {
+            const next = new Map(prev);
+            next.set(key, data);
+            return next;
+          }
+          return prev;
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching action history:', error);
+    } finally {
+      pendingHistoryFetches.current.delete(key);
+    }
+  }, [actionHistory]);
 
   // Autofill seeding quantity based on remaining trays and batch inventory
   useEffect(() => {
@@ -137,7 +465,7 @@ export default function DailyFlow() {
     const batch = availableBatches.find((b) => b.batchid === selectedBatchId);
     if (!batch) return;
     const remaining = Math.max(0, (seedingTask.quantity || 0) - (seedingTask.quantityCompleted || 0));
-    const availableGrams = parseFloat(batch.quantity || 0);
+    const availableGrams = getBatchAvailableGrams(batch);
     const needed = remaining * seedQuantityPerTray;
     const maxTrays = seedQuantityPerTray > 0 ? Math.floor(availableGrams / seedQuantityPerTray) : 0;
     if (!seedQuantityCompleted) {
@@ -149,22 +477,31 @@ export default function DailyFlow() {
     }
   }, [seedingTask, isSoakVariety, availableBatches, selectedBatchId, seedQuantityPerTray, seedQuantityCompleted]);
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     console.log('[loadTasks] Starting task refresh...');
     setLoading(true);
     try {
-      const sessionData = localStorage.getItem('sproutify_session');
-      const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
+    const sessionData = localStorage.getItem('sproutify_session');
+    const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
 
-      // Force refresh to bypass any caching - pass Date and forceRefresh flag
-      const [tasksData, count, passiveStatus] = await Promise.all([
-        fetchDailyTasks(new Date(), true), // Force refresh
-        getActiveTraysCount(),
-        fetchPassiveTrayStatus() // Fetch passive tray status directly from DB
-      ]);
+    const gapPromise = farmUuid
+      ? fetchOrderGapStatus(farmUuid).catch((error) => {
+          console.error('[loadTasks] Error fetching order gaps:', error);
+          return [];
+        })
+      : Promise.resolve<OrderGapStatus[]>([]);
+
+    // Force refresh to bypass any caching - pass Date and forceRefresh flag
+    const [tasksData, count, passiveStatus, orderGaps] = await Promise.all([
+      fetchDailyTasks(selectedDate, true), // Force refresh
+      getActiveTraysCount(),
+      fetchPassiveTrayStatus(), // Fetch passive tray status directly from DB
+      gapPromise
+    ]);
       
       // Update passive tray status
       setPassiveTrayStatus(passiveStatus);
+      setOrderGapStatus(orderGaps);
       
       const atRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
       const atRiskCount = atRiskTasks.length;
@@ -253,20 +590,88 @@ export default function DailyFlow() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDate, fetchActionHistory]);
 
   useEffect(() => {
     loadTasks();
     // Refresh every 5 minutes
-    const interval = setInterval(loadTasks, 5 * 60 * 1000);
+    const interval = setInterval(() => {
+      loadTasks();
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadTasks]);
 
-  const [notification, setNotification] = useState<{
-    type: 'success' | 'error';
-    message: string;
-    show: boolean;
-  }>({ type: 'success', message: '', show: false });
+  const handleAssignTray = useCallback(async () => {
+    if (!assignModalGap || !selectedAssignTrayId) return;
+    setIsAssigningTray(true);
+    try {
+      const success = await assignTrayToCustomer(selectedAssignTrayId, assignModalGap.customer_id);
+      if (success) {
+        showNotification('success', 'Tray assigned successfully');
+        closeAssignModal();
+        await loadTasks();
+      } else {
+        showNotification('error', 'Failed to assign tray');
+      }
+    } catch (error) {
+      console.error('[DailyFlow] Error assigning tray:', error);
+      showNotification('error', 'Failed to assign tray');
+    } finally {
+      setIsAssigningTray(false);
+    }
+  }, [assignModalGap, selectedAssignTrayId, closeAssignModal, loadTasks, showNotification]);
+
+  const handleAssignNearestTray = useCallback(async () => {
+    if (!nearReadyTrayModal) return;
+    const { gap, tray } = nearReadyTrayModal;
+    if (!gap.customer_id) {
+      showNotification('error', 'Missing customer for this gap');
+      return;
+    }
+
+    setIsTrayModalProcessing(true);
+    try {
+      const success = await assignTrayToCustomer(tray.tray_id, gap.customer_id);
+      if (success) {
+        showNotification('success', `Tray ${tray.tray_id} assigned to ${gap.customer_name}`);
+        setNearReadyTrayModal(null);
+        await loadTasks();
+      } else {
+        showNotification('error', 'Failed to assign tray');
+      }
+    } catch (error) {
+      console.error('[DailyFlow] Error assigning near-ready tray:', error);
+      showNotification('error', 'Failed to assign tray');
+    } finally {
+      setIsTrayModalProcessing(false);
+    }
+  }, [nearReadyTrayModal, loadTasks, showNotification]);
+
+  const handleHarvestNearestTray = useCallback(async () => {
+    if (!nearReadyTrayModal) return;
+    setIsTrayModalProcessing(true);
+    try {
+      const success = await harvestTrayNow(nearReadyTrayModal.tray.tray_id);
+      if (success) {
+        showNotification('success', `Tray ${nearReadyTrayModal.tray.tray_id} marked as harvested`);
+        setNearReadyTrayModal(null);
+        await loadTasks();
+      } else {
+        showNotification('error', 'Failed to harvest tray');
+      }
+    } catch (error) {
+      console.error('[DailyFlow] Error harvesting near-ready tray:', error);
+      showNotification('error', 'Failed to harvest tray');
+    } finally {
+      setIsTrayModalProcessing(false);
+    }
+  }, [nearReadyTrayModal, loadTasks, showNotification]);
+
+  const openNearReadyTrayDetail = useCallback(() => {
+    if (!nearReadyTrayModal) return;
+    setNearReadyTrayModal(null);
+    navigate(`/trays/${nearReadyTrayModal.tray.tray_id}`);
+  }, [nearReadyTrayModal, navigate]);
 
   const [errorDialog, setErrorDialog] = useState<{
     show: boolean;
@@ -274,74 +679,8 @@ export default function DailyFlow() {
     title: string;
   }>({ show: false, message: '', title: 'Error' });
 
-  const showNotification = (type: 'success' | 'error', message: string) => {
-    setNotification({ type, message, show: true });
-    setTimeout(() => setNotification({ type, message, show: false }), 5000);
-  };
-
   const showErrorDialog = (title: string, message: string) => {
     setErrorDialog({ show: true, message, title });
-  };
-
-  // Fetch action history for an at-risk task
-  // Use a ref to track pending fetches to avoid duplicate calls
-  const pendingHistoryFetches = useRef<Set<string>>(new Set());
-  
-  const fetchActionHistory = async (task: DailyTask) => {
-    if (!task.standingOrderId || !task.deliveryDate || !getSupabaseClient()) return;
-    
-    const key = `${task.standingOrderId}-${task.deliveryDate}-${task.recipeId}`;
-    
-    // Check if we already have this history or if it's pending
-    if (pendingHistoryFetches.current.has(key)) {
-      return; // Already fetching
-    }
-    
-    // Check current state synchronously (without triggering re-render)
-    const currentHistory = actionHistory;
-    if (currentHistory.has(key)) {
-      return; // Already have it
-    }
-    
-    // Mark as pending
-    pendingHistoryFetches.current.add(key);
-    
-    try {
-      const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) {
-        pendingHistoryFetches.current.delete(key);
-        return;
-      }
-      
-      const { farmUuid } = JSON.parse(sessionData);
-      
-      const { data } = await getSupabaseClient()
-        .from('order_fulfillment_actions')
-        .select('*')
-        .eq('farm_uuid', farmUuid)
-        .eq('standing_order_id', task.standingOrderId)
-        .eq('delivery_date', task.deliveryDate)
-        .eq('recipe_id', task.recipeId)
-        .order('created_at', { ascending: false })
-        .limit(3);
-      
-      if (data) {
-        setActionHistory(prev => {
-          // Double-check we still don't have it (race condition protection)
-          if (!prev.has(key)) {
-            const newMap = new Map(prev);
-            newMap.set(key, data);
-            return newMap;
-          }
-          return prev; // Return unchanged if already exists
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching action history:', error);
-    } finally {
-      // Remove from pending set
-      pendingHistoryFetches.current.delete(key);
-    }
   };
 
   // Fetch available substitutes for substitute action
@@ -420,6 +759,13 @@ export default function DailyFlow() {
     // For seed tasks, open the seeding dialog instead of completing directly
     // Handle both seed_request and planting_schedule seeding tasks
     if (task.action === 'Seed' && (task.taskSource === 'seed_request' || task.taskSource === 'planting_schedule')) {
+      console.log('[DailyFlow] Opening seeding dialog for task:', {
+        id: task.id,
+        taskSource: task.taskSource,
+        recipeId: task.recipeId,
+        requestId: task.requestId,
+        crop: task.crop
+      });
       setSeedingTask(task);
       setSelectedBatchId(null);
       setAvailableBatches([]);
@@ -428,9 +774,10 @@ export default function DailyFlow() {
       setMissedStepForSeeding(null);
       setIsSoakVariety(false);
       setAvailableSoakedSeed(null);
-      
+
       // For planting_schedule tasks, we need to fetch batches using recipeId directly
       if (task.taskSource === 'planting_schedule' && task.recipeId) {
+        console.log('[DailyFlow] Fetching batches for planting_schedule task with recipeId:', task.recipeId);
         // Fetch available batches for this recipe
         await fetchAvailableBatchesForRecipe(task);
         
@@ -569,6 +916,122 @@ export default function DailyFlow() {
         next.delete(task.id);
         return next;
       });
+    }
+  };
+
+  const resetBatchHarvestState = () => {
+    setBatchHarvestRows([]);
+    setBatchHarvestSelected({});
+    setBatchHarvestYields({});
+  };
+
+  const openBatchHarvestModal = (group: HarvestGroup) => {
+    const rowsMap = new Map<number, BatchHarvestRow>();
+    group.tasks.forEach((task) => {
+      task.trayIds.forEach((trayId) => {
+        if (!rowsMap.has(trayId)) {
+          rowsMap.set(trayId, {
+            trayId,
+            crop: task.crop,
+            batchId: task.batchId,
+            taskId: task.id,
+          });
+        }
+      });
+    });
+
+    const rows = Array.from(rowsMap.values());
+    const initialSelected: Record<number, boolean> = {};
+    const initialYields: Record<number, string> = {};
+
+    rows.forEach((row) => {
+      initialSelected[row.trayId] = true;
+      initialYields[row.trayId] = '';
+    });
+
+    setBatchHarvestRows(rows);
+    setBatchHarvestSelected(initialSelected);
+    setBatchHarvestYields(initialYields);
+    setBatchHarvestModalGroup(group);
+  };
+
+  const closeBatchHarvestModal = () => {
+    resetBatchHarvestState();
+    setBatchHarvestModalGroup(null);
+  };
+
+  const handleRecordBatchHarvest = async () => {
+    if (!batchHarvestModalGroup) return;
+
+    const selectedTrayIds = batchHarvestRows
+      .filter((row) => batchHarvestSelected[row.trayId])
+      .map((row) => row.trayId);
+
+    if (selectedTrayIds.length === 0) {
+      showNotification('error', 'Select at least one tray to harvest');
+      return;
+    }
+
+    setIsBatchHarvesting(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) {
+        showNotification('error', 'Session expired. Please reload the page.');
+        return;
+      }
+
+      const { farmUuid } = JSON.parse(sessionData);
+      const client = getSupabaseClient();
+      if (!client) {
+        throw new Error('Supabase client not initialized');
+      }
+
+      const now = new Date().toISOString();
+
+      for (const trayId of selectedTrayIds) {
+        const payload: Record<string, any> = { harvest_date: now, status: 'harvested' };
+        const yieldInput = batchHarvestYields[trayId];
+        if (yieldInput && yieldInput.trim() !== '') {
+          const parsed = parseFloat(yieldInput);
+          if (!Number.isNaN(parsed)) {
+            payload.yield = parsed;
+          }
+        }
+
+        const { error } = await client
+          .from('trays')
+          .update(payload)
+          .eq('tray_id', trayId)
+          .eq('farm_uuid', farmUuid);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      const { error: stepsError } = await client
+        .from('tray_steps')
+        .update({
+          completed: true,
+          completed_at: new Date().toISOString(),
+        })
+        .in('tray_id', selectedTrayIds);
+
+      if (stepsError) throw stepsError;
+
+      const orderLabel = batchHarvestModalGroup.customerName || 'this order';
+      showNotification(
+        'success',
+        `Harvested ${selectedTrayIds.length} ${selectedTrayIds.length === 1 ? 'tray' : 'trays'} for ${orderLabel}`
+      );
+
+      await loadTasks();
+      closeBatchHarvestModal();
+    } catch (error) {
+      console.error('[DailyFlow] Batch harvest error:', error);
+      showNotification('error', 'Failed to record batch harvest. Please try again.');
+    } finally {
+      setIsBatchHarvesting(false);
     }
   };
 
@@ -711,31 +1174,81 @@ export default function DailyFlow() {
       }
 
       // Query available batches by variety_id (not recipe_id)
-      // This is the correct approach - batches are linked to varieties, not recipes
-      console.log('[DailyFlow] Fetching batches for variety_id:', varietyId);
-      
-      let query = getSupabaseClient()
-        .from('seedbatches')
-        .select(`
-          batchid,
-          quantity,
-          unit,
-          lot_number,
-          purchasedate,
-          varietyid
-        `)
+      // Prefer the inventory view which already normalizes units/trays_possible
+      const traysNeeded = Math.max(1, task.trays || 0);
+      console.log('[DailyFlow] Fetching batches for variety_id:', varietyId, { traysNeeded, totalSeedNeeded });
+
+      const inventorySelect = `
+        batchid,
+        quantity,
+        unit,
+        lot_number,
+        purchasedate,
+        varietyid,
+        trays_possible,
+        quantity_grams
+      `;
+
+      let batchesData: any[] | null = null;
+      let usedInventoryView = false;
+
+      const { data: inventoryData, error: inventoryError } = await getSupabaseClient()
+        .from('seed_inventory_status')
+        .select(inventorySelect)
         .eq('farm_uuid', farmUuid)
         .eq('varietyid', varietyId)
-        .eq('is_active', true)
-        .gt('quantity', 0); // Only batches with quantity > 0
+        .gte('trays_possible', traysNeeded)
+        .order('purchasedate', { ascending: true });
 
-      // Only filter by quantity if we have a seed requirement
-      if (totalSeedNeeded > 0) {
-        query = query.gte('quantity', totalSeedNeeded);
+      if (!inventoryError) {
+        batchesData = inventoryData || [];
+        usedInventoryView = true;
+        console.log('[DailyFlow] seed_inventory_status returned batches:', {
+          varietyId,
+          traysNeeded,
+          count: batchesData.length
+        });
+      } else {
+        console.warn('[DailyFlow] seed_inventory_status query failed, falling back to seedbatches:', inventoryError);
       }
 
-      const { data: batchesData, error: batchesError } = await query
-        .order('purchasedate', { ascending: true });
+      if (!usedInventoryView) {
+        const { data: fallbackBatches, error: fallbackError } = await getSupabaseClient()
+          .from('seedbatches')
+          .select(`
+            batchid,
+            quantity,
+            unit,
+            lot_number,
+            purchasedate,
+            varietyid
+          `)
+          .eq('farm_uuid', farmUuid)
+          .eq('varietyid', varietyId)
+          .gt('quantity', 0)
+          .order('purchasedate', { ascending: true });
+
+        if (fallbackError) {
+          console.error('[DailyFlow] Error fetching batches:', fallbackError);
+          setAvailableBatches([]);
+          return;
+        }
+
+        let filteredBatches = fallbackBatches || [];
+        if (totalSeedNeeded > 0) {
+          filteredBatches = filteredBatches.filter((batch: any) => {
+            const batchGrams = convertQuantityValueToGrams(batch.quantity, batch.unit);
+            return batchGrams === null || batchGrams >= totalSeedNeeded;
+          });
+        }
+
+        batchesData = filteredBatches;
+        console.log('[DailyFlow] Fallback seedbatches query returned batches:', {
+          varietyId,
+          traysNeeded,
+          count: batchesData.length
+        });
+      }
 
       // Fetch variety name and seed_quantity_grams if we don't have them yet
       // Always fetch seed_quantity_grams from variety if we don't have it from recipe
@@ -756,16 +1269,14 @@ export default function DailyFlow() {
         }
       }
 
-      if (batchesError) {
-        console.error('[DailyFlow] Error fetching batches:', batchesError);
-        setAvailableBatches([]);
-        return;
-      }
-
+      const dataSource = usedInventoryView ? 'seed_inventory_status' : 'seedbatches';
       console.log('[DailyFlow] Found batches:', { 
+        source: dataSource,
         count: batchesData?.length || 0, 
         varietyId, 
         varietyName,
+        traysNeeded,
+        totalSeedNeeded,
         batches: batchesData 
       });
 
@@ -777,6 +1288,11 @@ export default function DailyFlow() {
         lot_number: batch.lot_number || null,
         purchasedate: batch.purchasedate,
         variety_name: varietyName,
+        trays_possible: batch.trays_possible ?? null,
+        quantity_grams:
+          batch.quantity_grams ??
+          convertQuantityValueToGrams(batch.quantity, batch.unit) ??
+          0,
       }));
 
       if (formattedBatches.length === 0) {
@@ -998,7 +1514,7 @@ export default function DailyFlow() {
             const sessionData = localStorage.getItem('sproutify_session');
             const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
             if (farmUuid) {
-              fetchDailyTasks(new Date(), true).then((tasksData) => {
+            fetchDailyTasks(selectedDate, true).then((tasksData) => {
                 const newAtRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
                 setTasks([...nonAtRiskTasks, ...newAtRiskTasks]);
               }).catch((error) => {
@@ -1217,7 +1733,7 @@ export default function DailyFlow() {
           const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
           if (farmUuid) {
             try {
-              const allTasks = await fetchDailyTasks(new Date(), true);
+              const allTasks = await fetchDailyTasks(selectedDate, true);
               const seedTasks = allTasks.filter(t => 
                 t.action === 'Seed' && 
                 ((completedTaskSource === 'seed_request' && t.requestId === completedRequestId) ||
@@ -1503,6 +2019,28 @@ export default function DailyFlow() {
   const harvestTasks = tasks.filter(t => t.action.toLowerCase().startsWith('harvest') && !t.action.toLowerCase().includes('at risk'));
   const atRiskTasks = tasks.filter(t => t.action.toLowerCase().includes('at risk'));
   const prepTasks = tasks.filter(t => t.action === 'Soak' || t.action === 'Seed');
+  const harvestGroups = useMemo<HarvestGroup[]>(() => {
+    const groupMap = new Map<string, HarvestGroup>();
+    harvestTasks.forEach((task) => {
+      const customerKey = task.customerName?.trim() || 'unassigned';
+      const deliveryKey = task.deliveryDate || 'no-date';
+      const key = `${customerKey}||${deliveryKey}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          key,
+          customerName: task.customerName,
+          deliveryDate: task.deliveryDate,
+          tasks: [],
+        });
+      }
+      groupMap.get(key)!.tasks.push(task);
+    });
+    return Array.from(groupMap.values());
+  }, [harvestTasks]);
+
+  const batchHarvestSelectedCount = useMemo(() => {
+    return batchHarvestRows.reduce((count, row) => count + (batchHarvestSelected[row.trayId] ? 1 : 0), 0);
+  }, [batchHarvestRows, batchHarvestSelected]);
   
   // Only log task grouping and limit frequency to avoid spam
   const logKey = `task-grouping-${tasks.length}-${atRiskTasks.length}`;
@@ -1546,25 +2084,20 @@ export default function DailyFlow() {
   // Tasks that have missed steps (need catch-up)
   const tasksWithMissedSteps = tasks.filter(t => t.missedSteps && t.missedSteps.length > 0);
 
-  // Get day name and date for header
-  const getToday = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return today;
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short', 
-      month: 'short', 
+  const formatHeaderDate = (date: Date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
       day: 'numeric',
       year: 'numeric'
     });
   };
 
-  const today = getToday();
-  const dayName = today.toLocaleDateString('en-US', { weekday: 'long' });
-  const formattedDate = formatDate(today);
+  const headerDayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
+  const formattedDate = formatHeaderDate(selectedDate);
+  const todayReference = new Date();
+  todayReference.setHours(0, 0, 0, 0);
+  const isViewingToday = selectedDate.getTime() === todayReference.getTime();
 
   if (loading) {
     return (
@@ -1586,9 +2119,32 @@ export default function DailyFlow() {
             <div className="p-2 rounded-lg bg-emerald-100">
               <Calendar className="h-5 w-5 text-emerald-600" />
             </div>
-            <div>
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900">{formattedDate}</h2>
-              <p className="text-sm text-slate-500">Today - {dayName}'s Flow</p>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="p-0 text-slate-500 hover:text-slate-700"
+                  onClick={() => changeSelectedDate(-1)}
+                  aria-label="Previous day"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <h2 className="text-3xl font-bold tracking-tight text-slate-900">{formattedDate}</h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="p-0 text-slate-500 hover:text-slate-700"
+                  onClick={() => changeSelectedDate(1)}
+                  aria-label="Next day"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-sm text-slate-500">
+                {isViewingToday ? 'Today - ' : ''}
+                {headerDayName}'s Flow
+              </p>
             </div>
           </div>
           <p className="text-slate-600 flex items-center gap-2 mt-2">
@@ -1609,6 +2165,103 @@ export default function DailyFlow() {
       </div>
 
       <div className="space-y-8">
+
+        {/* ORDER STATUS GAPS */}
+        {activeOrderGaps.length > 0 && (
+          <section>
+            <Card className="border-amber-200 bg-amber-50/80 shadow-sm overflow-hidden p-4 md:p-6">
+            <div className="flex flex-wrap items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-700" />
+                <h3 className="text-lg font-semibold uppercase tracking-wide text-amber-900">Order Gaps</h3>
+                <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs uppercase tracking-[0.2em]">
+                  {activeOrderGaps.length} gap{activeOrderGaps.length === 1 ? '' : 's'}
+                </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="border border-amber-200 text-amber-900 text-xs uppercase tracking-[0.2em] px-3 py-1 rounded-full"
+                onClick={handleAssignUnassignedGap}
+              >
+                Assign Unassigned
+              </Button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {activeOrderGaps.map((gap) => {
+                  const needsUnassigned = gap.unassigned_ready > 0;
+                  const hasNearReady = gap.near_ready_assigned > 0;
+                  const isFixable = needsUnassigned || hasNearReady;
+                  const message = needsUnassigned
+                    ? `⚠️ Missing ${gap.varieties_missing} ${gap.varieties_missing === 1 ? 'variety' : 'varieties'} — ${gap.unassigned_ready} unassigned ${gap.unassigned_ready === 1 ? 'tray' : 'trays'} ready to grab!`
+                    : hasNearReady
+                      ? `⏳ Ready ${formatReadyDateLabel(gap.soonest_ready_date)}`
+                      : '❌ No trays available — at risk!';
+                  const rowClass = isFixable
+                    ? 'border-amber-200 bg-amber-50 text-amber-900'
+                    : 'border-red-200 bg-red-50 text-red-900';
+                  return (
+                    <div
+                      key={`${gap.customer_id}-${gap.product_id}`}
+                      className={cn(
+                        'rounded-2xl border p-3 space-y-1',
+                        rowClass
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-current">
+                          {gap.customer_name} — {gap.product_name}
+                        </p>
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            'text-[0.6rem] uppercase tracking-[0.25em]',
+                            isFixable ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                          )}
+                        >
+                          Gap {gap.gap}
+                        </Badge>
+                      </div>
+                      <p className="text-sm leading-relaxed">{message}</p>
+                  {gap.is_mix && gap.varieties_in_product > 0 && (
+                    <p className="text-xs text-current/80">
+                      {gap.varieties_missing}/{gap.varieties_in_product} varieties missing
+                    </p>
+                  )}
+                  {gap.missing_varieties && (
+                    <p className="text-xs text-current/80">
+                      Missing: {gap.missing_varieties}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    {needsUnassigned && (
+                      <Button className="text-sm" onClick={() => openAssignModal(gap)}>
+                        Assign Tray
+                      </Button>
+                    )}
+                    {!needsUnassigned && hasNearReady && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-sm"
+                        onClick={() => viewNearReadyTray(gap)}
+                        disabled={fetchingTrayKey === `${gap.customer_id}-${gap.product_id}`}
+                      >
+                        {fetchingTrayKey === `${gap.customer_id}-${gap.product_id}` ? 'Loading...' : 'View Tray'}
+                      </Button>
+                    )}
+                    {!needsUnassigned && !hasNearReady && gap.gap > 0 && (
+                      <Badge variant="destructive" className="text-[0.6rem] uppercase tracking-[0.25em]">
+                        At Risk
+                      </Badge>
+                    )}
+                  </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </section>
+        )}
+
 
         {/* SECTION 0: MISSED STEPS CATCH-UP */}
         {tasksWithMissedSteps.length > 0 && (
@@ -1645,19 +2298,64 @@ export default function DailyFlow() {
               <h3 className="text-xl font-semibold text-slate-900">Ready for Harvest</h3>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {harvestTasks.map(task => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  variant="harvest"
-                  onComplete={handleComplete}
-                  isCompleting={completingIds.has(task.id)}
-                  isAnimatingOut={animatingOut.has(task.id)}
-                  onViewDetails={handleViewDetails}
-                  onMarkAsLost={handleMarkAsLost}
-                />
-              ))}
+            <div className="space-y-6">
+              {harvestGroups.map((group) => {
+                const traysReady = group.tasks.reduce((sum, task) => sum + (Number(task.quantity) || 0), 0);
+                const groupLabel = group.customerName ? `${group.customerName} Order` : 'Unassigned Trays';
+                const deliveryLabel = formatShortDateLabel(group.deliveryDate);
+                return (
+                  <div
+                    key={group.key}
+                    className={cn(
+                      "rounded-2xl border p-4 space-y-4 transition-shadow duration-200",
+                      group.customerName ? "border-emerald-200 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white"
+                    )}
+                  >
+                    <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{groupLabel}</p>
+                        {deliveryLabel && (
+                          <p className="text-xs text-slate-500">Delivery {deliveryLabel}</p>
+                        )}
+                        <p className="text-xs font-semibold text-emerald-700">
+                          {group.customerName
+                            ? `${group.customerName}: ${group.tasks.length} ${group.tasks.length === 1 ? 'variety' : 'varieties'} ready`
+                            : `${traysReady} ${traysReady === 1 ? 'tray' : 'trays'} ready`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-700 mt-1 md:mt-0">
+                          {group.tasks.length} {group.tasks.length === 1 ? 'variety' : 'varieties'}
+                        </Badge>
+                        {group.customerName && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openBatchHarvestModal(group)}
+                          >
+                            Harvest Order
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {group.tasks.map((task) => (
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          variant="harvest"
+                          onComplete={handleComplete}
+                          isCompleting={completingIds.has(task.id)}
+                          isAnimatingOut={animatingOut.has(task.id)}
+                          onViewDetails={handleViewDetails}
+                          onMarkAsLost={handleMarkAsLost}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
         )}
@@ -1692,6 +2390,147 @@ export default function DailyFlow() {
             </div>
           </section>
         )}
+
+      <Dialog open={!!assignModalGap} onOpenChange={(open) => !open && closeAssignModal()}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Assign Ready Tray</DialogTitle>
+            <DialogDescription>
+              Select a ready tray to assign to {assignModalGap?.customer_name} ({assignModalGap?.product_name})
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {isLoadingAssignableTrays ? (
+              <p className="text-sm text-slate-500">Loading ready trays...</p>
+            ) : assignableTrays.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No unassigned ready trays found for this product.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                {assignableTrays.map((tray) => (
+                  <label
+                    key={tray.tray_id}
+                    className={cn(
+                      'flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors',
+                      selectedAssignTrayId === tray.tray_id
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-slate-200 bg-white'
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="assign-tray"
+                      value={tray.tray_id}
+                      checked={selectedAssignTrayId === tray.tray_id}
+                      onChange={() => setSelectedAssignTrayId(tray.tray_id)}
+                      className="h-3 w-3 text-emerald-600 focus:ring-0"
+                    />
+                    <div className="text-sm">
+                      <p className="font-semibold text-slate-900">Tray {tray.tray_id} • {tray.recipe_name}</p>
+                      <p className="text-xs text-slate-500">
+                        Sowed {new Date(tray.sow_date).toLocaleDateString()} • {tray.days_grown} days grown
+                      </p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeAssignModal}>Cancel</Button>
+            <Button
+              onClick={handleAssignTray}
+              disabled={
+                !assignModalGap ||
+                !selectedAssignTrayId ||
+                isAssigningTray ||
+                isLoadingAssignableTrays ||
+                assignableTrays.length === 0
+              }
+            >
+              {isAssigningTray ? 'Assigning...' : 'Assign Tray'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!nearReadyTrayModal}
+        onOpenChange={(open) => !open && setNearReadyTrayModal(null)}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Tray {nearReadyTrayModal?.tray.tray_id}</DialogTitle>
+            <DialogDescription>
+              Near-ready tray for {nearReadyTrayModal?.gap.customer_name} — {nearReadyTrayModal?.gap.product_name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Recipe</Label>
+                <p className="font-semibold text-slate-900">{nearReadyTrayModal?.tray.recipe_name || '—'}</p>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Sow Date</Label>
+                <p className="text-sm text-slate-700">
+                  {nearReadyTrayModal?.tray.sow_date
+                    ? new Date(nearReadyTrayModal.tray.sow_date).toLocaleDateString()
+                    : 'Unknown'}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Days grown</Label>
+                <p className="text-sm text-slate-700">{nearReadyTrayModal?.tray.days_grown ?? '—'}</p>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Ready status</Label>
+                <p className="text-sm text-slate-700">
+                  {nearReadyTrayModal
+                    ? nearReadyTrayModal.tray.days_until_ready <= 0
+                      ? 'Ready now'
+                      : `Ready in ${nearReadyTrayModal.tray.days_until_ready} day${nearReadyTrayModal.tray.days_until_ready === 1 ? '' : 's'}`
+                    : 'Loading...'}
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex flex-col gap-2">
+            <Button
+              onClick={handleAssignNearestTray}
+              disabled={!nearReadyTrayModal || isTrayModalProcessing}
+              className="w-full"
+            >
+              {isTrayModalProcessing ? 'Processing...' : `Assign to ${nearReadyTrayModal?.gap.customer_name}`}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleHarvestNearestTray}
+              disabled={!nearReadyTrayModal || isTrayModalProcessing}
+              className="w-full"
+            >
+              {isTrayModalProcessing ? 'Processing...' : 'Harvest today'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={openNearReadyTrayDetail}
+              className="w-full"
+            >
+              View full tray detail
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setNearReadyTrayModal(null)}
+              className="w-full"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
         {/* Available Soaked Seed Panel */}
         {allAvailableSoakedSeed.length > 0 && (
@@ -1872,7 +2711,7 @@ export default function DailyFlow() {
 
       {/* Notification Toast */}
       {notification.show && (
-        <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-4 right-4 z-[100] animate-in slide-in-from-bottom-5">
           <Card className={cn(
             "p-4 shadow-lg border-2 min-w-[300px]",
             notification.type === 'success' 
@@ -2161,6 +3000,94 @@ export default function DailyFlow() {
         </DialogContent>
       </Dialog>
 
+      {/* Batch Harvest Modal for Customer Orders */}
+      <Dialog
+        open={!!batchHarvestModalGroup}
+        onOpenChange={(open) => {
+          if (!open) closeBatchHarvestModal();
+        }}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>
+              Harvest for {batchHarvestModalGroup?.customerName || 'this order'}
+            </DialogTitle>
+            <DialogDescription>
+              Confirm the ready trays and optionally record yield per tray before marking the order as harvested.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {batchHarvestRows.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No ready trays found for this order. Refresh the page if this looks incorrect.
+              </p>
+            ) : (
+              <div className="space-y-3 max-h-[360px] overflow-y-auto pr-2">
+                {batchHarvestRows.map((row) => (
+                  <div
+                    key={`${row.trayId}-${row.taskId}`}
+                    className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-3 py-3"
+                  >
+                    <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!batchHarvestSelected[row.trayId]}
+                        onChange={() =>
+                          setBatchHarvestSelected((prev) => ({
+                            ...prev,
+                            [row.trayId]: !prev[row.trayId],
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{row.crop}</p>
+                        <p className="text-xs text-slate-500">
+                          Tray {row.trayId}
+                          {row.batchId ? ` • ${row.batchId}` : ''}
+                        </p>
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Yield"
+                        value={batchHarvestYields[row.trayId] ?? ''}
+                        onChange={(e) =>
+                          setBatchHarvestYields((prev) => ({
+                            ...prev,
+                            [row.trayId]: e.target.value,
+                          }))
+                        }
+                        disabled={!batchHarvestSelected[row.trayId]}
+                        className="w-24"
+                      />
+                      <span className="text-xs font-semibold text-slate-500">g</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={closeBatchHarvestModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRecordBatchHarvest}
+              disabled={isBatchHarvesting || batchHarvestSelectedCount === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {isBatchHarvesting
+                ? 'Recording...'
+                : `Record Harvest${batchHarvestSelectedCount > 0 ? ` (${batchHarvestSelectedCount})` : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Seeding Dialog - with batch selection */}
       {/* Soak Task Completion Dialog */}
       <Dialog open={!!soakTask} onOpenChange={(open) => {
@@ -2202,11 +3129,11 @@ export default function DailyFlow() {
             const remaining = Math.max(0, traysRemainingToSeed - traysWithSoakedSeed);
             const gramsNeeded = remaining * seedPerTray; // Recommended amount
             const selectedBatch = availableBatches.find(b => b.batchid === selectedBatchId);
-            const availableGrams = selectedBatch ? parseFloat(selectedBatch.quantity) : 0;
+            const availableGrams = getBatchAvailableGrams(selectedBatch);
             const requestedQuantity = parseFloat(soakQuantityGrams) || 0;
             const hasShortage = selectedBatch && seedPerTray > 0 && gramsNeeded > availableGrams;
             const isInsufficient = selectedBatch && requestedQuantity > 0 && requestedQuantity > availableGrams;
-            const totalAvailable = availableBatches.reduce((sum, b) => sum + parseFloat(b.quantity || 0), 0);
+            const totalAvailable = availableBatches.reduce((sum, b) => sum + getBatchAvailableGrams(b), 0);
             const shortage = hasShortage ? gramsNeeded - availableGrams : (isInsufficient ? requestedQuantity - availableGrams : 0);
             const maxTraysPossible = seedPerTray > 0 ? Math.floor(availableGrams / seedPerTray) : 0;
             const canSoakPartial = maxTraysPossible > 0;
@@ -2326,7 +3253,16 @@ export default function DailyFlow() {
                     <div className="text-sm text-slate-500">Loading available batches...</div>
                   ) : availableBatches.length === 0 ? (
                     <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      No available batches found for this variety.
+                      <p>No available batches found for this variety.</p>
+                      <button
+                        className="text-amber-700 underline font-medium hover:text-amber-800 mt-1 block"
+                        onClick={() => {
+                          setSoakTask(null);
+                          navigate('/batches');
+                        }}
+                      >
+                        Go to Batches page to add seed inventory
+                      </button>
                     </div>
                   ) : (
                     <Select
@@ -2340,19 +3276,22 @@ export default function DailyFlow() {
                         <SelectValue placeholder="Select a seed batch" />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableBatches.map((batch) => (
+                      {availableBatches.map((batch) => {
+                        const quantityLabel = formatQuantityDisplay(batch.quantity, batch.unit);
+                        return (
                           <SelectItem key={batch.batchid} value={batch.batchid.toString()}>
                             <div className="flex flex-col">
                               <span className="font-medium">
                                 {batch.variety_name} - Batch #{batch.batchid}
                               </span>
                               <span className="text-xs text-slate-500">
-                                {batch.quantity} {batch.unit || 'grams'} available
+                                  {quantityLabel} available
                                 {batch.lot_number && ` • Lot: ${batch.lot_number}`}
                               </span>
                             </div>
                           </SelectItem>
-                        ))}
+                        );
+                      })}
                       </SelectContent>
                     </Select>
                   )}
@@ -2431,7 +3370,7 @@ export default function DailyFlow() {
                 if (!soakTask) return true;
                 const selectedBatch = availableBatches.find(b => b.batchid === selectedBatchId);
                 if (!selectedBatch) return !selectedBatchId || !soakQuantityGrams || isSubmittingSeeding.current || completingIds.has(soakTask?.id || '') || availableBatches.length === 0;
-                const availableGrams = parseFloat(selectedBatch.quantity) || 0;
+                const availableGrams = getBatchAvailableGrams(selectedBatch);
                 const seedPerTray = seedQuantityPerTray || 0;
                 const canSoakPartial = seedPerTray > 0 ? Math.floor(availableGrams / seedPerTray) > 0 : false;
                 return !selectedBatchId || !soakQuantityGrams || isSubmittingSeeding.current || completingIds.has(soakTask?.id || '') || availableBatches.length === 0 || !canSoakPartial;
@@ -2483,7 +3422,11 @@ export default function DailyFlow() {
             const traysToSeed = traysInput > 0 ? traysInput : remainingTrays;
             const gramsNeeded = seedPerTray > 0 ? traysToSeed * seedPerTray : 0;
             const totalNeeded = seedPerTray > 0 ? remainingTrays * seedPerTray : 0;
-            const availableGrams = selectedBatch ? parseFloat(selectedBatch.quantity || 0) : 0;
+            const convertedAvailableGrams =
+              selectedBatch?.quantity_grams ??
+              convertQuantityValueToGrams(selectedBatch?.quantity, selectedBatch?.unit) ??
+              0;
+            const availableGrams = convertedAvailableGrams || 0;
             const maxTraysPossible = seedPerTray > 0 ? Math.floor(availableGrams / seedPerTray) : 0;
             const hasShortage = seedPerTray > 0 && totalNeeded > availableGrams;
             const shortage = hasShortage ? totalNeeded - availableGrams : 0;
@@ -2539,7 +3482,16 @@ export default function DailyFlow() {
                       <div className="text-sm text-slate-500">Loading available batches...</div>
                     ) : availableBatches.length === 0 ? (
                       <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        No available batches found for this variety.
+                        <p>No available batches found for this variety.</p>
+                        <button
+                          className="text-amber-700 underline font-medium hover:text-amber-800 mt-1 block"
+                          onClick={() => {
+                            setSeedingTask(null);
+                            navigate('/batches');
+                          }}
+                        >
+                          Go to Batches page to add seed inventory
+                        </button>
                       </div>
                     ) : (
                       <Select
@@ -3611,6 +4563,7 @@ const TaskCard = ({
   };
 
   const style = styles[variant] || styles.default;
+  const isCustomerOrder = variant === 'harvest' && Boolean(task.customerName);
   const progressPercent = Math.min((task.dayCurrent / task.dayTotal) * 100, 100);
   const trayCount = task.traysRemaining ?? task.trays;
 
@@ -3619,6 +4572,7 @@ const TaskCard = ({
       "group relative flex flex-col justify-between overflow-hidden transition-all duration-300 bg-white border",
       "hover:shadow-lg hover:-translate-y-1", 
       style.border,
+      isCustomerOrder && "ring-1 ring-emerald-200 shadow-emerald-200/50",
       isAnimatingOut && "opacity-0 translate-x-10 scale-95 transition-all duration-300"
     )}>
       
@@ -3685,6 +4639,21 @@ const TaskCard = ({
           )}
         </div>
         
+        {/* Show customer info for harvest orders */}
+        {variant === 'harvest' && task.customerName && (
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-emerald-700 mb-2">
+            <Badge variant="outline" className="border-emerald-200 text-emerald-700 px-2 py-0.5">
+              Order
+            </Badge>
+            <span className="truncate">For: {task.customerName}</span>
+            {task.deliveryDate && (
+              <span className="text-slate-500">
+                • Delivery {formatShortDateLabel(task.deliveryDate) ?? task.deliveryDate}
+              </span>
+            )}
+          </div>
+        )}
+        
         {/* Show delivery date for seeding tasks with customers */}
         {variant === 'seed' && task.customerName && task.deliveryDate && (() => {
           // Parse date string as local date to avoid UTC timezone shift
@@ -3705,6 +4674,14 @@ const TaskCard = ({
         {variant === 'seed' && task.requiresWeight && task.weightLbs != null && task.weightLbs > 0 && (
           <div className="text-xs text-slate-600 mb-2 font-medium">
             Stack with {task.weightLbs}lb weight
+          </div>
+        )}
+
+        {/* Show overdue indicator for seeding tasks */}
+        {variant === 'seed' && task.isOverdue && task.daysOverdue && task.daysOverdue > 0 && (
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-red-600 mb-2 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+            <AlertTriangle size={14} className="text-red-500" />
+            <span>{task.daysOverdue} {task.daysOverdue === 1 ? 'day' : 'days'} overdue</span>
           </div>
         )}
 

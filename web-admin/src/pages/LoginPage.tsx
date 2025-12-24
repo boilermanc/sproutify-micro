@@ -313,7 +313,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="you@sproutify.co"
+                placeholder="team@sproutify.app"
                 autoComplete="email"
               />
             </div>
@@ -342,10 +342,10 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
         <p className="text-center text-sm text-white/60">
           Need help? Email{' '}
           <a
-            href="mailto:support@sproutify.micro"
+            href="mailto:team@sproutify.app"
             className="font-semibold text-emerald-200 underline-offset-4 hover:text-white hover:underline"
           >
-            support@sproutify.micro
+            team@sproutify.app
           </a>
         </p>
       </div>

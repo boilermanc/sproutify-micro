@@ -28,3 +28,4 @@ COMMENT ON COLUMN varieties.stock_unit IS 'Unit of measure for stock quantity (g
 
 
 
+

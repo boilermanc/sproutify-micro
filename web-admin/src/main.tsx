@@ -3,8 +3,14 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
+const shouldUseStrictMode = import.meta.env.MODE === 'production'
+
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+  shouldUseStrictMode ? (
+    <StrictMode>
+      <App />
+    </StrictMode>
+  ) : (
     <App />
-  </StrictMode>,
+  ),
 )

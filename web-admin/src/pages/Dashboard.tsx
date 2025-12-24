@@ -477,7 +477,7 @@ const Dashboard = () => {
   const fetchDashboardData = useCallback(async (showLoadingState = false) => {
     // Prevent multiple simultaneous fetches
     if (isFetchingRef.current) {
-      console.log('[DEBUG] Fetch already in progress, skipping...');
+      console.debug('[DEBUG] Fetch already in progress, skipping...');
       return;
     }
     
@@ -719,6 +719,7 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error fetching dashboard:', error);
     } finally {
+      isFetchingRef.current = false;
       setIsLoading(false);
       setIsRefreshing(false);
     }

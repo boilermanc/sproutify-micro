@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { useParams } from 'react-router-dom';
 import { checkHarvestReminders } from '../services/notificationService';
 import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
 import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -15,6 +16,18 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Textarea } from '@/components/ui/textarea';
 
 type TrayStatusFilter = 'all' | 'active' | 'harvested' | 'lost';
+type SortKey =
+  | 'trayId'
+  | 'batchId'
+  | 'variety'
+  | 'seeding_date_raw'
+  | 'customer'
+  | 'harvest_date_raw'
+  | 'status';
+type SortConfig = {
+  key: SortKey;
+  direction: 'asc' | 'desc';
+};
 
 const TraysPage = () => {
   const stageColors: Record<string, string> = {
@@ -37,12 +50,16 @@ const TraysPage = () => {
   const [totalCount, setTotalCount] = useState(0);
   const ITEMS_PER_PAGE = 20;
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [viewingTray, setViewingTray] = useState<any>(null);
   const [editingTray, setEditingTray] = useState<any>(null);
   const [trayDetails, setTrayDetails] = useState<any>(null);
   const [creating, setCreating] = useState(false);
+  const { trayId: routeTrayId } = useParams<{ trayId?: string }>();
+  const [hasOpenedTrayFromParam, setHasOpenedTrayFromParam] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [newTray, setNewTray] = useState<{
     recipe_id: string;
@@ -77,7 +94,6 @@ const TraysPage = () => {
       const { farmUuid } = JSON.parse(sessionData);
       const offset = page * ITEMS_PER_PAGE;
       const to = offset + ITEMS_PER_PAGE - 1;
-      const search = searchTerm.trim();
 
       // Fetch trays with recipes join, and join varieties to get variety name
       // Note: seedbatches join removed - will fetch separately to avoid column name issues
@@ -104,10 +120,6 @@ const TraysPage = () => {
         query = query.eq('status', 'lost');
       }
       // 'all' shows everything, so no additional filter
-
-      if (search) {
-        query = query.or(`tray_unique_id.ilike.%${search}%,recipes.recipe_name.ilike.%${search}%,recipes.varieties.name.ilike.%${search}%`);
-      }
 
       const { data, error, count } = await query
         .order('created_at', { ascending: false })
@@ -445,12 +457,20 @@ const TraysPage = () => {
           status,
           loss_reason: tray.loss_reason || null,
           harvest_date: tray.harvest_date ? new Date(tray.harvest_date).toLocaleDateString() : projectedHarvestDate,
+          harvest_date_raw: tray.harvest_date || '',
           seeding_date: tray.sow_date ? new Date(tray.sow_date).toLocaleDateString() : 'Not set',
+          seeding_date_raw: tray.sow_date || '',
           created_at: new Date(tray.created_at).toLocaleDateString()
         };
       });
 
-      setTrays(formattedTrays);
+    setTrays(formattedTrays);
+    console.log('[Trays] Sample tray customer_ids:', formattedTrays.slice(0, 5).map((t) => ({
+      tray_id: t.id,
+      customer_id: t.customer_id,
+      isAssigned: isTrayAssigned(t),
+    })));
+    console.log('[Trays] Unassigned count:', formattedTrays.filter((t) => !isTrayAssigned(t)).length);
       const pageHasMore = (count === null || count === undefined)
         ? ((data?.length || 0) === ITEMS_PER_PAGE)
         : ((offset + (data?.length || 0)) < count);
@@ -460,7 +480,7 @@ const TraysPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page, searchTerm]);
+  }, [statusFilter, page]);
 
   const fetchFormData = useCallback(async () => {
     try {
@@ -1039,7 +1059,7 @@ const TraysPage = () => {
     }
   };
 
-  const handleViewTray = async (tray: any) => {
+  const handleViewTray = useCallback(async (tray: any) => {
     setViewingTray(tray);
     setIsViewDialogOpen(true);
     
@@ -1137,7 +1157,29 @@ const TraysPage = () => {
     } catch (error) {
       console.error('Error loading tray details:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!routeTrayId) {
+      setHasOpenedTrayFromParam(false);
+      return;
+    }
+
+    if (hasOpenedTrayFromParam) return;
+
+    const trayIdNumber = Number(routeTrayId);
+    if (Number.isNaN(trayIdNumber)) return;
+
+    setHasOpenedTrayFromParam(true);
+
+    const matchedTray = trays.find((tray) => tray.id === trayIdNumber);
+    if (matchedTray) {
+      handleViewTray(matchedTray);
+      return;
+    }
+
+    handleViewTray({ id: trayIdNumber, trayId: routeTrayId });
+  }, [routeTrayId, trays, hasOpenedTrayFromParam, handleViewTray]);
 
   // Handle opening lost tray dialog
   const handleMarkAsLost = (tray: any) => {
@@ -1171,10 +1213,100 @@ const TraysPage = () => {
     }
   };
 
-  const filteredTrays = trays.filter(tray =>
-    tray.variety.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tray.trayId.toString().toLowerCase().includes(searchTerm.toLowerCase())
+  const handleSort = (key: SortKey) => {
+    setSortConfig((prev) => {
+      if (prev?.key === key) {
+        return {
+          key,
+          direction: prev.direction === 'asc' ? 'desc' : 'asc',
+        };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const SortableHeaderCell = ({ label, sortKey }: { label: string; sortKey: SortKey }) => (
+    <TableHead>
+      <button
+        type="button"
+        onClick={() => handleSort(sortKey)}
+        className="flex w-full items-center gap-1 text-left text-sm font-semibold text-foreground"
+      >
+        <span>{label}</span>
+        {sortConfig?.key === sortKey && (
+          <span className="text-[10px] text-muted-foreground">
+            {sortConfig.direction === 'asc' ? '▲' : '▼'}
+          </span>
+        )}
+      </button>
+    </TableHead>
   );
+
+  const isTrayAssigned = (tray: any) => {
+    const id = typeof tray.customer_id === 'string' ? parseInt(tray.customer_id, 10) : tray.customer_id;
+    return Number.isFinite(id) && id > 0;
+  };
+
+  const unassignedTraysCount = useMemo(() => {
+    return trays.filter((tray) => !isTrayAssigned(tray)).length;
+  }, [trays]);
+
+  const filteredTrays = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const matchesTerm = (value?: string | number | null) =>
+      value?.toString().toLowerCase().includes(normalizedSearch) ?? false;
+
+    return trays.filter((tray) => {
+      if (showUnassignedOnly && isTrayAssigned(tray)) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return (
+        matchesTerm(tray.variety) ||
+        matchesTerm(tray.trayId) ||
+        matchesTerm(tray.recipe) ||
+        matchesTerm(tray.customer) ||
+        matchesTerm(tray.batchId) ||
+        matchesTerm(tray.seeding_date) ||
+        matchesTerm(tray.harvest_date)
+      );
+    });
+  }, [trays, searchTerm, showUnassignedOnly]);
+
+  const sortedTrays = useMemo(() => {
+    if (!sortConfig) {
+      return filteredTrays;
+    }
+
+    const multiplier = sortConfig.direction === 'asc' ? 1 : -1;
+    const sorted = [...filteredTrays];
+
+    sorted.sort((a: any, b: any) => {
+      if (sortConfig.key === 'seeding_date_raw' || sortConfig.key === 'harvest_date_raw') {
+        const parseDate = (value?: string | null) => {
+          const timestamp = value ? Date.parse(value) : NaN;
+          return Number.isNaN(timestamp) ? 0 : timestamp;
+        };
+        const difference = parseDate(a[sortConfig.key]) - parseDate(b[sortConfig.key]);
+        return difference === 0 ? 0 : difference * multiplier;
+      }
+
+      const left = (a[sortConfig.key] ?? '').toString().toLowerCase();
+      const right = (b[sortConfig.key] ?? '').toString().toLowerCase();
+
+      if (left < right) return -1 * multiplier;
+      if (left > right) return 1 * multiplier;
+      return 0;
+    });
+
+    return sorted;
+  }, [filteredTrays, sortConfig]);
+
+  const traysToDisplay = sortedTrays;
   const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE)) : Math.max(1, page + 1);
 
   if (loading) {
@@ -1331,6 +1463,16 @@ const TraysPage = () => {
             className="pl-8"
           />
         </div>
+        <Button
+          size="sm"
+          variant={showUnassignedOnly ? 'default' : 'outline'}
+          className="text-xs uppercase tracking-wide"
+          onClick={() => setShowUnassignedOnly((prev) => !prev)}
+          disabled={unassignedTraysCount === 0}
+        >
+          {showUnassignedOnly ? 'Unassigned only' : 'Show unassigned'}
+          <span className="ml-2 text-[10px] text-muted-foreground">({unassignedTraysCount})</span>
+        </Button>
         <div className="flex items-center gap-2">
           {(['all', 'active', 'harvested', 'lost'] as TrayStatusFilter[]).map((status) => (
             <Button
@@ -1349,18 +1491,18 @@ const TraysPage = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Tray ID</TableHead>
-              <TableHead>Batch ID</TableHead>
-              <TableHead>Variety</TableHead>
-              <TableHead>Seeding Date</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Harvest Date</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableHeaderCell label="Tray ID" sortKey="trayId" />
+              <SortableHeaderCell label="Batch ID" sortKey="batchId" />
+              <SortableHeaderCell label="Variety" sortKey="variety" />
+              <SortableHeaderCell label="Seeding Date" sortKey="seeding_date_raw" />
+              <SortableHeaderCell label="Customer" sortKey="customer" />
+              <SortableHeaderCell label="Harvest Date" sortKey="harvest_date_raw" />
+              <SortableHeaderCell label="Status" sortKey="status" />
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredTrays.length === 0 ? (
+            {traysToDisplay.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="p-0 border-none">
                   <div className="p-8 flex flex-col items-center justify-center text-center">
@@ -1383,7 +1525,7 @@ const TraysPage = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredTrays.map((tray) => (
+              traysToDisplay.map((tray) => (
                 <TableRow key={tray.id}>
                   <TableCell className="font-medium">
                     <button

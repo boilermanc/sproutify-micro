@@ -39,3 +39,4 @@ CREATE POLICY "Allow authenticated read" ON public.pre_registrations
 
 
 
+

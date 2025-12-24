@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { getSupabaseClient } from '@/integrations/supabase/client';
 
 export interface OnboardingState {
   onboarding_completed: boolean;
@@ -24,6 +25,23 @@ const DEFAULT_STATE: OnboardingState = {
 
 const STORAGE_KEY = 'sproutify_onboarding';
 
+type SyncedOnboardingState = Pick<
+  OnboardingState,
+  | 'wizard_started'
+  | 'current_step'
+  | 'onboarding_completed'
+  | 'onboarding_completed_at'
+  | 'onboarding_steps_completed'
+>;
+
+const getSyncedPayload = (source: OnboardingState): SyncedOnboardingState => ({
+  wizard_started: source.wizard_started,
+  current_step: source.current_step,
+  onboarding_completed: source.onboarding_completed,
+  onboarding_completed_at: source.onboarding_completed_at,
+  onboarding_steps_completed: source.onboarding_steps_completed,
+});
+
 export const useOnboarding = () => {
   const [state, setState] = useState<OnboardingState>(() => {
     try {
@@ -36,39 +54,141 @@ export const useOnboarding = () => {
     }
     return DEFAULT_STATE;
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const farmUuidRef = useRef<string | null>(null);
 
-  const updateState = useCallback((updates: Partial<OnboardingState>) => {
-    setState((prev) => {
-      const newState = { ...prev, ...updates };
+  const syncOnboardingToDb = useCallback(
+    async (payload: SyncedOnboardingState, targetFarmUuid?: string | null) => {
+      const uuid = targetFarmUuid ?? farmUuidRef.current;
+      if (!uuid) return;
+
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+        await getSupabaseClient()
+          .from('farms')
+          .update({ onboarding_status: payload })
+          .eq('farm_uuid', uuid);
+      } catch (error) {
+        console.error('Error syncing onboarding status to Supabase:', error);
+      }
+    },
+    []
+  );
+
+  const persistState = useCallback(
+    (nextState: OnboardingState) => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
       } catch (error) {
         console.error('Error saving onboarding state:', error);
       }
-      return newState;
-    });
-  }, []);
 
-  const completeStep = useCallback((stepName: string) => {
-    setState((prev) => {
-      const newSteps = prev.onboarding_steps_completed.includes(stepName)
-        ? prev.onboarding_steps_completed
-        : [...prev.onboarding_steps_completed, stepName];
-      
-      const newState = {
-        ...prev,
-        onboarding_steps_completed: newSteps,
-      };
-      
+      void syncOnboardingToDb(getSyncedPayload(nextState));
+      return nextState;
+    },
+    [syncOnboardingToDb]
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const hydrateFromDatabase = async () => {
+      setIsLoading(true);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+        const client = getSupabaseClient();
+        const { data: { session } } = await client.auth.getSession();
+        let userId = session?.user?.id ?? null;
+
+        if (!userId) {
+          const storedSession = localStorage.getItem('sproutify_session');
+          if (storedSession) {
+            try {
+              const parsed = JSON.parse(storedSession);
+              userId = parsed?.userId ?? userId;
+            } catch (error) {
+              console.error('Error parsing stored session:', error);
+            }
+          }
+        }
+
+        if (!userId) return;
+
+        const { data: profile } = await client
+          .from('profile')
+          .select('farm_uuid')
+          .eq('id', userId)
+          .maybeSingle();
+
+        const farmUuid = profile?.farm_uuid ?? null;
+        if (!farmUuid) return;
+
+        farmUuidRef.current = farmUuid;
+
+        const { data: farmStatus } = await client
+          .from('farms')
+          .select('onboarding_status')
+          .eq('farm_uuid', farmUuid)
+          .maybeSingle();
+
+        if (isCancelled) return;
+
+        const remoteStatus = farmStatus?.onboarding_status as Partial<OnboardingState> | null;
+        if (remoteStatus && typeof remoteStatus === 'object') {
+          setState((prev) => {
+            if (isCancelled) return prev;
+            const merged: OnboardingState = {
+              ...prev,
+              ...remoteStatus,
+              onboarding_steps_completed: remoteStatus.onboarding_steps_completed ?? prev.onboarding_steps_completed,
+              tooltips_dismissed: prev.tooltips_dismissed,
+              sample_data_loaded: prev.sample_data_loaded,
+              setup_steps_dismissed: prev.setup_steps_dismissed,
+            };
+            return persistState(merged);
+          });
+        } else {
+          setState((prev) => {
+            if (isCancelled) return prev;
+            return persistState(prev);
+          });
+        }
       } catch (error) {
-        console.error('Error saving onboarding state:', error);
+        console.error('Error loading onboarding state from Supabase:', error);
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
-      
-      return newState;
-    });
-  }, []);
+    };
+
+    hydrateFromDatabase();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [persistState]);
+
+  const updateState = useCallback(
+    (updates: Partial<OnboardingState>) => {
+      setState((prev) => {
+        const newState = { ...prev, ...updates };
+        return persistState(newState);
+      });
+    },
+    [persistState]
+  );
+
+  const completeStep = useCallback(
+    (stepName: string) => {
+      setState((prev) => {
+        const newSteps = prev.onboarding_steps_completed.includes(stepName)
+          ? prev.onboarding_steps_completed
+          : [...prev.onboarding_steps_completed, stepName];
+
+        return persistState({ ...prev, onboarding_steps_completed: newSteps });
+      });
+    },
+    [persistState]
+  );
 
   const completeOnboarding = useCallback(() => {
     updateState({
@@ -98,26 +218,18 @@ export const useOnboarding = () => {
     updateState({ current_step: step });
   }, [updateState]);
 
-  const dismissTooltip = useCallback((tooltipId: string) => {
-    setState((prev) => {
-      const newDismissed = prev.tooltips_dismissed.includes(tooltipId)
-        ? prev.tooltips_dismissed
-        : [...prev.tooltips_dismissed, tooltipId];
-      
-      const newState = {
-        ...prev,
-        tooltips_dismissed: newDismissed,
-      };
-      
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
-      } catch (error) {
-        console.error('Error saving onboarding state:', error);
-      }
-      
-      return newState;
-    });
-  }, []);
+  const dismissTooltip = useCallback(
+    (tooltipId: string) => {
+      setState((prev) => {
+        const newDismissed = prev.tooltips_dismissed.includes(tooltipId)
+          ? prev.tooltips_dismissed
+          : [...prev.tooltips_dismissed, tooltipId];
+
+        return persistState({ ...prev, tooltips_dismissed: newDismissed });
+      });
+    },
+    [persistState]
+  );
 
   const setSampleDataLoaded = useCallback((loaded: boolean) => {
     updateState({ sample_data_loaded: loaded });
@@ -128,14 +240,8 @@ export const useOnboarding = () => {
   }, [updateState]);
 
   const resetOnboarding = useCallback(() => {
-    const resetState = DEFAULT_STATE;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(resetState));
-    } catch (error) {
-      console.error('Error resetting onboarding state:', error);
-    }
-    setState(resetState);
-  }, []);
+    setState(() => persistState(DEFAULT_STATE));
+  }, [persistState]);
 
   return {
     state,
@@ -149,6 +255,7 @@ export const useOnboarding = () => {
     dismissSetupSteps,
     resetOnboarding,
     updateState,
+    isLoading,
   };
 };
 

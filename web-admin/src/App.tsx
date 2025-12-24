@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
 import LoginPage from './pages/LoginPage';
@@ -44,19 +44,70 @@ import './App.css';
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const hasCheckedSession = useRef(false);
 
   useEffect(() => {
+    let isMounted = true;
+    const activeTimeouts = new Set<ReturnType<typeof setTimeout>>();
+
+    const registerTimeout = (id: ReturnType<typeof setTimeout>) => {
+      activeTimeouts.add(id);
+      return id;
+    };
+
+    const cancelTimeout = (id: ReturnType<typeof setTimeout> | null) => {
+      if (!id) return;
+      activeTimeouts.delete(id);
+      clearTimeout(id);
+    };
+
     const checkSession = async () => {
-      if (!getSupabaseClient()) return;
+      console.log('[App] checkSession started');
       try {
-        // Check for getSupabaseClient() session
-        const { data: { session }, error } = await getSupabaseClient().auth.getSession();
+        // Check if supabase client exists
+        const client = getSupabaseClient();
+        console.log('[App] Supabase client exists:', !!client);
+
+        if (!client) {
+          console.error('[App] No Supabase client!');
+          setIsLoading(false);
+          return;
+        }
+
+        // Check for getSupabaseClient() session with timeout
+        console.log('[App] Calling getSupabaseClient().auth.getSession()...');
+
+        // Use a simple timeout approach
+        let timedOut = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        timeoutId = registerTimeout(
+          setTimeout(() => {
+            timedOut = true;
+            activeTimeouts.delete(timeoutId!);
+            console.debug('[App] Session check timed out after 5s');
+            if (isMounted) {
+              setIsLoading(false);
+            }
+          }, 5000)
+        );
+
+        const { data: { session }, error } = await client.auth.getSession();
+        cancelTimeout(timeoutId);
+
+        if (timedOut) {
+          console.log('[App] Ignoring late response, already timed out');
+          return;
+        }
+
+        console.log('[App] getSession result:', { hasSession: !!session, error });
         
         if (session && !error) {
           // Skip profile check for admin users (team@sproutify.app)
           // Admin users are handled by RequireAdmin component
           if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
             // Admin user - check if they have admin session
+            console.log('[App] Admin user detected, skipping profile check');
             const adminSession = localStorage.getItem('sproutify_admin_session');
             if (adminSession) {
               // Admin is logged in, but not authenticated for regular app
@@ -68,27 +119,42 @@ function App() {
           }
 
           // Regular user - verify session and get user profile
+          console.log('[App] Regular user, fetching profile...');
           const { data: profile, error: profileError } = await getSupabaseClient()
             .from('profile')
             .select('*, farms(*)')
             .eq('id', session.user.id)
             .single();
 
+          console.log('[App] Profile result:', { hasProfile: !!profile, profileError });
           if (profile && !profileError) {
+            console.log('[App] Building session payload...');
             const sessionPayload = await buildSessionPayload(profile, {
               email: session.user.email,
               userId: session.user.id,
             });
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+            console.log('[App] Session payload stored, setting authenticated=true');
             setIsAuthenticated(true);
+            if (isMounted) {
+              setIsLoading(false);
+            }
           } else {
             // Profile not found or error - clear session
+            console.log('[App] No profile found, clearing session');
             localStorage.removeItem('sproutify_session');
             setIsAuthenticated(false);
+            if (isMounted) {
+              setIsLoading(false);
+            }
           }
         } else {
+          console.log('[App] No session, clearing localStorage');
           localStorage.removeItem('sproutify_session');
           setIsAuthenticated(false);
+          if (isMounted) {
+            setIsLoading(false);
+          }
         }
 
         // Check for auto-login via URL param (SSO from marketing site)
@@ -100,16 +166,22 @@ function App() {
           setIsAuthenticated(false);
         }
       } catch (err) {
-        console.error('Session check error:', err);
-      } finally {
-        setIsLoading(false);
+        console.error('[App] Session check error:', err);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    checkSession();
+    console.log('[App] useEffect running, calling checkSession');
+    if (hasCheckedSession.current) {
+      console.log('[App] checkSession already executed, skipping duplicate run');
+    } else {
+      hasCheckedSession.current = true;
+      checkSession();
+    }
 
     // Listen for auth state changes
-    if (!getSupabaseClient()) return;
     const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_session');
@@ -140,7 +212,11 @@ function App() {
     });
 
     return () => {
+      isMounted = false;
+      hasCheckedSession.current = false;
       subscription.unsubscribe();
+      activeTimeouts.forEach((id) => clearTimeout(id));
+      activeTimeouts.clear();
     };
   }, []);
 
@@ -212,6 +288,7 @@ function App() {
           <Route path="vendors" element={<VendorsPage />} />
           <Route path="supplies" element={<SuppliesPage />} />
           <Route path="trays" element={<TraysPage />} />
+          <Route path="trays/:trayId" element={<TraysPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="flow" element={<DailyFlow />} />
           <Route path="settings" element={<SettingsPage />} />

@@ -31,3 +31,4 @@ COMMENT ON COLUMN varieties.stock IS 'Current stock quantity for this variety';
 
 
 
+

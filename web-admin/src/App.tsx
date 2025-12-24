@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import { AuthApiError } from '@supabase/supabase-js';
+import { AuthError, AuthApiError } from '@supabase/supabase-js';
 import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
 import LoginPage from './pages/LoginPage';
@@ -45,9 +45,16 @@ import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
 
-const isInvalidRefreshTokenError = (error?: AuthApiError | null): error is AuthApiError => {
-  if (!error) return false;
-  return /refresh token not found|invalid refresh token/i.test(error.message);
+const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
+  if (!error) {
+    return false;
+  }
+
+  try {
+    return /refresh token not found|invalid refresh token/i.test(error.message);
+  } catch {
+    return false;
+  }
 };
 
 function App() {

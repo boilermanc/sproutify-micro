@@ -281,13 +281,14 @@ function App() {
     <Router basename="/admin">
       <Routes>
         {/* Admin Portal Routes */}
-        <Route path="/admin-portal/login" element={<AdminLogin />} />
+          <Route path="/admin-portal/login" element={<AdminLogin />} />
         <Route path="/admin-portal/reset-password" element={<PasswordResetPage />} />
         <Route path="/admin-portal/signup" element={<BetaSignupPage />} />
         
         <Route path="/admin-portal" element={
           <RequireAdmin>
             <AdminLayout onLogout={async () => {
+              clearSupabaseAuthStorage();
               if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
               localStorage.removeItem('sproutify_admin_session');
             }} />
@@ -311,6 +312,7 @@ function App() {
 
         <Route path="/" element={
           isAuthenticated ? <Layout onLogout={async () => {
+            clearSupabaseAuthStorage();
             if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
             localStorage.removeItem('sproutify_session');
             setIsAuthenticated(false);

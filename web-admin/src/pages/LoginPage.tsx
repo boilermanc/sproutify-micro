@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { buildSessionPayload } from '../utils/session';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [searchParams] = useSearchParams();
   const accessTokenParam = searchParams.get('access_token');
   const refreshTokenParam = searchParams.get('refresh_token');
@@ -322,15 +324,26 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
               <label htmlFor="password" className="text-sm font-medium text-slate-600">
                 Password
               </label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="pr-12"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                  onClick={() => setPasswordVisible((prev) => !prev)}
+                  aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                >
+                  {passwordVisible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>

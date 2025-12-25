@@ -272,6 +272,134 @@ const OrdersPage = () => {
         }, {} as Record<number, string>);
       }
 
+      const recipeIds = Array.from(
+        new Set(
+          (traysData || [])
+            .map((tray: any) => tray.recipe_id)
+            .filter((id: any) => id !== null && id !== undefined)
+        )
+      );
+
+      const recipeNameMap: Record<number, string> = {};
+      const recipeProductMap: Record<number, { product_id: number; product_name?: string }> = {};
+      const productVariantPrices: Record<number, number> = {};
+      const fallbackRecipePrices: Record<string, number> = {
+        'pea microgreen tray': 18,
+        "marie's micro mix": 15,
+      };
+
+      if (recipeIds.length > 0) {
+        const { data: recipesData, error: recipesError } = await getSupabaseClient()
+          .from('recipes')
+          .select('recipe_id, recipe_name')
+          .in('recipe_id', recipeIds);
+
+        if (recipesError) {
+          console.error('Error fetching recipes for orders page:', recipesError);
+        } else {
+          (recipesData || []).forEach((recipe: any) => {
+            if (recipe?.recipe_id) {
+              recipeNameMap[recipe.recipe_id] = recipe.recipe_name || '';
+            }
+          });
+        }
+
+        const { data: recipeMappings, error: mappingError } = await getSupabaseClient()
+          .from('product_recipe_mapping')
+          .select('recipe_id, product_id')
+          .in('recipe_id', recipeIds);
+
+        if (mappingError) {
+          console.error('Error fetching recipe -> product mappings:', mappingError);
+        } else if (recipeMappings && recipeMappings.length > 0) {
+          const productIds = Array.from(
+            new Set(
+              recipeMappings
+                .map((mapping: any) => mapping.product_id)
+                .filter((id: any) => id !== null && id !== undefined)
+            )
+          );
+
+          const productNameMap: Record<number, string> = {};
+
+          if (productIds.length > 0) {
+            const { data: productsData, error: productsError } = await getSupabaseClient()
+              .from('products')
+              .select('product_id, product_name')
+              .in('product_id', productIds);
+
+            if (productsError) {
+              console.error('Error fetching products for order price lookup:', productsError);
+            } else {
+              (productsData || []).forEach((product: any) => {
+                if (product?.product_id) {
+                  productNameMap[product.product_id] = product.product_name || '';
+                }
+              });
+            }
+
+            const { data: variantsData, error: variantsError } = await getSupabaseClient()
+              .from('product_variants')
+              .select('product_id, price')
+              .in('product_id', productIds)
+              .order('price', { ascending: true });
+
+            if (variantsError) {
+              console.error('Error fetching product variants for order price lookup:', variantsError);
+            } else {
+              (variantsData || []).forEach((variant: any) => {
+                if (!variant?.product_id) return;
+                const priceValue =
+                  typeof variant.price === 'number'
+                    ? variant.price
+                    : parseFloat(variant.price as string) || 0;
+                if (priceValue > 0 && !productVariantPrices[variant.product_id]) {
+                  productVariantPrices[variant.product_id] = priceValue;
+                }
+              });
+            }
+          }
+
+          recipeMappings.forEach((mapping: any) => {
+            if (!mapping?.recipe_id || !mapping.product_id) return;
+            if (!recipeProductMap[mapping.recipe_id]) {
+              recipeProductMap[mapping.recipe_id] = {
+                product_id: mapping.product_id,
+                product_name: productNameMap[mapping.product_id] || '',
+              };
+            }
+          });
+        }
+      }
+
+      const normalizeName = (name?: string) => {
+        if (!name) return '';
+        return name.toLowerCase().trim();
+      };
+
+      const resolveFallbackPrice = (name?: string) => {
+        const normalized = normalizeName(name);
+        return fallbackRecipePrices[normalized] || 0;
+      };
+
+      const getTrayPrice = (tray: any) => {
+        if (!tray) return 0;
+        const recipeId = tray.recipe_id;
+        const productInfo = recipeProductMap[recipeId];
+        if (productInfo) {
+          const variantPrice = productVariantPrices[productInfo.product_id];
+          if (variantPrice && variantPrice > 0) {
+            return variantPrice;
+          }
+          const fallbackFromProduct = resolveFallbackPrice(productInfo.product_name);
+          if (fallbackFromProduct > 0) {
+            return fallbackFromProduct;
+          }
+        }
+        const recipeName = recipeNameMap[recipeId];
+        return resolveFallbackPrice(recipeName);
+      };
+
       // Group trays by customer and date to create orders
       // Each tray assigned to a customer represents an order item
       const ordersMap = new Map<string, any>();
@@ -293,13 +421,16 @@ const OrdersPage = () => {
             trays: [],
             totalYield: 0,
             trayCount: 0,
+            totalAmount: 0,
             status: tray.harvest_date ? 'Fulfilled' : 'Pending',
           });
         }
 
         const order = ordersMap.get(orderKey);
+        const trayPrice = getTrayPrice(tray);
         order.trays.push(tray);
         order.totalYield += parseFloat(tray.yield || 0);
+        order.totalAmount += trayPrice;
         order.trayCount += 1;
         // If any tray is harvested, mark order as fulfilled
         if (tray.harvest_date) {
@@ -309,20 +440,23 @@ const OrdersPage = () => {
 
       // Convert legacy tray-based orders to array and format
       const formattedTrayOrders = Array.from(ordersMap.values())
-        .map((order, index) => ({
-          id: order.id,
-          orderId: `ORD-${1000 + index + 1}`,
-          customer: order.customer,
-          customer_id: order.customer_id,
-          date: order.date,
-          dateISO: order.orderDate, // Store ISO date for chart calculations
-          total: order.totalYield > 0 ? `$${(order.totalYield * 10).toFixed(2)}` : '$0.00', // Estimate: $10 per unit yield
-          status: order.status,
-          trayCount: order.trayCount,
-          yield: order.totalYield,
-          trayIds: order.trays.map((t: any) => t.tray_id), // Store tray IDs for fetching details
-          isNewOrder: false, // Legacy tray-based order
-        }));
+        .map((order, index) => {
+          const totalValue = order.totalAmount || 0;
+          return {
+            id: order.id,
+            orderId: `ORD-${1000 + index + 1}`,
+            customer: order.customer,
+            customer_id: order.customer_id,
+            date: order.date,
+            dateISO: order.orderDate, // Store ISO date for chart calculations
+            total: `$${totalValue.toFixed(2)}`,
+            status: order.status,
+            trayCount: order.trayCount,
+            yield: order.totalYield,
+            trayIds: order.trays.map((t: any) => t.tray_id), // Store tray IDs for fetching details
+            isNewOrder: false, // Legacy tray-based order
+          };
+        });
 
       // Combine new orders and legacy orders, sort by date
       const allOrders = [...ordersFromTable, ...formattedTrayOrders].sort((a, b) => {

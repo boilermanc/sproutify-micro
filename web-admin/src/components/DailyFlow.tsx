@@ -88,7 +88,6 @@ import { cn } from '@/lib/utils';
 import {
   fetchAssignableTrays,
   assignTrayToCustomer,
-  fetchNearestAssignedTray,
   harvestTrayNow,
 } from '../services/trayService';
 import type { AssignableTray } from '../services/trayService';
@@ -199,6 +198,17 @@ const formatReadyDateLabel = (value?: string | null): string => {
   return 'soon';
 };
 
+const formatGapKey = (gap: OrderGapStatus): string =>
+  `${gap.customer_id ?? 'unknown'}-${gap.product_id ?? 'unknown'}`;
+
+const parseMissingVarietyNames = (missing?: string | null): string[] => {
+  if (!missing) return [];
+  return missing
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name.length > 0);
+};
+
 type HarvestGroup = {
   key: string;
   customerName?: string;
@@ -211,6 +221,16 @@ type BatchHarvestRow = {
   crop: string;
   batchId?: string;
   taskId: string;
+};
+
+type HasRecipeInfo = {
+  variety_name?: string | null;
+  recipe_name?: string | null;
+};
+
+const getTrayDisplayName = (source?: HasRecipeInfo) => {
+  if (!source) return 'Unknown';
+  return source.variety_name || source.recipe_name || 'Unknown';
 };
 
 export default function DailyFlow() {
@@ -258,6 +278,8 @@ export default function DailyFlow() {
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
   const [orderGapStatus, setOrderGapStatus] = useState<OrderGapStatus[]>([]);
   const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
+  const [gapMissingVarietyTrays, setGapMissingVarietyTrays] = useState<Record<string, AssignableTray[]>>({});
+  const [gapMissingVarietyTraysLoading, setGapMissingVarietyTraysLoading] = useState<Record<string, boolean>>({});
   const [assignModalGap, setAssignModalGap] = useState<OrderGapStatus | null>(null);
   const [assignableTrays, setAssignableTrays] = useState<AssignableTray[]>([]);
   const [isLoadingAssignableTrays, setIsLoadingAssignableTrays] = useState(false);
@@ -267,7 +289,6 @@ export default function DailyFlow() {
     gap: OrderGapStatus;
     tray: AssignableTray;
   } | null>(null);
-  const [fetchingTrayKey, setFetchingTrayKey] = useState<string | null>(null);
   const [isTrayModalProcessing, setIsTrayModalProcessing] = useState(false);
   const [batchHarvestModalGroup, setBatchHarvestModalGroup] = useState<HarvestGroup | null>(null);
   const [batchHarvestRows, setBatchHarvestRows] = useState<BatchHarvestRow[]>([]);
@@ -335,6 +356,59 @@ export default function DailyFlow() {
     }
   }, []);
 
+  const updateGapMissingVarietyTrays = useCallback(async (gaps: OrderGapStatus[]) => {
+    if (!gaps || gaps.length === 0) {
+      setGapMissingVarietyTrays({});
+      setGapMissingVarietyTraysLoading({});
+      return;
+    }
+
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      setGapMissingVarietyTrays({});
+      setGapMissingVarietyTraysLoading({});
+      return;
+    }
+
+    const initialLoading: Record<string, boolean> = {};
+    gaps.forEach((gap) => {
+      initialLoading[formatGapKey(gap)] = true;
+    });
+
+    setGapMissingVarietyTrays({});
+    setGapMissingVarietyTraysLoading(initialLoading);
+
+    for (const gap of gaps) {
+      const gapKey = formatGapKey(gap);
+      const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
+
+      if (gap.product_id == null || missingVarieties.length === 0) {
+        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: [] }));
+        setGapMissingVarietyTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
+        continue;
+      }
+
+      try {
+        const trays = await fetchAssignableTrays(farmUuid, gap.product_id);
+        const matches = trays.filter((tray) => {
+          const nameToCheck = (
+            (tray.variety_name && tray.variety_name.toLowerCase()) ||
+            (tray.recipe_name && tray.recipe_name.toLowerCase()) ||
+            ''
+          );
+          return missingVarieties.some((name) => nameToCheck.includes(name));
+        });
+
+        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: matches }));
+      } catch (error) {
+        console.error('[DailyFlow] Error fetching missing variety trays:', error);
+        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: [] }));
+      } finally {
+        setGapMissingVarietyTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
+      }
+    }
+  }, [getFarmUuidFromSession]);
+
   const openAssignModal = useCallback(async (gap: OrderGapStatus) => {
     const farmUuid = getFarmUuidFromSession();
     if (!farmUuid) {
@@ -372,39 +446,9 @@ export default function DailyFlow() {
     setIsAssigningTray(false);
   }, []);
 
-  const viewNearReadyTray = useCallback(async (gap: OrderGapStatus) => {
-    const farmUuid = getFarmUuidFromSession();
-    if (!farmUuid) {
-      showNotification('error', 'Unable to resolve farm for tray view');
-      return;
-    }
-    if (!gap.customer_id) {
-      showNotification('error', 'No customer specified for this gap');
-      return;
-    }
-
-    const gapKey = `${gap.customer_id}-${gap.product_id}`;
-    setFetchingTrayKey(gapKey);
-
-    try {
-      const tray = await fetchNearestAssignedTray(
-        farmUuid,
-        gap.customer_id,
-        gap.product_id,
-        gap.product_name
-      );
-      if (tray?.tray_id) {
-        setNearReadyTrayModal({ gap, tray });
-      } else {
-        showNotification('error', 'No near-ready tray found for this order');
-      }
-    } catch (error) {
-      console.error('[DailyFlow] Error fetching near-ready tray:', error);
-      showNotification('error', 'Failed to find near-ready tray');
-    } finally {
-      setFetchingTrayKey((current) => (current === gapKey ? null : current));
-    }
-  }, [getFarmUuidFromSession, showNotification]);
+  const viewNearReadyTray = useCallback((gap: OrderGapStatus, tray: AssignableTray) => {
+    setNearReadyTrayModal({ gap, tray });
+  }, []);
 
   // Track tasks that are animating out (use ref so it persists through loadTasks calls)
   const animatingOutRef = useRef<Set<string>>(new Set());
@@ -614,6 +658,10 @@ export default function DailyFlow() {
     return () => clearInterval(interval);
   }, [loadTasks]);
 
+  useEffect(() => {
+    updateGapMissingVarietyTrays(orderGapStatus);
+  }, [orderGapStatus, updateGapMissingVarietyTrays]);
+
   const handleAssignTray = useCallback(async () => {
     if (!assignModalGap || !selectedAssignTrayId) return;
     setIsAssigningTray(true);
@@ -659,6 +707,41 @@ export default function DailyFlow() {
       setIsTrayModalProcessing(false);
     }
   }, [nearReadyTrayModal, loadTasks, showNotification]);
+
+  const handleSkipDelivery = useCallback(async (gap: OrderGapStatus) => {
+    if (!gap.standing_order_id) {
+      showNotification('error', 'Missing standing order details for this gap');
+      return;
+    }
+
+    const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+    if (!deliveryDate) {
+      showNotification('error', 'Missing delivery date for this gap');
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      showNotification('error', 'Session expired. Please log in again.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('order_schedules')
+        .update({ status: 'skipped' })
+        .eq('standing_order_id', gap.standing_order_id)
+        .eq('scheduled_delivery_date', deliveryDate);
+
+      if (error) throw error;
+      const formattedDate = new Date(deliveryDate).toLocaleDateString();
+      showNotification('success', `Delivery skipped for ${gap.customer_name || 'customer'} on ${formattedDate}`);
+      await loadTasks();
+    } catch (error: any) {
+      console.error('[DailyFlow] Error skipping delivery:', error);
+      showNotification('error', error?.message || 'Failed to skip delivery');
+    }
+  }, [loadTasks, showNotification]);
 
   const handleHarvestNearestTray = useCallback(async () => {
     if (!nearReadyTrayModal) return;
@@ -710,7 +793,7 @@ export default function DailyFlow() {
       
       const { data } = await getSupabaseClient()
         .from('order_fulfillment_status')
-        .select('recipe_id, recipe_name, trays_ready, harvest_date')
+        .select('recipe_id, recipe_name, variety_name, trays_ready, harvest_date')
         .eq('farm_uuid', farmUuid)
         .neq('recipe_id', task.recipeId)
         .gte('trays_ready', 1);
@@ -2211,6 +2294,11 @@ export default function DailyFlow() {
                   const rowClass = isFixable
                     ? 'border-amber-200 bg-amber-50 text-amber-900'
                     : 'border-red-200 bg-red-50 text-red-900';
+                  const gapKey = formatGapKey(gap);
+                  const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
+                  const isMissingVarietyLoading = gapMissingVarietyTraysLoading[gapKey] || false;
+                  const showViewTrayButton = matchingTrays.length > 0 && !isMissingVarietyLoading;
+                  const showSkipDeliveryButton = !isMissingVarietyLoading && matchingTrays.length === 0 && gap.gap > 0;
                   return (
                     <div
                       key={`${gap.customer_id}-${gap.product_id}`}
@@ -2244,29 +2332,43 @@ export default function DailyFlow() {
                       Missing: {gap.missing_varieties}
                     </p>
                   )}
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
                     {needsUnassigned && (
                       <Button className="text-sm" onClick={() => openAssignModal(gap)}>
                         Assign Tray
                       </Button>
                     )}
-                    {!needsUnassigned && hasNearReady && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-sm"
-                        onClick={() => viewNearReadyTray(gap)}
-                        disabled={fetchingTrayKey === `${gap.customer_id}-${gap.product_id}`}
-                      >
-                        {fetchingTrayKey === `${gap.customer_id}-${gap.product_id}` ? 'Loading...' : 'View Tray'}
-                      </Button>
-                    )}
-                    {!needsUnassigned && !hasNearReady && gap.gap > 0 && (
-                      <Badge variant="destructive" className="text-[0.6rem] uppercase tracking-[0.25em]">
-                        At Risk
-                      </Badge>
-                    )}
-                  </div>
+                      {isMissingVarietyLoading && (
+                        <Button variant="outline" size="sm" className="text-sm" disabled>
+                          Checking trays...
+                        </Button>
+                      )}
+                      {showViewTrayButton && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm"
+                          onClick={() => viewNearReadyTray(gap, matchingTrays[0])}
+                        >
+                          View Tray
+                        </Button>
+                      )}
+                      {showSkipDeliveryButton && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm"
+                          onClick={() => handleSkipDelivery(gap)}
+                        >
+                          Skip Delivery
+                        </Button>
+                      )}
+                      {!needsUnassigned && !hasNearReady && gap.gap > 0 && (
+                        <Badge variant="destructive" className="text-[0.6rem] uppercase tracking-[0.25em]">
+                          At Risk
+                        </Badge>
+                      )}
+                    </div>
                     </div>
                   );
                 })}
@@ -2440,7 +2542,9 @@ export default function DailyFlow() {
                       className="h-3 w-3 text-emerald-600 focus:ring-0"
                     />
                     <div className="text-sm">
-                      <p className="font-semibold text-slate-900">Tray {tray.tray_id} • {tray.recipe_name}</p>
+                      <p className="font-semibold text-slate-900">
+                        Tray {tray.tray_id} • {getTrayDisplayName(tray)}
+                      </p>
                       <p className="text-xs text-slate-500">
                         Sowed {tray.sow_date ? new Date(tray.sow_date).toLocaleDateString() : 'N/A'} • {tray.days_grown} days grown
                       </p>
@@ -2474,7 +2578,11 @@ export default function DailyFlow() {
       >
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Tray {nearReadyTrayModal?.tray.tray_id}</DialogTitle>
+            <DialogTitle>
+              {nearReadyTrayModal
+                ? `${getTrayDisplayName(nearReadyTrayModal.tray)} — Tray ${nearReadyTrayModal.tray.tray_id}`
+                : 'Tray'}
+            </DialogTitle>
             <DialogDescription>
               Near-ready tray for {nearReadyTrayModal?.gap.customer_name} — {nearReadyTrayModal?.gap.product_name}
             </DialogDescription>
@@ -2483,7 +2591,9 @@ export default function DailyFlow() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs text-muted-foreground">Recipe</Label>
-                <p className="font-semibold text-slate-900">{nearReadyTrayModal?.tray.recipe_name || '—'}</p>
+              <p className="font-semibold text-slate-900">
+                {nearReadyTrayModal ? getTrayDisplayName(nearReadyTrayModal.tray) : '—'}
+              </p>
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Sow Date</Label>
@@ -4223,11 +4333,14 @@ export default function DailyFlow() {
                     <SelectValue placeholder="Select variety..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableSubstitutes.map((sub) => (
-                      <SelectItem key={sub.recipe_id} value={sub.recipe_id.toString()}>
-                        {sub.recipe_name} ({sub.trays_ready} {sub.trays_ready === 1 ? 'tray' : 'trays'} ready)
-                      </SelectItem>
-                    ))}
+                    {availableSubstitutes.map((sub) => {
+                      const label = sub.variety_name || sub.recipe_name || 'Unknown';
+                      return (
+                        <SelectItem key={sub.recipe_id} value={sub.recipe_id.toString()}>
+                          {label} ({sub.trays_ready} {sub.trays_ready === 1 ? 'tray' : 'trays'} ready)
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

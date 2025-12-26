@@ -13,7 +13,8 @@ import {
   Send,
   Search,
   CheckCircle2,
-  Circle
+  Circle,
+  Info
 } from 'lucide-react';
 
 interface Notification {
@@ -31,6 +32,16 @@ interface Notification {
   user_name?: string;
   farm_name?: string;
 }
+
+const InfoTooltip = ({ description }: { description: string }) => (
+  <span
+    className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-transparent text-slate-400 hover:border-slate-500"
+    title={description}
+    aria-label={description}
+  >
+    <Info className="h-3 w-3" aria-hidden="true" />
+  </span>
+);
 
 const AdminNotifications = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -240,6 +251,64 @@ const AdminNotifications = () => {
     info: notifications.filter(n => n.type === 'info').length,
   };
 
+  const unreadPercent = metrics.total > 0 ? Math.round((metrics.unread / metrics.total) * 100) : 0;
+  const readPercent = metrics.total > 0 ? Math.round((metrics.read / metrics.total) * 100) : 0;
+
+  const metricCards = [
+    {
+      key: 'total',
+      label: 'Total',
+      value: metrics.total,
+      tooltip: 'Number of notifications retrieved (limited to the 100 most recent entries).',
+    },
+    {
+      key: 'unread',
+      label: 'Unread',
+      value: metrics.unread,
+      tooltip: 'Notifications that are still marked unread so you know what needs attention.',
+      valueClass: 'text-red-600',
+      subText: `${unreadPercent}% of total`,
+    },
+    {
+      key: 'read',
+      label: 'Read',
+      value: metrics.read,
+      tooltip: 'Notifications marked read by users.',
+      valueClass: 'text-green-600',
+      subText: `${readPercent}% of total`,
+    },
+    {
+      key: 'uniqueUsers',
+      label: 'Unique Users',
+      value: metrics.uniqueUsers,
+      tooltip: 'How many unique users appear in the current notification set.',
+    },
+    {
+      key: 'sentToday',
+      label: 'Sent Today',
+      value: metrics.sentToday,
+      tooltip: 'Notifications that were created since midnight for each farm.',
+    },
+    {
+      key: 'sentThisWeek',
+      label: 'Sent This Week',
+      value: metrics.sentThisWeek,
+      tooltip: 'Notifications created in the last 7 days.',
+    },
+    {
+      key: 'system',
+      label: 'System',
+      value: metrics.system,
+      tooltip: 'System-level notifications that typically include configuration or maintenance updates.',
+    },
+    {
+      key: 'info',
+      label: 'Info',
+      value: metrics.info,
+      tooltip: 'Informational notifications without urgent actions.',
+    },
+  ];
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       {/* Header */}
@@ -256,60 +325,20 @@ const AdminNotifications = () => {
 
       {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Total</p>
-            <p className="text-2xl font-bold">{metrics.total}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Unread</p>
-            <p className="text-2xl font-bold text-red-600">{metrics.unread}</p>
-            <p className="text-xs text-gray-400 mt-1">
-              {metrics.total > 0 ? Math.round((metrics.unread / metrics.total) * 100) : 0}%
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Read</p>
-            <p className="text-2xl font-bold text-green-600">{metrics.read}</p>
-            <p className="text-xs text-gray-400 mt-1">
-              {metrics.total > 0 ? Math.round((metrics.read / metrics.total) * 100) : 0}%
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Unique Users</p>
-            <p className="text-2xl font-bold">{metrics.uniqueUsers}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Sent Today</p>
-            <p className="text-2xl font-bold">{metrics.sentToday}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Sent This Week</p>
-            <p className="text-2xl font-bold">{metrics.sentThisWeek}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">System</p>
-            <p className="text-2xl font-bold">{metrics.system}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-gray-500 mb-1">Info</p>
-            <p className="text-2xl font-bold">{metrics.info}</p>
-          </CardContent>
-        </Card>
+        {metricCards.map((card) => (
+          <Card key={card.key} className="border-none shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-1">
+                <p className="text-sm text-gray-500 mb-1">{card.label}</p>
+                <InfoTooltip description={card.tooltip} />
+              </div>
+              <p className={`text-2xl font-bold ${card.valueClass ?? ''}`}>{card.value}</p>
+              {card.subText && (
+                <p className="text-xs text-gray-400 mt-1">{card.subText}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Send Notification Form */}
@@ -327,7 +356,10 @@ const AdminNotifications = () => {
                 onChange={(e) => setSendToAll(e.target.checked)}
                 className="rounded"
               />
-              <span>Send to All Users</span>
+              <span className="flex items-center gap-1">
+                Send to All Users
+                <InfoTooltip description="Broadcast to every active user (per farm) when checked. Uncheck to target a single user." />
+              </span>
             </Label>
             {sendToAll && (
               <span className="text-sm text-gray-500">
@@ -356,7 +388,10 @@ const AdminNotifications = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Type</Label>
+              <div className="flex items-center gap-1">
+                <Label>Type</Label>
+                <InfoTooltip description="Pick the notification bucket so the badge on each notification matches its intent." />
+              </div>
               <Select value={notificationType} onValueChange={setNotificationType}>
                 <SelectTrigger>
                   <SelectValue />
@@ -439,7 +474,10 @@ const AdminNotifications = () => {
           </div>
         </div>
         <div className="space-y-2">
-          <Label>Type</Label>
+          <div className="flex items-center gap-1">
+            <Label>Type</Label>
+            <InfoTooltip description="Choose a notification bucket to quickly spot low stock alerts, orders, etc." />
+          </div>
           <Select value={typeFilter} onValueChange={setTypeFilter}>
             <SelectTrigger className="w-[150px]">
               <SelectValue />
@@ -455,7 +493,10 @@ const AdminNotifications = () => {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Status</Label>
+          <div className="flex items-center gap-1">
+            <Label>Status</Label>
+            <InfoTooltip description="Filter by whether recipients have already opened the notification." />
+          </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[150px]">
               <SelectValue />
@@ -468,7 +509,10 @@ const AdminNotifications = () => {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Sort</Label>
+          <div className="flex items-center gap-1">
+            <Label>Sort</Label>
+            <InfoTooltip description="Choose whether the newest or oldest notifications appear first." />
+          </div>
           <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'newest' | 'oldest')}>
             <SelectTrigger className="w-[150px]">
               <SelectValue />

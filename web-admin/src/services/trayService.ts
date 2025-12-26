@@ -4,6 +4,7 @@ export interface AssignableTray {
   tray_id: number;
   recipe_id: number;
   recipe_name: string;
+  variety_name?: string | null;
   sow_date?: string | null;
   days_grown: number;
   days_until_ready: number;
@@ -27,6 +28,7 @@ export async function fetchAssignableTrays(farmUuid: string, productId: number):
       recipe_id,
       recipes!inner (
         recipe_name,
+        variety_name,
         product_recipe_mapping!inner (
           product_id
         )
@@ -53,6 +55,7 @@ export async function fetchAssignableTrays(farmUuid: string, productId: number):
         tray_id: tray.tray_id,
         recipe_id: tray.recipe_id,
         recipe_name: recipe?.recipe_name || 'Unknown',
+        variety_name: recipe?.variety_name || null,
         sow_date: tray.sow_date,
         days_grown: tray.sow_date
           ? Math.max(

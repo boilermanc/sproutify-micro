@@ -60,8 +60,10 @@ export interface DailyTask {
   stepColor?: string;
   sourceType?: string;
   customerName?: string;
+  customerId?: number;
   deliveryDate?: string;
   standingOrderId?: number;
+  orderScheduleId?: number;
   traysNeeded?: number;
   traysReady?: number;
   notes?: string;
@@ -88,6 +90,9 @@ export interface OrderGapStatus {
   customer_name: string;
   product_id: number;
   product_name: string;
+  standing_order_id?: number | null;
+  scheduled_delivery_date?: string | null;
+  delivery_date?: string | null;
   is_mix: boolean;
   trays_needed: number;
   varieties_in_product: number;
@@ -421,7 +426,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         // Fetch schedules for seeding (sow_date = today) and soaking (sow_date - soak_duration = today)
         const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
           .from('planting_schedule_view')
-          .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, delivery_date')
+          .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, customer_id, standing_order_id, schedule_id, delivery_date')
           .eq('farm_uuid', farmUuid);
         
         // Fetch recipe steps to calculate soak duration (needed for both seeding/soaking and harvest)
@@ -574,6 +579,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
                 // Get germination weight info for this recipe
                 const germinationWeight = germinationWeightMapForSchedule[schedule.recipe_id];
+                const orderScheduleId = schedule.schedule_id ?? (schedule as any).order_schedule_id ?? undefined;
                 seedingTasks.push({
                   id: `seed-${schedule.recipe_id}-${schedule.recipe_name}-${targetDateStr}`,
                   action: 'Seed',
@@ -589,6 +595,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                   taskSource: 'planting_schedule',
                   quantity: schedule.trays_needed || 0,
                   customerName: schedule.customer_name || null,
+                  customerId: schedule.customer_id ?? undefined,
+                  standingOrderId: schedule.standing_order_id ?? undefined,
+                  orderScheduleId,
                   deliveryDate: schedule.delivery_date || null,
                   // Germination weight info
                   requiresWeight: germinationWeight?.requires_weight || false,
@@ -2560,7 +2569,10 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
         // Ensure we only create the number of trays specified (should be 1 for daily flow seeding)
         const numberOfTrays = Math.max(1, task.trays || 1);
         const requests = Array.from({ length: numberOfTrays }, () => ({
-          customer_name: null,
+          customer_name: task.customerName ?? null,
+          customer_id: task.customerId ?? null,
+          standing_order_id: task.standingOrderId ?? null,
+          order_schedule_id: task.orderScheduleId ?? null,
           variety_name: varietyName,
           recipe_name: recipeData.recipe_name,
           farm_uuid: farmUuid,

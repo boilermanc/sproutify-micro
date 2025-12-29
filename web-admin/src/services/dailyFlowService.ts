@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { resolveVarietyNameFromRelation } from '../lib/varietyUtils';
 
 /**
  * Parse a date string (YYYY-MM-DD) as a local date, not UTC
@@ -655,20 +656,26 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         
         // Continue with harvest logic - filter schedules for harvest_date = today
         if (allSchedules && allSchedules.length > 0) {
-          const { data: activeTrays } = await getSupabaseClient()
-            .from('trays')
-            .select(`
-              tray_id,
+        const { data: activeTrays } = await getSupabaseClient()
+          .from('trays')
+          .select(`
+            tray_id,
+            recipe_id,
+            sow_date,
+            batch_id,
+            location,
+            customer_id,
+            recipes(
               recipe_id,
-              sow_date,
-              batch_id,
-              location,
-              customer_id,
-              recipes(
-                recipe_id,
-                recipe_name
+              recipe_name,
+              variety_id,
+              variety_name,
+              varieties(
+                varietyid,
+                name
               )
-            `)
+            )
+          `)
             .eq('farm_uuid', farmUuid)
             .is('harvest_date', null)
             .not('sow_date', 'is', null)
@@ -790,6 +797,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
           const traysByCustomer = new Map<string, {
             recipeId: number;
             recipeName: string;
+            varietyName?: string;
             customerId?: number;
             location?: string;
             trayIds: number[];
@@ -803,12 +811,15 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             const tray = item.tray;
             const recipeId = tray.recipe_id || 0;
             const recipeName = tray.recipes?.recipe_name || 'Unknown';
+            const varietyNameFromRelation = resolveVarietyNameFromRelation((tray.recipes as any)?.varieties);
+            const currentVarietyName = tray.recipes?.variety_name || varietyNameFromRelation;
             const customerId = tray.customer_id;
             const key = `${recipeId}-${customerId ?? 'unassigned'}`;
             if (!traysByCustomer.has(key)) {
               traysByCustomer.set(key, {
                 recipeId,
                 recipeName,
+                varietyName: currentVarietyName,
                 customerId,
                 location: tray.location || 'Not set',
                 trayIds: [],
@@ -819,6 +830,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
               });
             }
             const group = traysByCustomer.get(key)!;
+            if (!group.varietyName && currentVarietyName) {
+              group.varietyName = currentVarietyName;
+            }
             group.trayIds.push(tray.tray_id);
             if (tray.batch_id) {
               group.batchIds.add(tray.batch_id);
@@ -839,8 +853,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             const dayTotal = group.dayTotal || recipeTotalDays[group.recipeId] || 0;
             harvestTasks.push({
               id: key,
-              action: `Harvest ${group.recipeName}`,
-              crop: group.recipeName,
+              action: `Harvest ${group.varietyName || group.recipeName}`,
+              crop: group.varietyName || group.recipeName,
               batchId: batchIdDisplay,
               location: group.location || 'Not set',
               customerName: customerName || undefined,

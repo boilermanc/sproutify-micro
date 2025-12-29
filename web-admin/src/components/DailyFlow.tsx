@@ -85,6 +85,7 @@ import type { FulfillmentActionType } from '../services/orderFulfillmentActions'
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { resolveVarietyNameFromRelation } from '@/lib/varietyUtils';
 import {
   fetchAssignableTrays,
   assignTrayToCustomer,
@@ -221,6 +222,8 @@ type BatchHarvestRow = {
   crop: string;
   batchId?: string;
   taskId: string;
+  recipeId?: number;
+  varietyName?: string;
 };
 
 type HasRecipeInfo = {
@@ -292,6 +295,7 @@ export default function DailyFlow() {
   const [isProcessingFulfillment, setIsProcessingFulfillment] = useState(false);
   const [actionHistory, setActionHistory] = useState<Map<string, any[]>>(new Map());
   const actionHistoryRef = useRef<Map<string, any[]>>(new Map());
+  const recipeVarietyCacheRef = useRef<Record<number, string>>({});
   const [availableSubstitutes, setAvailableSubstitutes] = useState<any[]>([]);
   const [selectedSubstitute, setSelectedSubstitute] = useState<number | null>(null);
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
@@ -1054,7 +1058,57 @@ export default function DailyFlow() {
     setBatchHarvestYields({});
   };
 
-  const openBatchHarvestModal = (group: HarvestGroup) => {
+  const enrichBatchHarvestRowsWithVariety = useCallback(
+    async (rows: BatchHarvestRow[]): Promise<BatchHarvestRow[]> => {
+      if (rows.length === 0) return rows;
+      const missingRecipeIds = Array.from(
+        new Set(
+          rows
+            .map((row) => row.recipeId)
+            .filter((id): id is number => !!id && !recipeVarietyCacheRef.current[id])
+        )
+      );
+
+      if (missingRecipeIds.length > 0) {
+        const farmUuid = getFarmUuidFromSession();
+        if (farmUuid) {
+          try {
+            const { data: recipesData, error: recipesError } = await getSupabaseClient()
+              .from('recipes')
+              .select('recipe_id, variety_id, variety_name, varieties(name)')
+              .in('recipe_id', missingRecipeIds)
+              .eq('farm_uuid', farmUuid);
+
+            if (!recipesError && recipesData) {
+              const updatedCache = { ...recipeVarietyCacheRef.current };
+              recipesData.forEach((recipe: any) => {
+                if (!recipe?.recipe_id) return;
+                const varietyNameFromRelation = resolveVarietyNameFromRelation(recipe.varieties);
+                const varietyName = varietyNameFromRelation || recipe.variety_name;
+                if (varietyName) {
+                  updatedCache[recipe.recipe_id] = varietyName;
+                }
+              });
+              recipeVarietyCacheRef.current = updatedCache;
+            } else if (recipesError) {
+              console.error('[DailyFlow] Error fetching recipe varieties for batch harvest modal:', recipesError);
+            }
+          } catch (error) {
+            console.error('[DailyFlow] Error loading variety names for batch harvest modal:', error);
+          }
+        }
+      }
+
+      return rows.map((row) => ({
+        ...row,
+        varietyName:
+          row.varietyName || (row.recipeId ? recipeVarietyCacheRef.current[row.recipeId] : undefined),
+      }));
+    },
+    [getFarmUuidFromSession]
+  );
+
+  const openBatchHarvestModal = async (group: HarvestGroup) => {
     const rowsMap = new Map<number, BatchHarvestRow>();
     group.tasks.forEach((task) => {
       task.trayIds.forEach((trayId) => {
@@ -1064,6 +1118,8 @@ export default function DailyFlow() {
             crop: task.crop,
             batchId: task.batchId,
             taskId: task.id,
+            recipeId: task.recipeId,
+            varietyName: (task as HasRecipeInfo).variety_name ?? undefined,
           });
         }
       });
@@ -1082,6 +1138,13 @@ export default function DailyFlow() {
     setBatchHarvestSelected(initialSelected);
     setBatchHarvestYields(initialYields);
     setBatchHarvestModalGroup(group);
+
+    try {
+      const enrichedRows = await enrichBatchHarvestRowsWithVariety(rows);
+      setBatchHarvestRows(enrichedRows);
+    } catch (error) {
+      console.error('[DailyFlow] Error enriching batch harvest rows:', error);
+    }
   };
 
   const closeBatchHarvestModal = () => {
@@ -2500,11 +2563,11 @@ export default function DailyFlow() {
                           {group.tasks.length} {group.tasks.length === 1 ? 'variety' : 'varieties'}
                         </Badge>
                         {group.customerName && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openBatchHarvestModal(group)}
-                          >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void openBatchHarvestModal(group)}
+                        >
                             Harvest Order
                           </Button>
                         )}
@@ -3221,7 +3284,9 @@ export default function DailyFlow() {
                         className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                       />
                       <div>
-                        <p className="text-sm font-semibold text-slate-900">{row.crop}</p>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {row.varietyName || row.crop}
+                        </p>
                         <p className="text-xs text-slate-500">
                           Tray {row.trayId}
                           {row.batchId ? ` • ${row.batchId}` : ''}

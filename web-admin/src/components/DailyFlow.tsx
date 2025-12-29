@@ -246,6 +246,25 @@ export default function DailyFlow() {
   const [soakTask, setSoakTask] = useState<DailyTask | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [availableBatches, setAvailableBatches] = useState<any[]>([]);
+  useEffect(() => {
+    console.log('[DailyFlow] availableBatches state updated:', availableBatches.map((batch) => ({
+      batchid: batch.batchid,
+      batch_id: batch.batch_id,
+      batchId: batch.batchId,
+    })));
+  }, [availableBatches]);
+
+  useEffect(() => {
+    if (selectedBatchId === null) {
+      console.log('[DailyFlow] selectedBatchId cleared');
+      return;
+    }
+    const batch = availableBatches.find((b) => b.batchid === selectedBatchId);
+    console.log('[DailyFlow] Selected batch:', {
+      selectedBatchId,
+      batch,
+    });
+  }, [selectedBatchId, availableBatches]);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [soakQuantityGrams, setSoakQuantityGrams] = useState<string>('');
   const [seedQuantityPerTray, setSeedQuantityPerTray] = useState<number>(0);
@@ -1382,7 +1401,7 @@ export default function DailyFlow() {
       });
 
       // Format batches for display
-      const formattedBatches = (batchesData || []).map((batch: any) => {
+  const formattedBatches = (batchesData || []).map((batch: any) => {
         const rawBatchId =
           batch.batchid ??
           batch.batch_id ??
@@ -1416,11 +1435,17 @@ export default function DailyFlow() {
         };
       });
 
+    console.log('[DailyFlow] Normalized batches:', formattedBatches);
+
       if (formattedBatches.length === 0) {
         console.warn('[DailyFlow] No batches found for variety:', { varietyId, varietyName, farmUuid });
         showNotification('error', `No seed batches found for variety "${varietyName}". Please add a batch first.`);
       }
 
+      console.log('[DailyFlow] Setting availableBatches:', formattedBatches.map((batch) => ({
+        batchid: batch.batchid,
+        batch_id: batch.batch_id,
+      })));
       setAvailableBatches(formattedBatches);
       setSeedQuantityPerTray(seedQuantityPerTray); // Store for use in modal
     } catch (error) {
@@ -1699,6 +1724,7 @@ export default function DailyFlow() {
     if (selectedBatchId) {
       batchIdToUse = selectedBatchId;
     }
+    console.log('[DailyFlow] handleSeedingConfirm batchIdToUse before validation:', batchIdToUse);
 
     // Determine recipe ID and check if this is a soak variety
     let recipeId: number | undefined;
@@ -3413,13 +3439,15 @@ export default function DailyFlow() {
                       </button>
                     </div>
                   ) : (
-                    <Select
-                      value={selectedBatchId?.toString() || ''}
-                      onValueChange={(value) => {
-                        setSelectedBatchId(parseInt(value, 10));
-                        setSoakQuantityGrams(''); // Reset quantity when batch changes
-                      }}
-                    >
+                      <Select
+                        value={selectedBatchId?.toString() || ''}
+                        onValueChange={(value) => {
+                          const parsed = parseInt(value, 10);
+                          console.log('[DailyFlow] Soak dialog batch selected:', { value, parsed });
+                          setSelectedBatchId(parsed);
+                          setSoakQuantityGrams(''); // Reset quantity when batch changes
+                        }}
+                      >
                       <SelectTrigger id="soak-batch-select" className="w-full">
                         <SelectValue placeholder="Select a seed batch" />
                       </SelectTrigger>
@@ -3427,7 +3455,7 @@ export default function DailyFlow() {
                       {availableBatches.map((batch) => {
                         const quantityLabel = formatQuantityDisplay(batch.quantity, batch.unit);
                         return (
-                          <SelectItem key={batch.batchid} value={batch.batchid.toString()}>
+                      <SelectItem key={batch.batchid} value={batch.batchid.toString()}>
                             <div className="flex flex-col">
                               <span className="font-medium">
                                 {batch.variety_name} - Batch #{batch.batchid}
@@ -3644,7 +3672,11 @@ export default function DailyFlow() {
                     ) : (
                       <Select
                         value={selectedBatchId?.toString() || ''}
-                        onValueChange={(value) => setSelectedBatchId(parseInt(value, 10))}
+                        onValueChange={(value) => {
+                          const parsed = parseInt(value, 10);
+                          console.log('[DailyFlow] Seeding dialog batch selected:', { value, parsed });
+                          setSelectedBatchId(parsed);
+                        }}
                       >
                         <SelectTrigger id="batch-select" className="w-full">
                           <SelectValue placeholder="Select a seed batch" />

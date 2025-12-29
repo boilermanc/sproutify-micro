@@ -2443,6 +2443,67 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
   }
 };
 
+const checkRecipeRequiresSoak = async (recipeId?: number): Promise<boolean> => {
+  if (!recipeId) return false;
+  try {
+    const { data, error } = await getSupabaseClient().rpc('recipe_has_soak', {
+      p_recipe_id: recipeId
+    });
+    if (error) {
+      console.error('[DailyFlow] Error checking recipe soak requirement:', error);
+      return false;
+    }
+    return !!(data && Array.isArray(data) ? data[0]?.has_soak : data?.has_soak);
+  } catch (error) {
+    console.error('[DailyFlow] Unexpected error checking recipe soak requirement:', error);
+    return false;
+  }
+};
+
+const fetchAvailableSoakedSeedForRecipe = async (
+  farmUuid: string,
+  recipeId?: number,
+  varietyId?: number
+): Promise<any | null> => {
+  if (!farmUuid || (!recipeId && !varietyId)) {
+    return null;
+  }
+
+  try {
+    let query = getSupabaseClient()
+      .from('available_soaked_seed')
+      .select('*')
+      .eq('farm_uuid', farmUuid)
+      .gt('quantity_remaining', 0)
+      .order('expires_at', { ascending: true })
+      .limit(1);
+
+    if (recipeId && varietyId) {
+      query = query.or(`recipe_id.eq.${recipeId},variety_id.eq.${varietyId}`);
+    } else if (recipeId) {
+      query = query.eq('recipe_id', recipeId);
+    } else if (varietyId) {
+      query = query.eq('variety_id', varietyId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[DailyFlow] Error fetching available soaked seed:', error);
+      return null;
+    }
+
+    if (!data) return null;
+    if (Array.isArray(data)) {
+      return data[0] ?? null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('[DailyFlow] Unexpected error fetching available soaked seed:', error);
+    return null;
+  }
+};
+
 /**
  * Mark a task as completed by updating tray_steps
  * Uses actual schema: status='Completed', completed_date, completed_by
@@ -2538,19 +2599,6 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
 
       // For Seed tasks, create the actual trays
       if (task.action === 'Seed') {
-        console.log('[DailyFlow] completeTask called with batchId:', batchId);
-        console.log('[DailyFlow] completeTask task object:', {
-          id: task.id,
-          recipeId: task.recipeId,
-          requestId: task.requestId,
-          taskSource: task.taskSource,
-        });
-        // batchId is required for Seed tasks to trigger tray creation
-        if (!batchId) {
-          throw new Error('Batch ID is required for seeding tasks');
-        }
-
-        // Get recipe to find variety
         const { data: recipeData, error: recipeError } = await getSupabaseClient()
           .from('recipes')
           .select('recipe_id, recipe_name, variety_id, variety_name')
@@ -2567,55 +2615,100 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
           throw new Error(`Recipe ${task.recipeId} not found`);
         }
 
-        // Get variety name
         const varietyName = recipeData.variety_name || recipeData.recipe_name || '';
-
-        console.log('[DailyFlow] Using batch_id:', batchId, 'for variety:', varietyName);
-
-        if (!userId) {
-          throw new Error('User ID not found in session');
-        }
-
-        // Create tray creation requests (one per tray)
-        // Use the selected taskDate (seeding date) for requested_at, which becomes the sow_date
-        // Convert taskDateStr to ISO string at midnight for consistent date handling
-        const sowDateISO = taskDateStr ? new Date(taskDateStr + 'T00:00:00').toISOString() : now;
-        
-        // Ensure we only create the number of trays specified (should be 1 for daily flow seeding)
+        const recipeIdForSoak = task.recipeId ?? recipeData.recipe_id;
         const numberOfTrays = Math.max(1, task.trays || 1);
-        const requests = Array.from({ length: numberOfTrays }, () => ({
-          customer_name: task.customerName ?? null,
-          customer_id: task.customerId ?? null,
-          standing_order_id: task.standingOrderId ?? null,
-          order_schedule_id: task.orderScheduleId ?? null,
-          variety_name: varietyName,
-          recipe_name: recipeData.recipe_name,
-          farm_uuid: farmUuid,
-          user_id: userId,
-          requested_at: sowDateISO, // Use selected seeding date, not current time
-          batch_id: batchId, // Required for tray creation trigger
-        }));
+        let usedSoakedSeedEntry: any | null = null;
 
-        console.log('[DailyFlow] Creating tray creation requests:', {
-          numberOfTrays,
-          taskTrays: task.trays,
-          requestsCount: requests.length,
-          recipeName: recipeData.recipe_name,
-          batchId
-        });
-
-        const { error: requestError } = await getSupabaseClient()
-          .from('tray_creation_requests')
-          .insert(requests);
-
-        if (requestError) {
-          console.error('[DailyFlow] Error creating tray requests:', requestError);
-          throw requestError;
+        if (recipeIdForSoak) {
+          const requiresSoak = await checkRecipeRequiresSoak(recipeIdForSoak);
+          if (requiresSoak) {
+            const soakedSeedEntry = await fetchAvailableSoakedSeedForRecipe(
+              farmUuid,
+              recipeIdForSoak,
+              recipeData.variety_id
+            );
+            if (soakedSeedEntry) {
+              try {
+                const traysFromSoaked = await useLeftoverSoakedSeed(
+                  soakedSeedEntry.soaked_id,
+                  numberOfTrays,
+                  task.requestId ?? null
+                );
+                if (traysFromSoaked > 0) {
+                  usedSoakedSeedEntry = soakedSeedEntry;
+                  console.log('[DailyFlow] Creating trays from soaked seed:', {
+                    soakedId: soakedSeedEntry.soaked_id,
+                    recipeId: recipeIdForSoak,
+                    traysRequested: numberOfTrays,
+                    traysCreated: traysFromSoaked
+                  });
+                } else {
+                  console.warn(
+                    '[DailyFlow] Soaked seed RPC returned zero trays for recipe',
+                    recipeIdForSoak
+                  );
+                }
+              } catch (error) {
+                console.error('[DailyFlow] Error creating trays from soaked seed:', error);
+              }
+            }
+          }
         }
 
-        console.log('[DailyFlow] Tray creation requests created successfully:', {
-          requested: requests.length
-        });
+        if (!usedSoakedSeedEntry) {
+          console.log('[DailyFlow] completeTask called with batchId:', batchId);
+          console.log('[DailyFlow] completeTask task object:', {
+            id: task.id,
+            recipeId: task.recipeId,
+            requestId: task.requestId,
+            taskSource: task.taskSource,
+          });
+
+          if (!batchId) {
+            throw new Error('Batch ID is required for seeding tasks');
+          }
+
+          if (!userId) {
+            throw new Error('User ID not found in session');
+          }
+
+          const sowDateISO = taskDateStr ? new Date(taskDateStr + 'T00:00:00').toISOString() : now;
+          const requests = Array.from({ length: numberOfTrays }, () => ({
+            customer_name: task.customerName ?? null,
+            customer_id: task.customerId ?? null,
+            standing_order_id: task.standingOrderId ?? null,
+            order_schedule_id: task.orderScheduleId ?? null,
+            variety_name: varietyName,
+            recipe_name: recipeData.recipe_name,
+            farm_uuid: farmUuid,
+            user_id: userId,
+            requested_at: sowDateISO,
+            batch_id: batchId,
+          }));
+
+          console.log('[DailyFlow] Using batch_id:', batchId, 'for variety:', varietyName);
+          console.log('[DailyFlow] Creating tray creation requests:', {
+            numberOfTrays,
+            taskTrays: task.trays,
+            requestsCount: requests.length,
+            recipeName: recipeData.recipe_name,
+            batchId
+          });
+
+          const { error: requestError } = await getSupabaseClient()
+            .from('tray_creation_requests')
+            .insert(requests);
+
+          if (requestError) {
+            console.error('[DailyFlow] Error creating tray requests:', requestError);
+            throw requestError;
+          }
+
+          console.log('[DailyFlow] Tray creation requests created successfully:', {
+            requested: requests.length
+          });
+        }
       }
 
       // Record completion in task_completions table
@@ -3255,12 +3348,12 @@ export const completeSeedTask = async (
 /**
  * Use leftover soaked seed to create ad-hoc trays
  */
-export const useLeftoverSoakedSeed = async (
+export async function useLeftoverSoakedSeed(
   soakedId: number,
   quantityTrays: number,
   requestId: number | null,
   userId?: string
-): Promise<number> => {
+): Promise<number> {
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) throw new Error('No session found');
@@ -3282,7 +3375,7 @@ export const useLeftoverSoakedSeed = async (
     console.error('Error using leftover soaked seed:', error);
     throw error;
   }
-};
+}
 
 /**
  * Discard soaked seed

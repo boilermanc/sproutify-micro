@@ -651,17 +651,26 @@ export default function DailyFlow() {
       // Load available soaked seed
       // Note: available_soaked_seed view already filters by status='available', so we don't need to filter again
       if (farmUuid) {
-        const { data: soakedSeedData, error } = await getSupabaseClient()
-          .from('available_soaked_seed')
-          .select('*')
-          .eq('farm_uuid', farmUuid)
-          .order('expires_at', { ascending: true });
+        try {
+          const { data: soakedSeedData, error } = await getSupabaseClient()
+            .from('available_soaked_seed')
+            .select('*')
+            .eq('farm_uuid', farmUuid)
+            .order('expires_at', { ascending: true });
 
-        if (error) {
-          console.error('[DailyFlow] Error fetching available soaked seed:', error);
-        } else if (soakedSeedData) {
-          setAllAvailableSoakedSeed(soakedSeedData);
+          if (error) {
+            console.error('[DailyFlow] Error fetching available soaked seed:', error);
+            setAllAvailableSoakedSeed([]);
+          } else {
+            const filtered = (soakedSeedData || []).filter((item: any) => (item.quantity_remaining ?? 0) > 0);
+            setAllAvailableSoakedSeed(filtered);
+          }
+        } catch (error) {
+          console.error('[DailyFlow] Unexpected error fetching available soaked seed:', error);
+          setAllAvailableSoakedSeed([]);
         }
+      } else {
+        setAllAvailableSoakedSeed([]);
       }
     } catch (error) {
       console.error('Error loading tasks:', error);
@@ -1729,7 +1738,7 @@ export default function DailyFlow() {
     // Check if batch is required (for non-soak varieties)
     // For soak varieties, batch_id should be null
     let batchIdToUse: number | null = null;
-    if (selectedBatchId) {
+    if (selectedBatchId !== null && selectedBatchId !== undefined) {
       batchIdToUse = selectedBatchId;
     }
     console.log('[DailyFlow] handleSeedingConfirm batchIdToUse before validation:', batchIdToUse);
@@ -1747,15 +1756,6 @@ export default function DailyFlow() {
         });
         
         isSoakVariety = hasSoak && hasSoak[0]?.has_soak;
-        
-        // For soak varieties, batch_id should be null
-        if (isSoakVariety) {
-          batchIdToUse = null;
-        } else if (!batchIdToUse) {
-          // For non-soak varieties, batch_id is required
-          showNotification('error', 'Please select a seed batch for non-soak varieties');
-          return;
-        }
       }
     } else if (seedingTask.requestId) {
       // For seed_request tasks, get recipe_id from request
@@ -1772,15 +1772,6 @@ export default function DailyFlow() {
         });
         
         isSoakVariety = hasSoak && hasSoak[0]?.has_soak;
-        
-        // For soak varieties, batch_id should be null
-        if (isSoakVariety) {
-          batchIdToUse = null;
-        } else if (!batchIdToUse) {
-          // For non-soak varieties, batch_id is required
-          showNotification('error', 'Please select a seed batch for non-soak varieties');
-          return;
-        }
       }
     }
 
@@ -1792,6 +1783,11 @@ export default function DailyFlow() {
 
     if (seedingTask.taskSource === 'seed_request' && !seedingTask.requestId) {
       showNotification('error', 'Invalid seed task - missing request ID');
+      return;
+    }
+
+    if (!isSoakVariety && batchIdToUse == null) {
+      showNotification('error', 'Please select a seed batch for non-soak varieties');
       return;
     }
 

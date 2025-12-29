@@ -96,35 +96,19 @@ function App() {
         // Check for getSupabaseClient() session with timeout
         console.log('[App] Calling getSupabaseClient().auth.getSession()...');
 
-        // Use a simple timeout approach
-        let timedOut = false;
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
         timeoutId = registerTimeout(
           setTimeout(() => {
-            timedOut = true;
             activeTimeouts.delete(timeoutId!);
-            const clearedKeys = clearSupabaseAuthStorage();
             console.warn(
-              `[App] Session check timed out after ${SESSION_TIMEOUT_MS / 1000}s, clearing potentially corrupted session`,
-              { clearedKeys },
+              `[App] Session check still running after ${SESSION_TIMEOUT_MS / 1000}s, continuing to wait for Supabase`,
             );
-            // Clear potentially corrupted Supabase auth data
-            localStorage.removeItem('sproutify_session');
-            if (isMounted) {
-              setIsAuthenticated(false);
-              setIsLoading(false);
-            }
           }, SESSION_TIMEOUT_MS)
         );
 
         const { data: { session }, error } = await client.auth.getSession();
         cancelTimeout(timeoutId);
-
-        if (timedOut) {
-          console.log('[App] Ignoring late response, already timed out');
-          return;
-        }
 
         console.log('[App] getSession result:', { hasSession: !!session, error });
 

@@ -89,7 +89,8 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
     action, 
     actionUrl, 
     type, 
-    colorClasses 
+    colorClasses,
+    onTakeAction
   }: { 
     action: string; 
     actionUrl?: string; 
@@ -101,6 +102,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
       hoverBg: string;
       hoverText: string;
     };
+    onTakeAction?: () => void;
   }) => {
     const isExpanded = expandedAction === type;
 
@@ -226,6 +228,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                             onClick={(e) => {
                               e.stopPropagation();
                               handleClose();
+                              onTakeAction?.();
                               navigate(actionUrl);
                             }}
                             className={`w-full ${colorClasses.bg} ${colorClasses.border} ${colorClasses.text} ${colorClasses.hoverBg} ${colorClasses.hoverText} border-solid`}
@@ -317,6 +320,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               action={insights.opportunity.action}
               actionUrl={insights.opportunity.actionUrl || '/reports'}
               type="opportunity"
+            onTakeAction={onClose}
               colorClasses={{
                 bg: 'bg-emerald-500/10',
                 border: 'border-emerald-500/20',
@@ -343,6 +347,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               action={insights.risk.action}
               actionUrl={insights.risk.actionUrl || '/trays'}
               type="risk"
+            onTakeAction={onClose}
               colorClasses={{
                 bg: 'bg-amber-500/10',
                 border: 'border-amber-500/20',
@@ -369,6 +374,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               action={insights.inventory.action}
               actionUrl={insights.inventory.actionUrl || '/supplies'}
               type="inventory"
+            onTakeAction={onClose}
               colorClasses={{
                 bg: 'bg-blue-500/10',
                 border: 'border-blue-500/20',

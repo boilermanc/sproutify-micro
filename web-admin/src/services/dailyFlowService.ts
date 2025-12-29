@@ -130,19 +130,27 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     if (!sessionData) return [];
 
     const { farmUuid } = JSON.parse(sessionData);
-    const today = selectedDate || new Date();
-    today.setHours(0, 0, 0, 0);
-    const taskDate = formatDateString(today); // Use formatDateString to avoid UTC timezone shift
+    const normalizedToday = selectedDate ? new Date(selectedDate.getTime()) : new Date();
+    normalizedToday.setHours(0, 0, 0, 0);
+    const taskDate = formatDateString(normalizedToday); // Use formatDateString to avoid UTC timezone shift
 
     // Query daily_flow_aggregated view for today's tasks
     // Note: The view may not include recipe_id directly, so we'll fetch it from requests when needed
-    const { data: tasksData, error: tasksError } = await getSupabaseClient()
+    console.log('[fetchDailyTasks] daily_flow_aggregated filters', {
+      farm_uuid: farmUuid,
+      task_date: taskDate,
+      selectedDate: normalizedToday.toISOString(),
+    });
+
+    const taskQuery = getSupabaseClient()
       .from('daily_flow_aggregated')
       .select('*')
       .eq('farm_uuid', farmUuid)
       .eq('task_date', taskDate)
       .order('task_source', { ascending: true })
       .order('recipe_name', { ascending: true });
+
+    const { data: tasksData, error: tasksError } = await taskQuery;
 
     if (tasksError) throw tasksError;
 

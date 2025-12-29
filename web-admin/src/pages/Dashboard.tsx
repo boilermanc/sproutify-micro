@@ -54,8 +54,12 @@ interface InsightData {
   inventory?: { title: string; message: string; action: string; actionUrl?: string };
 }
 
+type InsightType = 'opportunity' | 'risk' | 'inventory';
+
 const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightData | null, isVisible: boolean, onClose: () => void, navigate: (path: string) => void }) => {
+  const MESSAGE_PREVIEW_LENGTH = 200;
   const [expandedAction, setExpandedAction] = useState<string | null>(null);
+  const [detailModal, setDetailModal] = useState<{ type: InsightType; title: string; message: string } | null>(null);
   
   // Debug: Log the data being received (only when data actually changes)
   useEffect(() => {
@@ -82,6 +86,40 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
       message: 'Daily insights will appear here once you start tracking trays and harvests.',
       action: 'Create your first tray'
     }
+  };
+
+  const handleOpenDetail = useCallback((type: InsightType, title: string, message: string) => {
+    setDetailModal({ type, title, message });
+  }, []);
+
+  const handleCloseDetail = useCallback(() => {
+    setDetailModal(null);
+  }, []);
+
+  const renderInsightMessage = (type: InsightType, title: string, message: string) => {
+    const shouldTruncate = message.length > MESSAGE_PREVIEW_LENGTH;
+    const previewText = shouldTruncate
+      ? `${message.slice(0, MESSAGE_PREVIEW_LENGTH).trimEnd()}...`
+      : message;
+
+    return (
+      <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
+        {previewText}
+        {shouldTruncate && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              handleOpenDetail(type, title, message);
+            }}
+            className="ml-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 focus:outline-none"
+          >
+            more...
+          </button>
+        )}
+      </p>
+    );
   };
 
   // Expandable Action Button Component with Popup Modal
@@ -263,12 +301,64 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
   );
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }}
-      className="mb-8 relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl"
-    >
+    <>
+      <AnimatePresence>
+        {detailModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[101]"
+              onClick={handleCloseDetail}
+            />
+            <div className="fixed inset-0 z-[102] flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                className="pointer-events-auto w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden"
+              >
+                <div className="p-6 border-b border-white/5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Daily Insight</p>
+                      <h3 className="text-xl font-bold text-white mt-1">{detailModal.title}</h3>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleCloseDetail}
+                      className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+                    >
+                      <X size={20} />
+                    </Button>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line">
+                    {detailModal.message}
+                  </p>
+                  <div className="mt-6 flex justify-end">
+                    <Button variant="outline" size="sm" onClick={handleCloseDetail}>
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <motion.div 
+        initial={{ opacity: 0, height: 0 }}
+        animate={{ opacity: 1, height: 'auto' }}
+        exit={{ opacity: 0, height: 0 }}
+        className="mb-8 relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl"
+      >
       {/* Background Decor */}
       <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
@@ -313,9 +403,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Opportunity</span>
             </div>
             <h3 className="font-semibold text-slate-200 mb-2">{insights.opportunity.title}</h3>
-            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
-              {insights.opportunity.message}
-            </p>
+            {renderInsightMessage('opportunity', insights.opportunity.title, insights.opportunity.message)}
             <ExpandableActionButton
               action={insights.opportunity.action}
               actionUrl={insights.opportunity.actionUrl || '/reports'}
@@ -340,9 +428,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Attention Needed</span>
             </div>
             <h3 className="font-semibold text-slate-200 mb-2">{insights.risk.title}</h3>
-            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
-              {insights.risk.message}
-            </p>
+            {renderInsightMessage('risk', insights.risk.title, insights.risk.message)}
             <ExpandableActionButton
               action={insights.risk.action}
               actionUrl={insights.risk.actionUrl || '/trays'}
@@ -367,9 +453,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Inventory</span>
             </div>
             <h3 className="font-semibold text-slate-200 mb-2">{insights.inventory.title}</h3>
-            <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
-              {insights.inventory.message}
-            </p>
+            {renderInsightMessage('inventory', insights.inventory.title, insights.inventory.message)}
             <ExpandableActionButton
               action={insights.inventory.action}
               actionUrl={insights.inventory.actionUrl || '/supplies'}
@@ -386,7 +470,8 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
           </div>
 
         </div>
-    </motion.div>
+      </motion.div>
+    </>
   );
 };
 

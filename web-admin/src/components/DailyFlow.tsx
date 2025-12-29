@@ -1447,6 +1447,14 @@ export default function DailyFlow() {
         batch_id: batch.batch_id,
       })));
       setAvailableBatches(formattedBatches);
+      if (
+        formattedBatches.length === 1 &&
+        formattedBatches[0].batchid !== null &&
+        formattedBatches[0].batchid !== undefined
+      ) {
+        setSelectedBatchId(formattedBatches[0].batchid);
+        console.log('[DailyFlow] Auto-selected batch for single result:', formattedBatches[0].batchid);
+      }
       setSeedQuantityPerTray(seedQuantityPerTray); // Store for use in modal
     } catch (error) {
       console.error('[DailyFlow] Error in fetchAvailableBatchesForRecipe:', error);

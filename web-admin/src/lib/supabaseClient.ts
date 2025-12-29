@@ -21,7 +21,6 @@ const supabaseOptions = {
   auth: {
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    lock: 'no-lock',
     persistSession: true,
   },
 };

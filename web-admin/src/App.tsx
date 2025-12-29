@@ -46,7 +46,27 @@ import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
 
-const SESSION_TIMEOUT_MS = 8000;
+const SESSION_WARNING_TIMEOUT_MS = 8000;
+const SESSION_HARD_TIMEOUT_MS = 15000;
+
+const clearSupabaseStorageKeys = (): string[] => {
+  const clearedKeys: string[] = [];
+  if (typeof localStorage === 'undefined') {
+    return clearedKeys;
+  }
+
+  for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+
+    if (key.toLowerCase().includes('supabase')) {
+      localStorage.removeItem(key);
+      clearedKeys.push(key);
+    }
+  }
+
+  return clearedKeys;
+};
 
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
   if (!error) {
@@ -102,12 +122,30 @@ function App() {
           setTimeout(() => {
             activeTimeouts.delete(timeoutId!);
             console.warn(
-              `[App] Session check still running after ${SESSION_TIMEOUT_MS / 1000}s, continuing to wait for Supabase`,
+              `[App] Session check still running after ${SESSION_WARNING_TIMEOUT_MS / 1000}s, continuing to wait for Supabase`,
             );
-          }, SESSION_TIMEOUT_MS)
+          }, SESSION_WARNING_TIMEOUT_MS)
         );
 
-        const { data: { session }, error } = await client.auth.getSession();
+        const getSessionWithTimeout = async () => {
+          let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            hardTimeoutId = registerTimeout(
+              setTimeout(() => reject(new Error('Session check timed out')), SESSION_HARD_TIMEOUT_MS)
+            );
+          });
+
+          try {
+            return Promise.race([
+              client.auth.getSession(),
+              timeoutPromise,
+            ]);
+          } finally {
+            cancelTimeout(hardTimeoutId);
+          }
+        };
+
+        const { data: { session }, error } = await getSessionWithTimeout();
         cancelTimeout(timeoutId);
 
         console.log('[App] getSession result:', { hasSession: !!session, error });
@@ -193,8 +231,20 @@ function App() {
           // Auto-login will be handled by LoginPage
           setIsAuthenticated(false);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('[App] Session check error:', err);
+        if (err?.message === 'Session check timed out') {
+          const clearedSupabaseKeys = clearSupabaseStorageKeys();
+          clearSupabaseAuthStorage();
+          localStorage.removeItem('sproutify_session');
+          console.warn('[App] Session reset after timeout, cleared Supabase storage keys:', clearedSupabaseKeys);
+          setIsAuthenticated(false);
+          if (isMounted) {
+            setIsLoading(false);
+          }
+          window.location.assign('/login');
+          return;
+        }
         if (isMounted) {
           setIsLoading(false);
         }

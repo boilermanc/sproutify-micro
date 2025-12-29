@@ -17,9 +17,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // Export a safe client that may be null if not configured
 // This allows the module to always initialize successfully
-export const supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+const supabaseOptions = {
+  auth: {
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    lock: 'no-lock',
+    persistSession: true,
+  },
+};
+
+export const supabase: SupabaseClient | null =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey, supabaseOptions)
+    : null;
 
 // Helper function to ensure supabase is not null
 // Throws an error if supabase is not configured

@@ -1382,19 +1382,39 @@ export default function DailyFlow() {
       });
 
       // Format batches for display
-      const formattedBatches = (batchesData || []).map((batch: any) => ({
-        batchid: batch.batchid,
-        quantity: batch.quantity,
-        unit: batch.unit || 'grams', // Default to grams if unit is not set
-        lot_number: batch.lot_number || null,
-        purchasedate: batch.purchasedate,
-        variety_name: varietyName,
-        trays_possible: batch.trays_possible ?? null,
-        quantity_grams:
-          batch.quantity_grams ??
-          convertQuantityValueToGrams(batch.quantity, batch.unit) ??
-          0,
-      }));
+      const formattedBatches = (batchesData || []).map((batch: any) => {
+        const rawBatchId =
+          batch.batchid ??
+          batch.batch_id ??
+          batch.id ??
+          batch.batchId ??
+          batch.BatchId ??
+          null;
+        const numericBatchId =
+          rawBatchId === null || rawBatchId === undefined
+            ? null
+            : Number(rawBatchId);
+        const resolvedBatchId =
+          numericBatchId !== null && Number.isFinite(numericBatchId)
+            ? numericBatchId
+            : null;
+
+        return {
+          batchid: resolvedBatchId,
+          batch_id: resolvedBatchId,
+          batchId: resolvedBatchId,
+          quantity: batch.quantity,
+          unit: batch.unit || 'grams', // Default to grams if unit is not set
+          lot_number: batch.lot_number || null,
+          purchasedate: batch.purchasedate,
+          variety_name: varietyName,
+          trays_possible: batch.trays_possible ?? null,
+          quantity_grams:
+            batch.quantity_grams ??
+            convertQuantityValueToGrams(batch.quantity, batch.unit) ??
+            0,
+        };
+      });
 
       if (formattedBatches.length === 0) {
         console.warn('[DailyFlow] No batches found for variety:', { varietyId, varietyName, farmUuid });

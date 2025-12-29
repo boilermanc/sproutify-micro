@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface FarmData {
   farm_uuid: string;
-  farm_name: string;
+  farmname: string;
   seeding_days?: string[];
   subscription_status?: string;
   subscription_plan?: string;
@@ -77,7 +77,7 @@ const SettingsPage = () => {
       if (farmError) throw farmError;
       if (farm) {
         setFarmData(farm);
-        setFarmName(farm.farm_name || farm.farmname || '');
+        setFarmName(farm.farmname || '');
         setSeedingDays(farm.seeding_days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
       }
 
@@ -124,7 +124,7 @@ const SettingsPage = () => {
       const { error } = await getSupabaseClient()
         .from('farms')
         .update({ 
-          farm_name: farmName,
+          farmname: farmName,
           seeding_days: seedingDays
         })
         .eq('farm_uuid', farmData.farm_uuid);

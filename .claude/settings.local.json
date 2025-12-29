@@ -28,7 +28,10 @@
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(curl:*)",
-      "Bash(netstat:*)"
+      "Bash(netstat:*)",
+      "Bash(tree:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []

@@ -6,11 +6,9 @@ type ProfileRecord = {
   farm_uuid?: string;
   role?: string;
   farms?: {
-    farm_name?: string | null;
     farmname?: string | null;
     trial_end_date?: string | null;
   } | null;
-  farm_name?: string | null;
   farmname?: string | null;
 };
 
@@ -24,9 +22,7 @@ export interface SproutifySession {
 }
 
 const getFarmNameFromProfile = (profile: ProfileRecord) =>
-  profile.farms?.farm_name ??
   profile.farms?.farmname ??
-  profile.farm_name ??
   profile.farmname ??
   null;
 
@@ -45,12 +41,12 @@ export const buildSessionPayload = async (
   if ((!farmName || !farmName.trim()) && farmUuid && getSupabaseClient()) {
     const { data: farm } = await getSupabaseClient()
       .from('farms')
-      .select('farm_name, farmname, trial_end_date')
+      .select('farmname, trial_end_date')
       .eq('farm_uuid', farmUuid)
       .single();
 
     if (farm) {
-      farmName = farm.farm_name ?? farm.farmname ?? farmName;
+      farmName = farm.farmname ?? farmName;
       trialEndDate = trialEndDate ?? farm.trial_end_date ?? null;
     }
   }

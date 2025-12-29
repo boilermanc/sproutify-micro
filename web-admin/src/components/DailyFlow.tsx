@@ -528,14 +528,17 @@ export default function DailyFlow() {
 
   const isLoadingTasksRef = useRef(false);
 
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (options: { suppressLoading?: boolean } = {}) => {
+    const showLoading = !options.suppressLoading;
     if (isLoadingTasksRef.current) {
       console.warn('[loadTasks] Refresh already in progress, skipping');
       return;
     }
     isLoadingTasksRef.current = true;
     console.log('[loadTasks] Starting task refresh...');
-    setLoading(true);
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
     const sessionData = localStorage.getItem('sproutify_session');
     const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
@@ -644,7 +647,9 @@ export default function DailyFlow() {
     } catch (error) {
       console.error('Error loading tasks:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
       isLoadingTasksRef.current = false;
     }
   }, [selectedDate, fetchActionHistory]);
@@ -653,7 +658,7 @@ export default function DailyFlow() {
     loadTasks();
     // Refresh every 5 minutes
     const interval = setInterval(() => {
-      loadTasks();
+      loadTasks({ suppressLoading: true });
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadTasks]);
@@ -670,7 +675,7 @@ export default function DailyFlow() {
       if (success) {
         showNotification('success', 'Tray assigned successfully');
         closeAssignModal();
-        await loadTasks();
+        await loadTasks({ suppressLoading: true });
       } else {
         showNotification('error', 'Failed to assign tray');
       }
@@ -696,7 +701,7 @@ export default function DailyFlow() {
       if (success) {
         showNotification('success', `Tray ${tray.tray_id} assigned to ${gap.customer_name}`);
         setNearReadyTrayModal(null);
-        await loadTasks();
+        await loadTasks({ suppressLoading: true });
       } else {
         showNotification('error', 'Failed to assign tray');
       }
@@ -736,7 +741,7 @@ export default function DailyFlow() {
       if (error) throw error;
       const formattedDate = new Date(deliveryDate).toLocaleDateString();
       showNotification('success', `Delivery skipped for ${gap.customer_name || 'customer'} on ${formattedDate}`);
-      await loadTasks();
+      await loadTasks({ suppressLoading: true });
     } catch (error: any) {
       console.error('[DailyFlow] Error skipping delivery:', error);
       showNotification('error', error?.message || 'Failed to skip delivery');
@@ -751,7 +756,7 @@ export default function DailyFlow() {
       if (success) {
         showNotification('success', `Tray ${nearReadyTrayModal.tray.tray_id} marked as harvested`);
         setNearReadyTrayModal(null);
-        await loadTasks();
+        await loadTasks({ suppressLoading: true });
       } else {
         showNotification('error', 'Failed to harvest tray');
       }
@@ -989,7 +994,7 @@ export default function DailyFlow() {
           if (needsReload) {
             // Reload tasks after animation to get updated counts and new tasks
             setTimeout(async () => {
-              await loadTasks();
+              await loadTasks({ suppressLoading: true });
             }, 100);
           }
         }, 300); // Animation duration
@@ -1121,7 +1126,7 @@ export default function DailyFlow() {
         `Harvested ${selectedTrayIds.length} ${selectedTrayIds.length === 1 ? 'tray' : 'trays'} for ${orderLabel}`
       );
 
-      await loadTasks();
+      await loadTasks({ suppressLoading: true });
       closeBatchHarvestModal();
     } catch (error) {
       console.error('[DailyFlow] Batch harvest error:', error);
@@ -1448,7 +1453,7 @@ export default function DailyFlow() {
       
       // Reload tasks to show updated status
       setTimeout(async () => {
-        await loadTasks();
+        await loadTasks({ suppressLoading: true });
       }, 100);
     } catch (error: any) {
       console.error('Error completing soak task:', error);
@@ -1475,7 +1480,7 @@ export default function DailyFlow() {
       );
       showNotification('success', 'Request cancelled successfully');
       setCancelRequestDialog(null);
-      setTimeout(loadTasks, 100);
+      setTimeout(() => loadTasks({ suppressLoading: true }), 100);
     } catch (error: any) {
       console.error('Error cancelling request:', error);
       showNotification('error', error?.message || 'Failed to cancel request');
@@ -1504,7 +1509,7 @@ export default function DailyFlow() {
       );
       showNotification('success', 'Request rescheduled successfully');
       setRescheduleRequestDialog(null);
-      setTimeout(loadTasks, 100);
+      setTimeout(() => loadTasks({ suppressLoading: true }), 100);
     } catch (error: any) {
       console.error('Error rescheduling request:', error);
       showNotification('error', error?.message || 'Failed to reschedule request');
@@ -1613,10 +1618,10 @@ export default function DailyFlow() {
             fetchDailyTasks(selectedDate, true).then((tasksData) => {
                 const newAtRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
                 setTasks([...nonAtRiskTasks, ...newAtRiskTasks]);
-              }).catch((error) => {
+                }).catch((error) => {
                 console.error('[handleFulfillmentAction] Error reloading at-risk tasks:', error);
                 // Fallback to full reload on error
-                loadTasks();
+                loadTasks({ suppressLoading: true });
               });
             }
           }
@@ -1890,7 +1895,7 @@ export default function DailyFlow() {
         const reasonLabel = LOSS_REASONS.find(r => r.value === lossReason)?.label || lossReason;
         showNotification('success', `Marked ${lostTask.trays} ${lostTask.trays === 1 ? 'tray' : 'trays'} as lost (${reasonLabel})`);
         setLostTask(null);
-        setTimeout(loadTasks, 500);
+        setTimeout(() => loadTasks({ suppressLoading: true }), 500);
       } else {
         showNotification('error', 'Failed to mark trays as lost. Please try again.');
       }
@@ -1924,7 +1929,7 @@ export default function DailyFlow() {
       showNotification('success', `Created ${traysCreated} ${traysCreated === 1 ? 'tray' : 'trays'} from leftover soaked seed`);
       setUseSoakedSeedDialog(null);
       setUseSoakedSeedQuantity('');
-      setTimeout(loadTasks, 500);
+      setTimeout(() => loadTasks({ suppressLoading: true }), 500);
     } catch (error: any) {
       console.error('Error using soaked seed:', error);
       const errorMessage = error?.message || 'Failed to use soaked seed';
@@ -1945,7 +1950,7 @@ export default function DailyFlow() {
         showNotification('success', 'Soaked seed discarded successfully');
         setDiscardSoakedSeedDialog(null);
         setDiscardReason('expired');
-        setTimeout(loadTasks, 500);
+        setTimeout(() => loadTasks({ suppressLoading: true }), 500);
       } else {
         showNotification('error', 'Failed to discard soaked seed');
       }
@@ -1979,7 +1984,7 @@ export default function DailyFlow() {
             next.delete(task.id);
             return next;
           });
-          setTimeout(loadTasks, 100);
+          setTimeout(() => loadTasks({ suppressLoading: true }), 100);
         }, 300);
       } else {
         showNotification('error', 'Failed to skip task. Please try again.');
@@ -2000,8 +2005,8 @@ export default function DailyFlow() {
     try {
       const success = await skipMissedStep(missedStep);
       if (success) {
-        showNotification('success', `Skipped "${missedStep.description}" (Day ${missedStep.expectedDay})`);
-        await loadTasks();
+      showNotification('success', `Skipped "${missedStep.description}" (Day ${missedStep.expectedDay})`);
+      await loadTasks({ suppressLoading: true });
       } else {
         showNotification('error', 'Failed to skip step. Please try again.');
       }
@@ -2069,7 +2074,7 @@ export default function DailyFlow() {
         const success = await completeMissedStep(missedStep);
         if (success) {
           showNotification('success', `Completed "${missedStep.description}" (Day ${missedStep.expectedDay})`);
-          await loadTasks();
+          await loadTasks({ suppressLoading: true });
         } else {
           showNotification('error', 'Failed to complete step. Please try again.');
         }
@@ -2102,7 +2107,7 @@ export default function DailyFlow() {
       const success = await skipAllMissedSteps(missedSteps);
       if (success) {
         showNotification('success', `Skipped ${missedSteps.length} missed steps for ${cropName}`);
-        await loadTasks();
+        await loadTasks({ suppressLoading: true });
       } else {
         showNotification('error', 'Failed to skip steps. Please try again.');
       }

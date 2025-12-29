@@ -2772,6 +2772,19 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       }
 
       console.log('[DailyFlow] Task completion recorded successfully');
+      if (task.action === 'Seed') {
+        try {
+          await markSeedingTrayStepsCompleted({
+            farmUuid,
+            recipeId: task.recipeId,
+            taskDateStr,
+            trayIds: task.trayIds,
+            completedAt: now,
+          });
+        } catch (seedingError) {
+          console.error('[DailyFlow] Error marking seeding tray_steps complete:', seedingError);
+        }
+      }
       return true;
     }
 
@@ -2955,6 +2968,92 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
     // The error message from getSupabaseClient() is in error.message
     throw error;
   }
+};
+
+interface MarkSeedingTrayStepsOptions {
+  farmUuid: string;
+  recipeId?: number;
+  taskDateStr?: string;
+  trayIds?: number[];
+  completedAt?: string;
+}
+
+const markSeedingTrayStepsCompleted = async ({
+  farmUuid,
+  recipeId,
+  taskDateStr,
+  trayIds,
+  completedAt,
+}: MarkSeedingTrayStepsOptions): Promise<void> => {
+  if (!farmUuid || !recipeId) return;
+
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  const targetDate = taskDateStr || formatDateString(new Date());
+  const now = completedAt || new Date().toISOString();
+
+  const { data: seedSteps, error: seedStepError } = await client
+    .from('steps')
+    .select('step_id')
+    .eq('recipe_id', recipeId)
+    .ilike('step_name', '%seed%');
+
+  if (seedStepError) {
+    console.error('[DailyFlow] Error fetching seeding steps:', seedStepError);
+    return;
+  }
+
+  const stepIds = (seedSteps || [])
+    .map((step: any) => step.step_id)
+    .filter((id: number | null | undefined) => !!id);
+
+  if (stepIds.length === 0) {
+    console.log('[DailyFlow] No seeding steps found for recipe:', recipeId);
+    return;
+  }
+
+  let trayStepsQuery = client
+    .from('tray_steps')
+    .select('id')
+    .in('step_id', stepIds)
+    .eq('scheduled_date', targetDate)
+    .eq('completed', false)
+    .eq('trays.farm_uuid', farmUuid);
+
+  if (trayIds && trayIds.length > 0) {
+    trayStepsQuery = trayStepsQuery.in('tray_id', trayIds);
+  }
+
+  const { data: trayStepsToUpdate, error: trayStepsError } = await trayStepsQuery;
+
+  if (trayStepsError) {
+    console.error('[DailyFlow] Error querying tray_steps for seeding completion:', trayStepsError);
+    return;
+  }
+
+  const trayStepIds = (trayStepsToUpdate || [])
+    .map((row: any) => row.id)
+    .filter((id: number | null | undefined) => !!id);
+
+  if (!trayStepIds.length) {
+    return;
+  }
+
+  const { error: updateError } = await client
+    .from('tray_steps')
+    .update({
+      completed: true,
+      completed_at: now,
+    })
+    .in('id', trayStepIds);
+
+  if (updateError) {
+    console.error('[DailyFlow] Error marking seeding tray_steps completed:', updateError);
+    return;
+  }
+
+  console.log('[DailyFlow] Marked seeding tray_steps as completed:', trayStepIds, 'recipeId:', recipeId);
 };
 
 /**
@@ -3334,7 +3433,10 @@ export const completeSeedTask = async (
   requestId: number,
   quantityCompleted: number,
   seedbatchId: number | null,
-  userId?: string
+  userId?: string,
+  recipeId?: number,
+  taskDateStr?: string,
+  trayIds?: number[]
 ): Promise<number> => {
   try {
     const sessionData = localStorage.getItem('sproutify_session');
@@ -3352,7 +3454,23 @@ export const completeSeedTask = async (
 
     if (error) throw error;
 
-    return data || 0; // Returns number of trays created
+    const traysCreated = data || 0; // Returns number of trays created
+    const { farmUuid } = JSON.parse(sessionData);
+    if (recipeId && farmUuid) {
+      try {
+        await markSeedingTrayStepsCompleted({
+          farmUuid,
+          recipeId,
+          taskDateStr,
+          trayIds,
+          completedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[DailyFlow] Error marking seeding tray_steps complete after seed_request:', err);
+      }
+    }
+
+    return traysCreated;
   } catch (error) {
     console.error('Error completing seed task:', error);
     throw error;

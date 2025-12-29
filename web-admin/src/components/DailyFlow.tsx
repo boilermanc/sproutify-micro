@@ -1889,7 +1889,11 @@ export default function DailyFlow() {
         traysCreated = await completeSeedTask(
           seedingTask.requestId!,
           quantityToComplete,
-          batchIdToUse
+          batchIdToUse,
+          undefined,
+          seedingTask.recipeId,
+          taskDateStr,
+          seedingTask.trayIds
         );
       }
 

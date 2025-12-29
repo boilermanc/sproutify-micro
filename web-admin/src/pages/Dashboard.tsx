@@ -606,6 +606,7 @@ const Dashboard = () => {
       const today = new Date();
       const nextWeek = new Date();
       nextWeek.setDate(nextWeek.getDate() + 7);
+      const todayStr = today.toISOString().split('T')[0];
 
       const [
         traysTotal,
@@ -615,13 +616,13 @@ const Dashboard = () => {
         upcomingHarvestsCount,
         productsCount,
         standingOrdersCount,
-        ordersCount,
+        todaysDeliveriesCount,
         tasksCount
       ] = await Promise.all([
         // Total Trays
         getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid),
         // Active Trays
-        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).is('harvest_date', null),
+        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('status', 'active').is('harvest_date', null),
         // Varieties (global table, no farm filter)
         getSupabaseClient().from('varieties').select('*', { count: 'exact', head: true }).then(r => {
           console.log('[DEBUG] Varieties query result:', { count: r.count, error: r.error });
@@ -645,24 +646,39 @@ const Dashboard = () => {
           console.log('[DEBUG] Standing Orders query result:', { count: r.count, error: r.error });
           return r;
         }, () => ({ count: 0, error: null })),
-        // Active Orders (standing_orders where is_active = true)
-        getSupabaseClient().from('standing_orders').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid).eq('is_active', true).then(r => {
-          console.log('[DEBUG] Active Orders query result:', { count: r.count, error: r.error });
-          return r;
-        }, () => ({ count: 0, error: null })),
+        // Active Orders = today's pending order schedules
+        getSupabaseClient()
+          .from('order_schedules')
+          .select('*, standing_orders!inner(farm_uuid)', { count: 'exact', head: true })
+          .eq('standing_orders.farm_uuid', farmUuid)
+          .eq('scheduled_delivery_date', todayStr)
+          .eq('status', 'pending')
+          .then(r => {
+            console.log('[DEBUG] Today\'s Pending Deliveries query result:', { count: r.count, error: r.error, scheduledDate: todayStr });
+            return r;
+          }, () => ({ count: 0, error: null })),
         // Today's Tasks (pending tray_steps scheduled for today)
         getSupabaseClient()
           .from('tray_steps')
           .select(`
             tray_step_id,
-            trays!tray_steps_tray_id_fkey(farm_uuid)
+            trays!tray_steps_tray_id_fkey(farm_uuid, status),
+            steps!tray_steps_step_id_fkey(step_name)
           `)
           .eq('trays.farm_uuid', farmUuid)
-          .eq('scheduled_date', today.toISOString().split('T')[0])
+          .eq('trays.status', 'active')
+          .eq('scheduled_date', todayStr)
           .eq('status', 'Pending')
           .then(r => {
-            const count = r.data?.length || 0;
-            console.log('[DEBUG] Today\'s Tasks query result:', { count, errorMessage: r.error?.message, scheduledDate: today.toISOString().split('T')[0] });
+            const normalized = (r.data || []).filter((row: any) => {
+              const stepName = (row.steps?.step_name || '').toLowerCase();
+              if (!row.trays || row.trays.status !== 'active') return false;
+              if (!stepName) return true;
+              const passiveWords = ['germination', 'growing', 'blackout'];
+              return !passiveWords.some(word => stepName.includes(word));
+            });
+            const count = normalized.length;
+            console.log('[DEBUG] Today\'s Tasks query result:', { count, rawCount: r.data?.length || 0, scheduledDate: todayStr });
             return { ...r, count };
           }, () => ({ count: 0, error: null }))
       ]);
@@ -671,7 +687,7 @@ const Dashboard = () => {
         totalTrays: traysTotal.count || 0,
         activeTrays: traysActive.count || 0,
         totalVarieties: varietiesCount.count || 0,
-        totalOrders: ordersCount.count || 0,
+        totalOrders: todaysDeliveriesCount.count || 0,
         recentHarvests: recentHarvestsCount.count || 0,
         upcomingHarvests: upcomingHarvestsCount.count || 0,
         totalProducts: productsCount.count || 0,

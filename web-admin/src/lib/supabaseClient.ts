@@ -22,6 +22,9 @@ const supabaseOptions = {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     persistSession: true,
+    lock: async (_name: string, _acquireTimeout: number, fn: () => Promise<any>) => {
+      return fn();
+    },
   },
 };
 

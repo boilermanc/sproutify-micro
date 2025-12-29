@@ -46,28 +46,6 @@ import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import './App.css';
 
-const SESSION_WARNING_TIMEOUT_MS = 8000;
-const SESSION_HARD_TIMEOUT_MS = 15000;
-
-const clearSupabaseStorageKeys = (): string[] => {
-  const clearedKeys: string[] = [];
-  if (typeof localStorage === 'undefined') {
-    return clearedKeys;
-  }
-
-  for (let i = localStorage.length - 1; i >= 0; i -= 1) {
-    const key = localStorage.key(i);
-    if (!key) continue;
-
-    if (key.toLowerCase().includes('supabase')) {
-      localStorage.removeItem(key);
-      clearedKeys.push(key);
-    }
-  }
-
-  return clearedKeys;
-};
-
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
   if (!error) {
     return false;
@@ -87,23 +65,10 @@ function App() {
 
   useEffect(() => {
     let isMounted = true;
-    const activeTimeouts = new Set<ReturnType<typeof setTimeout>>();
-
-    const registerTimeout = (id: ReturnType<typeof setTimeout>) => {
-      activeTimeouts.add(id);
-      return id;
-    };
-
-    const cancelTimeout = (id: ReturnType<typeof setTimeout> | null) => {
-      if (!id) return;
-      activeTimeouts.delete(id);
-      clearTimeout(id);
-    };
 
     const checkSession = async () => {
       console.log('[App] checkSession started');
       try {
-        // Check if supabase client exists
         const client = getSupabaseClient();
         console.log('[App] Supabase client exists:', !!client);
 
@@ -113,40 +78,8 @@ function App() {
           return;
         }
 
-        // Check for getSupabaseClient() session with timeout
         console.log('[App] Calling getSupabaseClient().auth.getSession()...');
-
-        let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-        timeoutId = registerTimeout(
-          setTimeout(() => {
-            activeTimeouts.delete(timeoutId!);
-            console.warn(
-              `[App] Session check still running after ${SESSION_WARNING_TIMEOUT_MS / 1000}s, continuing to wait for Supabase`,
-            );
-          }, SESSION_WARNING_TIMEOUT_MS)
-        );
-
-        const getSessionWithTimeout = async () => {
-          let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
-          const timeoutPromise = new Promise<never>((_resolve, reject) => {
-            hardTimeoutId = registerTimeout(
-              setTimeout(() => reject(new Error('Session check timed out')), SESSION_HARD_TIMEOUT_MS)
-            );
-          });
-
-          try {
-            return Promise.race([
-              client.auth.getSession(),
-              timeoutPromise,
-            ]);
-          } finally {
-            cancelTimeout(hardTimeoutId);
-          }
-        };
-
-        const { data: { session }, error } = await getSessionWithTimeout();
-        cancelTimeout(timeoutId);
+        const { data: { session }, error } = await client.auth.getSession();
 
         console.log('[App] getSession result:', { hasSession: !!session, error });
 
@@ -169,14 +102,10 @@ function App() {
         }
 
         if (session) {
-          // Skip profile check for admin users (team@sproutify.app)
-          // Admin users are handled by RequireAdmin component
           if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
-            // Admin user - check if they have admin session
             console.log('[App] Admin user detected, skipping profile check');
             const adminSession = localStorage.getItem('sproutify_admin_session');
             if (adminSession) {
-              // Admin is logged in, but not authenticated for regular app
               setIsAuthenticated(false);
             } else {
               setIsAuthenticated(false);
@@ -184,7 +113,6 @@ function App() {
             return;
           }
 
-          // Regular user - verify session and get user profile
           console.log('[App] Regular user, fetching profile...');
           const { data: profile, error: profileError } = await getSupabaseClient()
             .from('profile')
@@ -206,7 +134,6 @@ function App() {
               setIsLoading(false);
             }
           } else {
-            // Profile not found or error - clear session
             console.log('[App] No profile found, clearing session');
             localStorage.removeItem('sproutify_session');
             setIsAuthenticated(false);
@@ -223,28 +150,14 @@ function App() {
           }
         }
 
-        // Check for auto-login via URL param (SSO from marketing site)
         const params = new URLSearchParams(window.location.search);
         const emailParam = params.get('email');
 
         if (emailParam && !session) {
-          // Auto-login will be handled by LoginPage
           setIsAuthenticated(false);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error('[App] Session check error:', err);
-        if (err?.message === 'Session check timed out') {
-          const clearedSupabaseKeys = clearSupabaseStorageKeys();
-          clearSupabaseAuthStorage();
-          localStorage.removeItem('sproutify_session');
-          console.warn('[App] Session reset after timeout, cleared Supabase storage keys:', clearedSupabaseKeys);
-          setIsAuthenticated(false);
-          if (isMounted) {
-            setIsLoading(false);
-          }
-          window.location.assign('/login');
-          return;
-        }
         if (isMounted) {
           setIsLoading(false);
         }
@@ -293,8 +206,6 @@ function App() {
       isMounted = false;
       hasCheckedSession.current = false;
       subscription.unsubscribe();
-      activeTimeouts.forEach((id) => clearTimeout(id));
-      activeTimeouts.clear();
     };
   }, []);
 

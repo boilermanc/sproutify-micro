@@ -2538,6 +2538,13 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
 
       // For Seed tasks, create the actual trays
       if (task.action === 'Seed') {
+        console.log('[DailyFlow] completeTask called with batchId:', batchId);
+        console.log('[DailyFlow] completeTask task object:', {
+          id: task.id,
+          recipeId: task.recipeId,
+          requestId: task.requestId,
+          taskSource: task.taskSource,
+        });
         // batchId is required for Seed tasks to trigger tray creation
         if (!batchId) {
           throw new Error('Batch ID is required for seeding tasks');

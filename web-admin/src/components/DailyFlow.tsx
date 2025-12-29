@@ -1800,6 +1800,7 @@ export default function DailyFlow() {
 
     const missedStepRef = missedStepForSeeding;
     const quantityToComplete = parseInt(seedQuantityCompleted);
+    const batchIdForTask = batchIdToUse ?? undefined;
     
     try {
       let traysCreated = 0;
@@ -1817,7 +1818,8 @@ export default function DailyFlow() {
         today.setHours(0, 0, 0, 0);
         const taskDateStr = today.toISOString().split('T')[0];
         
-        const success = await completeTask(taskToComplete, undefined, batchIdToUse || undefined, taskDateStr);
+        console.log('[DailyFlow] Calling completeTask with batchId:', batchIdForTask);
+        const success = await completeTask(taskToComplete, undefined, batchIdForTask, taskDateStr);
         if (success) {
           traysCreated = quantityToComplete;
         } else {

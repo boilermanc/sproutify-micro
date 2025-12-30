@@ -1861,6 +1861,10 @@ export default function DailyFlow() {
     const quantityToComplete = parseInt(seedQuantityCompleted);
     const batchIdForTask = batchIdToUse ?? undefined;
     
+    // Get today's date for the task date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const taskDateStr = today.toISOString().split('T')[0];
     try {
       let traysCreated = 0;
       
@@ -1872,10 +1876,6 @@ export default function DailyFlow() {
           trays: quantityToComplete,
         };
         
-        // Get today's date for the task date
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const taskDateStr = today.toISOString().split('T')[0];
         
         console.log('[DailyFlow] Calling completeTask with batchId:', batchIdForTask);
         const success = await completeTask(taskToComplete, undefined, batchIdForTask, taskDateStr);

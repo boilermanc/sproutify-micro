@@ -519,8 +519,6 @@ const getActivityStyles = (type: string) => {
   }
 };
 
-const PASSIVE_STEP_NAMES = ['germination', 'blackout', 'growing'];
-
 const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null => {
   if (!dateStr) return null;
   if (dateStr instanceof Date) {

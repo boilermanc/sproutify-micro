@@ -891,7 +891,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             recipe_id,
             recipes(
               recipe_id,
-              recipe_name
+              recipe_name,
+              variety_name
             )
           `)
           .eq('farm_uuid', farmUuid)
@@ -1228,7 +1229,10 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
                   // Get recipe name
                   const recipeTray = traysWithRecipes.find((t: any) => t.recipe_id === recipeId);
-                  const recipeName = (recipeTray?.recipes as any)?.recipe_name || 'Unknown';
+                  const recipeRecord = recipeTray?.recipes as any;
+                  const recipeName = recipeRecord?.recipe_name || 'Unknown';
+                  const varietyName = recipeRecord?.variety_name;
+                  const displayName = varietyName || recipeName;
 
                   // Get water_frequency and water_method from the step (should be same for all trays of same recipe)
                   const step = recipeTrays[0].step;
@@ -1280,12 +1284,12 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
                   // Group by recipe and create task
                   const trayIds = recipeTrays.map((rt: any) => rt.tray_id);
-                  const taskId = `water-${recipeId}-${recipeName}-${targetDateStr}`;
+                  const taskId = `water-${recipeId}-${displayName}-${targetDateStr}`;
 
                   wateringTasks.push({
                     id: taskId,
                     action: 'Water',
-                    crop: recipeName,
+                    crop: displayName,
                     batchId: 'N/A',
                     location: 'Not set',
                     dayCurrent: dayCurrent,

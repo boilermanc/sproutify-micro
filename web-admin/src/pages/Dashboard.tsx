@@ -321,17 +321,17 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                 transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                 className="pointer-events-auto w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden"
               >
-                <div className="p-6 border-b border-white/5">
+                <div className="p-6 border-b border-white/5 bg-slate-950/80 backdrop-blur-sm">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Daily Insight</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-200">Daily Insight</p>
                       <h3 className="text-xl font-bold text-white mt-1">{detailModal.title}</h3>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={handleCloseDetail}
-                      className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+                      className="text-slate-200 hover:text-white hover:bg-white/10 rounded-full"
                     >
                       <X size={20} />
                     </Button>
@@ -342,7 +342,12 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                     {detailModal.message}
                   </p>
                   <div className="mt-6 flex justify-end">
-                    <Button variant="outline" size="sm" onClick={handleCloseDetail}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCloseDetail}
+                      className="text-white border-white/30 hover:border-white/60 hover:bg-white/10"
+                    >
                       Close
                     </Button>
                   </div>
@@ -531,35 +536,19 @@ const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null 
 
 const getActionableTrayStepsCount = async (farmUuid: string, todayStr: string): Promise<number> => {
   try {
-    const { data, error } = await getSupabaseClient()
-      .from('tray_steps')
-      .select(`
-        tray_step_id,
-        tray_id,
-        status,
-        scheduled_date,
-        steps!tray_steps_step_id_fkey(
-          step_id,
-          step_name,
-          step_type
-        )
-      `)
-      .eq('trays.farm_uuid', farmUuid)
-      .eq('trays.status', 'active')
-      .eq('status', 'Pending')
-      .eq('scheduled_date', todayStr);
+    const { count, error } = await getSupabaseClient()
+      .from('actionable_tray_steps')
+      .select('*', { count: 'exact', head: true })
+      .eq('farm_uuid', farmUuid)
+      .eq('scheduled_date', todayStr)
+      .eq('status', 'Pending');
 
     if (error) {
       console.error('[Dashboard] Error fetching actionable tray steps:', error);
       return 0;
     }
 
-    return (data || []).filter(row => {
-      const stepName = (row.steps?.step_name || '').toLowerCase();
-      const stepType = (row.steps?.step_type || '').toLowerCase();
-      const isPassiveName = PASSIVE_STEP_NAMES.some(passive => stepName.includes(passive));
-      return stepType === 'active' || !isPassiveName;
-    }).length;
+    return count || 0;
   } catch (error) {
     console.error('[Dashboard] Unexpected error fetching actionable tray steps:', error);
     return 0;
@@ -570,7 +559,7 @@ const getWateringTrayCount = async (farmUuid: string, today: Date): Promise<numb
   try {
     const { data: activeTrays, error: trayError } = await getSupabaseClient()
       .from('trays')
-      .select('tray_id')
+      .select('tray_id, recipe_id')
       .eq('farm_uuid', farmUuid)
       .eq('status', 'active')
       .is('harvest_date', null);
@@ -583,17 +572,22 @@ const getWateringTrayCount = async (farmUuid: string, today: Date): Promise<numb
     const trayIds = (activeTrays || [])
       .map((tray: any) => tray.tray_id)
       .filter(Boolean);
+    const trayRecipeMap = new Map<number, number | null>();
+    (activeTrays || []).forEach((tray: any) => {
+      if (tray.tray_id) {
+        trayRecipeMap.set(tray.tray_id, tray.recipe_id ?? null);
+      }
+    });
     if (trayIds.length === 0) return 0;
+
+    const todayStr = today.toISOString().split('T')[0];
 
     const { data: trayStepsData, error: stepsError } = await getSupabaseClient()
       .from('tray_steps')
-      .select(`
-        tray_id,
-        scheduled_date,
-        status,
-        steps!tray_steps_step_id_fkey(step_id, water_frequency)
-      `)
-      .in('tray_id', trayIds);
+      .select('tray_id, scheduled_date, status, steps!fk_step_id(step_id, water_frequency), trays!fk_tray_id(tray_id, status)')
+      .in('tray_id', trayIds)
+      .eq('trays.status', 'active')
+      .lte('scheduled_date', todayStr);
 
     if (stepsError || !trayStepsData) {
       if (stepsError) console.error('[Dashboard] Error fetching tray steps for watering:', stepsError);
@@ -622,16 +616,51 @@ const getWateringTrayCount = async (farmUuid: string, today: Date): Promise<numb
         return bDate - aDate;
       });
 
-      const pendingRow = sorted.find((row) => (row.status || '').toLowerCase() === 'pending');
-      const candidate = pendingRow || sorted[0];
+      const candidate = sorted[0];
       if (!candidate) return;
-      const isPending = !(candidate.status) || candidate.status.toLowerCase() === 'pending';
-      if (isPending) {
-        traysNeedingWater.add(trayId);
-      }
+      traysNeedingWater.add(trayId);
     });
 
-    return traysNeedingWater.size;
+    const potentialTrays = Array.from(traysNeedingWater);
+
+    const { data: harvestSteps } = await getSupabaseClient()
+      .from('tray_steps')
+      .select('tray_id, scheduled_date, steps!fk_step_id(step_name)')
+      .in('tray_id', potentialTrays)
+      .eq('steps.step_name', 'Harvest')
+      .gt('scheduled_date', todayStr);
+
+    const traysWithFutureHarvest = new Set(
+      (harvestSteps || [])
+        .filter((step: any) => {
+          const scheduled = parseLocalDate(step.scheduled_date);
+          return scheduled ? scheduled.getTime() > new Date(todayStr).getTime() : false;
+        })
+        .map((step: any) => step.tray_id)
+        .filter(Boolean)
+    );
+    const filteredTrays = potentialTrays.filter(trayId => traysWithFutureHarvest.has(trayId));
+
+    const { data: completedRecipes } = await getSupabaseClient()
+      .from('task_completions')
+      .select('recipe_id')
+      .eq('farm_uuid', farmUuid)
+      .eq('task_date', todayStr)
+      .eq('task_type', 'watering')
+      .eq('status', 'completed');
+
+    const completedRecipeIds = new Set(
+      (completedRecipes || [])
+        .map((rec: any) => rec.recipe_id)
+        .filter(Boolean)
+    );
+
+    const remainingTrays = filteredTrays.filter((trayId) => {
+      const recipeId = trayRecipeMap.get(trayId);
+      return recipeId ? !completedRecipeIds.has(recipeId) : true;
+    });
+
+    return remainingTrays.length;
   } catch (error) {
     console.error('[Dashboard] Unexpected error while counting watering trays:', error);
     return 0;

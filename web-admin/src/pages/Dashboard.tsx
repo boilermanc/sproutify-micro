@@ -514,6 +514,130 @@ const getActivityStyles = (type: string) => {
   }
 };
 
+const PASSIVE_STEP_NAMES = ['germination', 'blackout', 'growing'];
+
+const parseLocalDate = (dateStr: string | Date | null | undefined): Date | null => {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) {
+    const copy = new Date(dateStr);
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+  const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+};
+
+const getActionableTrayStepsCount = async (farmUuid: string, todayStr: string): Promise<number> => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('tray_steps')
+      .select(`
+        tray_step_id,
+        tray_id,
+        status,
+        scheduled_date,
+        steps!tray_steps_step_id_fkey(
+          step_id,
+          step_name,
+          step_type
+        )
+      `)
+      .eq('trays.farm_uuid', farmUuid)
+      .eq('trays.status', 'active')
+      .eq('status', 'Pending')
+      .eq('scheduled_date', todayStr);
+
+    if (error) {
+      console.error('[Dashboard] Error fetching actionable tray steps:', error);
+      return 0;
+    }
+
+    return (data || []).filter(row => {
+      const stepName = (row.steps?.step_name || '').toLowerCase();
+      const stepType = (row.steps?.step_type || '').toLowerCase();
+      const isPassiveName = PASSIVE_STEP_NAMES.some(passive => stepName.includes(passive));
+      return stepType === 'active' || !isPassiveName;
+    }).length;
+  } catch (error) {
+    console.error('[Dashboard] Unexpected error fetching actionable tray steps:', error);
+    return 0;
+  }
+};
+
+const getWateringTrayCount = async (farmUuid: string, today: Date): Promise<number> => {
+  try {
+    const { data: activeTrays, error: trayError } = await getSupabaseClient()
+      .from('trays')
+      .select('tray_id')
+      .eq('farm_uuid', farmUuid)
+      .eq('status', 'active')
+      .is('harvest_date', null);
+
+    if (trayError || !activeTrays) {
+      if (trayError) console.error('[Dashboard] Error fetching active trays for watering:', trayError);
+      return 0;
+    }
+
+    const trayIds = (activeTrays || [])
+      .map((tray: any) => tray.tray_id)
+      .filter(Boolean);
+    if (trayIds.length === 0) return 0;
+
+    const { data: trayStepsData, error: stepsError } = await getSupabaseClient()
+      .from('tray_steps')
+      .select(`
+        tray_id,
+        scheduled_date,
+        status,
+        steps!tray_steps_step_id_fkey(step_id, water_frequency)
+      `)
+      .in('tray_id', trayIds);
+
+    if (stepsError || !trayStepsData) {
+      if (stepsError) console.error('[Dashboard] Error fetching tray steps for watering:', stepsError);
+      return 0;
+    }
+
+    const todayNormalized = new Date(today);
+    todayNormalized.setHours(0, 0, 0, 0);
+    const candidateSteps = new Map<number, any[]>();
+
+    trayStepsData.forEach((row: any) => {
+      if (!row.tray_id || !row.steps?.water_frequency) return;
+      const scheduled = parseLocalDate(row.scheduled_date);
+      if (!scheduled) return;
+      if (scheduled.getTime() > todayNormalized.getTime()) return;
+      const existing = candidateSteps.get(row.tray_id) || [];
+      existing.push(row);
+      candidateSteps.set(row.tray_id, existing);
+    });
+
+    const traysNeedingWater = new Set<number>();
+    candidateSteps.forEach((rows, trayId) => {
+      const sorted = [...rows].sort((a, b) => {
+        const aDate = parseLocalDate(a.scheduled_date)?.getTime() ?? 0;
+        const bDate = parseLocalDate(b.scheduled_date)?.getTime() ?? 0;
+        return bDate - aDate;
+      });
+
+      const pendingRow = sorted.find((row) => (row.status || '').toLowerCase() === 'pending');
+      const candidate = pendingRow || sorted[0];
+      if (!candidate) return;
+      const isPending = !(candidate.status) || candidate.status.toLowerCase() === 'pending';
+      if (isPending) {
+        traysNeedingWater.add(trayId);
+      }
+    });
+
+    return traysNeedingWater.size;
+  } catch (error) {
+    console.error('[Dashboard] Unexpected error while counting watering trays:', error);
+    return 0;
+  }
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -607,6 +731,18 @@ const Dashboard = () => {
       const nextWeek = new Date();
       nextWeek.setDate(nextWeek.getDate() + 7);
       const todayStr = today.toISOString().split('T')[0];
+      const todayDow = today.getDay();
+
+      const maintenanceTasksPromise = getSupabaseClient()
+        .from('maintenance_tasks')
+        .select('*', { count: 'exact', head: true })
+        .eq('farm_uuid', farmUuid)
+        .eq('is_active', true)
+        .or(`task_date.eq.${todayStr},day_of_week.eq.${todayDow}`)
+        .then((result) => ({ count: result.count || 0 }), () => ({ count: 0 }));
+
+      const actionableTrayStepsPromise = getActionableTrayStepsCount(farmUuid, todayStr);
+      const wateringTrayCountPromise = getWateringTrayCount(farmUuid, today);
 
       const [
         traysTotal,
@@ -617,7 +753,9 @@ const Dashboard = () => {
         productsCount,
         standingOrdersCount,
         todaysDeliveriesCount,
-        tasksCount
+        actionableTrayStepsCount,
+        wateringTrayCount,
+        maintenanceTasksCount
       ] = await Promise.all([
         // Total Trays
         getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).eq('farm_uuid', farmUuid),
@@ -657,31 +795,23 @@ const Dashboard = () => {
             console.log('[DEBUG] Today\'s Pending Deliveries query result:', { count: r.count, error: r.error, scheduledDate: todayStr });
             return r;
           }, () => ({ count: 0, error: null })),
-        // Today's Tasks (pending tray_steps scheduled for today)
-        getSupabaseClient()
-          .from('tray_steps')
-          .select(`
-            tray_step_id,
-            trays!tray_steps_tray_id_fkey(farm_uuid, status),
-            steps!tray_steps_step_id_fkey(step_name)
-          `)
-          .eq('trays.farm_uuid', farmUuid)
-          .eq('trays.status', 'active')
-          .eq('scheduled_date', todayStr)
-          .eq('status', 'Pending')
-          .then(r => {
-            const normalized = (r.data || []).filter((row: any) => {
-              const stepName = (row.steps?.step_name || '').toLowerCase();
-              if (!row.trays || row.trays.status !== 'active') return false;
-              if (!stepName) return true;
-              const passiveWords = ['germination', 'growing', 'blackout'];
-              return !passiveWords.some(word => stepName.includes(word));
-            });
-            const count = normalized.length;
-            console.log('[DEBUG] Today\'s Tasks query result:', { count, rawCount: r.data?.length || 0, scheduledDate: todayStr });
-            return { ...r, count };
-          }, () => ({ count: 0, error: null }))
+        // Actionable tray steps
+        actionableTrayStepsPromise,
+        // Watering tasks (distinct trays)
+        wateringTrayCountPromise,
+        maintenanceTasksPromise
       ]);
+
+      const trayStepTasksCount = actionableTrayStepsCount || 0;
+      const wateringTasksCountValue = wateringTrayCount || 0;
+      const maintenanceTasksCountValue = maintenanceTasksCount.count || 0;
+      const totalTasks = trayStepTasksCount + wateringTasksCountValue + maintenanceTasksCountValue;
+
+      console.log('[DEBUG] Dashboard actionable tasks breakdown:', {
+        traySteps: trayStepTasksCount,
+        watering: wateringTasksCountValue,
+        maintenance: maintenanceTasksCountValue
+      });
 
       setStats({
         totalTrays: traysTotal.count || 0,
@@ -692,7 +822,7 @@ const Dashboard = () => {
         upcomingHarvests: upcomingHarvestsCount.count || 0,
         totalProducts: productsCount.count || 0,
         standingOrders: standingOrdersCount.count || 0,
-        weeklyTasks: tasksCount.count || 0,
+        weeklyTasks: totalTasks,
       });
 
       // 3. Process Chart Data

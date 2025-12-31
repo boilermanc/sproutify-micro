@@ -31,7 +31,8 @@
       "Bash(netstat:*)",
       "Bash(tree:*)",
       "Bash(npx tsc:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

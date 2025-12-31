@@ -223,3 +223,207 @@ export async function harvestTrayNow(trayId: number): Promise<boolean> {
   return true;
 }
 
+/**
+ * Represents a tray assigned to a customer but with a harvest date that doesn't match the delivery date.
+ */
+export interface MismatchedAssignedTray {
+  tray_id: number;
+  recipe_id: number;
+  recipe_name: string;
+  variety_name?: string | null;
+  sow_date?: string | null;
+  customer_id: number;
+  harvest_date: string; // The scheduled harvest date from tray_steps
+  tray_step_id: number; // The harvest step ID for updating
+}
+
+/**
+ * Fetch trays that are assigned to a customer but have a harvest date after the delivery date.
+ * These are trays that exist but can't fulfill today's delivery because they're not ready yet.
+ */
+export async function fetchAssignedMismatchedTrays(
+  farmUuid: string,
+  customerId: number,
+  productId: number,
+  deliveryDate: string
+): Promise<MismatchedAssignedTray[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    console.error('[fetchAssignedMismatchedTrays] missing supabase client');
+    return [];
+  }
+
+  // First, get recipe IDs that map to this product
+  const { data: productRecipes, error: productError } = await supabase
+    .from('product_recipe_mapping')
+    .select('recipe_id')
+    .eq('product_id', productId);
+
+  if (productError) {
+    console.error('[fetchAssignedMismatchedTrays] Error loading product maps:', productError);
+    return [];
+  }
+
+  const recipeIds = (productRecipes || []).map((pr: any) => pr.recipe_id).filter(Boolean);
+  if (recipeIds.length === 0) {
+    return [];
+  }
+
+  // Fetch active trays assigned to this customer with matching recipes
+  const { data: trays, error: traysError } = await supabase
+    .from('trays')
+    .select(`
+      tray_id,
+      sow_date,
+      recipe_id,
+      customer_id,
+      recipes!inner (
+        recipe_name,
+        variety_name
+      )
+    `)
+    .eq('farm_uuid', farmUuid)
+    .eq('customer_id', customerId)
+    .in('recipe_id', recipeIds)
+    .eq('status', 'active')
+    .is('harvest_date', null);
+
+  if (traysError) {
+    console.error('[fetchAssignedMismatchedTrays] Error loading trays:', traysError);
+    return [];
+  }
+
+  if (!trays || trays.length === 0) {
+    return [];
+  }
+
+  const trayIds = trays.map((t: any) => t.tray_id);
+
+  // Fetch harvest steps for these trays
+  const { data: traySteps, error: stepsError } = await supabase
+    .from('tray_steps')
+    .select(`
+      tray_step_id,
+      tray_id,
+      step_id,
+      scheduled_date,
+      status,
+      steps!inner (
+        step_name
+      )
+    `)
+    .in('tray_id', trayIds)
+    .ilike('steps.step_name', '%harvest%')
+    .eq('status', 'Pending');
+
+  if (stepsError) {
+    console.error('[fetchAssignedMismatchedTrays] Error loading tray steps:', stepsError);
+    return [];
+  }
+
+  // Create a map of tray_id -> harvest step info
+  const harvestStepMap = new Map<number, { scheduled_date: string; tray_step_id: number }>();
+  (traySteps || []).forEach((ts: any) => {
+    if (ts.scheduled_date) {
+      harvestStepMap.set(ts.tray_id, {
+        scheduled_date: ts.scheduled_date,
+        tray_step_id: ts.tray_step_id,
+      });
+    }
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const deliveryDateObj = new Date(deliveryDate);
+  deliveryDateObj.setHours(0, 0, 0, 0);
+
+  // First pass: identify recipe_ids that have at least one tray READY (harvest_date <= today)
+  // These varieties are "covered" and shouldn't appear in gaps
+  const recipesWithReadyTrays = new Set<number>();
+
+  for (const tray of trays) {
+    const harvestInfo = harvestStepMap.get(tray.tray_id);
+    if (!harvestInfo) continue;
+
+    const harvestDateObj = new Date(harvestInfo.scheduled_date);
+    harvestDateObj.setHours(0, 0, 0, 0);
+
+    // If harvest date is today or earlier, this variety has a ready tray
+    if (harvestDateObj <= today) {
+      recipesWithReadyTrays.add(tray.recipe_id);
+    }
+  }
+
+  // Second pass: collect mismatched trays, but EXCLUDE varieties that have ready trays
+  const mismatchedTrays: MismatchedAssignedTray[] = [];
+
+  for (const tray of trays) {
+    // Skip if this variety already has a ready tray
+    if (recipesWithReadyTrays.has(tray.recipe_id)) {
+      continue;
+    }
+
+    const harvestInfo = harvestStepMap.get(tray.tray_id);
+    if (!harvestInfo) continue;
+
+    const harvestDateObj = new Date(harvestInfo.scheduled_date);
+    harvestDateObj.setHours(0, 0, 0, 0);
+
+    // Only include if harvest date is in the future (truly mismatched)
+    if (harvestDateObj > today) {
+      const recipe = Array.isArray(tray.recipes) ? tray.recipes[0] : tray.recipes;
+      mismatchedTrays.push({
+        tray_id: tray.tray_id,
+        recipe_id: tray.recipe_id,
+        recipe_name: recipe?.recipe_name || 'Unknown',
+        variety_name: recipe?.variety_name || null,
+        sow_date: tray.sow_date,
+        customer_id: tray.customer_id,
+        harvest_date: harvestInfo.scheduled_date,
+        tray_step_id: harvestInfo.tray_step_id,
+      });
+    }
+  }
+
+  return mismatchedTrays;
+}
+
+/**
+ * Update harvest step scheduled_date to today (harvest early).
+ */
+export async function updateHarvestStepToToday(trayStepId: number): Promise<boolean> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().split('T')[0];
+
+  const { error } = await getSupabaseClient()
+    .from('tray_steps')
+    .update({ scheduled_date: todayStr })
+    .eq('tray_step_id', trayStepId);
+
+  if (error) {
+    console.error('[updateHarvestStepToToday] Error updating harvest step:', error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Update harvest step scheduled_date to a specific date.
+ */
+export async function updateHarvestStepDate(trayStepId: number, dateStr: string): Promise<boolean> {
+  const { error } = await getSupabaseClient()
+    .from('tray_steps')
+    .update({ scheduled_date: dateStr })
+    .eq('tray_step_id', trayStepId);
+
+  if (error) {
+    console.error('[updateHarvestStepDate] Error updating harvest step:', error);
+    return false;
+  }
+
+  return true;
+}
+

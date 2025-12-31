@@ -28,7 +28,8 @@ import {
   Phone,
   RefreshCw,
   FileText,
-  User
+  User,
+  type LucideIcon,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -90,8 +91,11 @@ import {
   fetchAssignableTrays,
   assignTrayToCustomer,
   harvestTrayNow,
+  fetchAssignedMismatchedTrays,
+  updateHarvestStepToToday,
+  updateHarvestStepDate,
 } from '../services/trayService';
-import type { AssignableTray } from '../services/trayService';
+import type { AssignableTray, MismatchedAssignedTray } from '../services/trayService';
 
 const convertQuantityValueToGrams = (
   rawQuantity: number | string | null | undefined,
@@ -174,6 +178,21 @@ const formatShortDateLabel = (value?: string): string | undefined => {
   return undefined;
 };
 
+// Format date string to local date display (handles timezone correctly)
+const formatLocalDate = (value?: string | null): string => {
+  if (!value) return 'N/A';
+  const dateOnly = value.includes('T') ? value.split('T')[0] : value;
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  if (!Number.isNaN(year) && !Number.isNaN(month) && !Number.isNaN(day)) {
+    return new Date(year, month - 1, day).toLocaleDateString();
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString();
+  }
+  return 'N/A';
+};
+
 const getRelativeDayLabel = (value?: string | null): string | null => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -208,6 +227,86 @@ const parseMissingVarietyNames = (missing?: string | null): string[] => {
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter((name) => name.length > 0);
+};
+
+// Variety status for order gap breakdown
+interface VarietyStatus {
+  varietyName: string;
+  status: 'ready' | 'date_mismatch' | 'missing';
+  tray?: MismatchedAssignedTray;
+  readyDate?: string;
+}
+
+// Build variety breakdown for an order gap
+const buildVarietyBreakdown = (
+  gap: OrderGapStatus,
+  mismatchedTrays: MismatchedAssignedTray[],
+  matchingTrays: AssignableTray[]
+): VarietyStatus[] => {
+  const breakdown: VarietyStatus[] = [];
+  const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
+
+  // Group mismatched trays by variety
+  const mismatchedByVariety = new Map<string, MismatchedAssignedTray>();
+  for (const tray of mismatchedTrays) {
+    const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
+    if (varietyKey && !mismatchedByVariety.has(varietyKey)) {
+      mismatchedByVariety.set(varietyKey, tray);
+    }
+  }
+
+  // Group ready trays by variety
+  const readyByVariety = new Map<string, AssignableTray>();
+  for (const tray of matchingTrays) {
+    const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
+    if (varietyKey && !readyByVariety.has(varietyKey)) {
+      readyByVariety.set(varietyKey, tray);
+    }
+  }
+
+  // Process each mismatched tray variety
+  for (const [varietyKey, tray] of mismatchedByVariety) {
+    const displayName = tray.variety_name || tray.recipe_name || varietyKey;
+    breakdown.push({
+      varietyName: displayName,
+      status: 'date_mismatch',
+      tray,
+      readyDate: tray.harvest_date,
+    });
+  }
+
+  // Process ready trays that aren't already mismatched
+  for (const [varietyKey, tray] of readyByVariety) {
+    if (!mismatchedByVariety.has(varietyKey)) {
+      const displayName = tray.variety_name || tray.recipe_name || varietyKey;
+      breakdown.push({
+        varietyName: displayName,
+        status: 'ready',
+      });
+    }
+  }
+
+  // Process missing varieties that aren't mismatched or ready
+  for (const missingName of missingVarieties) {
+    const alreadyAdded = breakdown.some(
+      (v) => v.varietyName.toLowerCase().includes(missingName) ||
+             missingName.includes(v.varietyName.toLowerCase())
+    );
+    if (!alreadyAdded) {
+      breakdown.push({
+        varietyName: missingName,
+        status: 'missing',
+      });
+    }
+  }
+
+  // Sort: date_mismatch first, then missing, then ready
+  breakdown.sort((a, b) => {
+    const order = { date_mismatch: 0, missing: 1, ready: 2 };
+    return order[a.status] - order[b.status];
+  });
+
+  return breakdown;
 };
 
 type HarvestGroup = {
@@ -303,6 +402,15 @@ export default function DailyFlow() {
   const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
   const [gapMissingVarietyTrays, setGapMissingVarietyTrays] = useState<Record<string, AssignableTray[]>>({});
   const [gapMissingVarietyTraysLoading, setGapMissingVarietyTraysLoading] = useState<Record<string, boolean>>({});
+  const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
+  const [gapMismatchedTraysLoading, setGapMismatchedTraysLoading] = useState<Record<string, boolean>>({});
+  const [gapReallocationConfirm, setGapReallocationConfirm] = useState<{
+    gap: OrderGapStatus;
+    tray: MismatchedAssignedTray;
+    action: 'harvestEarly' | 'keepForFuture' | 'cancel';
+    nextDeliveryDate?: string | null; // The next scheduled delivery after today
+  } | null>(null);
+  const [animatingOutGaps, setAnimatingOutGaps] = useState<Set<string>>(new Set());
   const [assignModalGap, setAssignModalGap] = useState<OrderGapStatus | null>(null);
   const [assignableTrays, setAssignableTrays] = useState<AssignableTray[]>([]);
   const [isLoadingAssignableTrays, setIsLoadingAssignableTrays] = useState(false);
@@ -318,6 +426,18 @@ export default function DailyFlow() {
   const [batchHarvestSelected, setBatchHarvestSelected] = useState<Record<number, boolean>>({});
   const [batchHarvestYields, setBatchHarvestYields] = useState<Record<number, string>>({});
   const [isBatchHarvesting, setIsBatchHarvesting] = useState(false);
+  // State for "Complete Order & Harvest Early" confirmation modal
+  const [earlyHarvestConfirm, setEarlyHarvestConfirm] = useState<{
+    group: HarvestGroup;
+    mismatchedTrays: MismatchedAssignedTray[];
+    readyVarieties: string[];
+  } | null>(null);
+  const [isProcessingEarlyHarvest, setIsProcessingEarlyHarvest] = useState(false);
+  // Track early harvest trays that were modified (for revert on cancel)
+  const [pendingEarlyHarvestTrays, setPendingEarlyHarvestTrays] = useState<{
+    trayStepId: number;
+    originalDate: string;
+  }[]>([]);
   const [notification, setNotification] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -428,6 +548,55 @@ export default function DailyFlow() {
         setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: [] }));
       } finally {
         setGapMissingVarietyTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
+      }
+    }
+  }, [getFarmUuidFromSession]);
+
+  const updateGapMismatchedTrays = useCallback(async (gaps: OrderGapStatus[]) => {
+    if (!gaps || gaps.length === 0) {
+      setGapMismatchedTrays({});
+      setGapMismatchedTraysLoading({});
+      return;
+    }
+
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      setGapMismatchedTrays({});
+      setGapMismatchedTraysLoading({});
+      return;
+    }
+
+    const initialLoading: Record<string, boolean> = {};
+    gaps.forEach((gap) => {
+      initialLoading[formatGapKey(gap)] = true;
+    });
+
+    setGapMismatchedTrays({});
+    setGapMismatchedTraysLoading(initialLoading);
+
+    for (const gap of gaps) {
+      const gapKey = formatGapKey(gap);
+      const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+
+      if (gap.product_id == null || gap.customer_id == null || !deliveryDate) {
+        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: [] }));
+        setGapMismatchedTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
+        continue;
+      }
+
+      try {
+        const mismatchedTrays = await fetchAssignedMismatchedTrays(
+          farmUuid,
+          gap.customer_id,
+          gap.product_id,
+          deliveryDate
+        );
+        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: mismatchedTrays }));
+      } catch (error) {
+        console.error('[DailyFlow] Error fetching mismatched trays:', error);
+        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: [] }));
+      } finally {
+        setGapMismatchedTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
       }
     }
   }, [getFarmUuidFromSession]);
@@ -697,7 +866,8 @@ export default function DailyFlow() {
 
   useEffect(() => {
     updateGapMissingVarietyTrays(orderGapStatus);
-  }, [orderGapStatus, updateGapMissingVarietyTrays]);
+    updateGapMismatchedTrays(orderGapStatus);
+  }, [orderGapStatus, updateGapMissingVarietyTrays, updateGapMismatchedTrays]);
 
   const handleAssignTray = useCallback(async () => {
     if (!assignModalGap || !selectedAssignTrayId) return;
@@ -779,6 +949,121 @@ export default function DailyFlow() {
       showNotification('error', error?.message || 'Failed to skip delivery');
     }
   }, [loadTasks, showNotification]);
+
+  // Open confirmation dialog for reallocation actions
+  const openReallocationConfirm = useCallback(async (
+    gap: OrderGapStatus,
+    tray: MismatchedAssignedTray,
+    action: 'harvestEarly' | 'keepForFuture' | 'cancel'
+  ) => {
+    let nextDeliveryDate: string | null = null;
+
+    // For harvest early, fetch the next delivery date that will lose coverage
+    if (action === 'harvestEarly' && gap.standing_order_id) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toISOString().split('T')[0];
+
+        const { data } = await supabase
+          .from('order_schedules')
+          .select('scheduled_delivery_date')
+          .eq('standing_order_id', gap.standing_order_id)
+          .gt('scheduled_delivery_date', todayStr)
+          .eq('status', 'pending')
+          .order('scheduled_delivery_date', { ascending: true })
+          .limit(1);
+
+        if (data && data.length > 0) {
+          nextDeliveryDate = data[0].scheduled_delivery_date;
+        }
+      }
+    }
+
+    setGapReallocationConfirm({ gap, tray, action, nextDeliveryDate });
+  }, []);
+
+  // Execute the confirmed reallocation action with animation
+  const handleReallocationConfirm = useCallback(async () => {
+    if (!gapReallocationConfirm) return;
+
+    const { gap, tray, action } = gapReallocationConfirm;
+    const gapKey = formatGapKey(gap);
+
+    // Close dialog first
+    setGapReallocationConfirm(null);
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      showNotification('error', 'Session expired. Please log in again.');
+      return;
+    }
+
+    const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+
+    try {
+      let success = false;
+      let message = '';
+
+      if (action === 'harvestEarly') {
+        // Update harvest step scheduled_date to today
+        success = await updateHarvestStepToToday(tray.tray_step_id);
+        if (success) {
+          message = `Tray #${tray.tray_id} harvest moved to today`;
+        }
+      } else if (action === 'keepForFuture' || action === 'cancel') {
+        if (!gap.standing_order_id || !deliveryDate) {
+          showNotification('error', 'Missing order details');
+          return;
+        }
+
+        const notes = action === 'keepForFuture'
+          ? 'Keeping tray for future delivery'
+          : 'Cancelled by user';
+
+        const { error } = await supabase
+          .from('order_schedules')
+          .update({ status: 'skipped', notes })
+          .eq('standing_order_id', gap.standing_order_id)
+          .eq('scheduled_delivery_date', deliveryDate);
+
+        if (!error) {
+          success = true;
+          message = action === 'keepForFuture'
+            ? `Skipped today - tray kept for ${new Date(tray.harvest_date).toLocaleDateString()}`
+            : `Delivery cancelled for ${gap.customer_name || 'customer'}`;
+        }
+      }
+
+      if (success) {
+        showNotification('success', message);
+
+        // Only animate out for actions that truly resolve the gap
+        // "harvestEarly" doesn't skip the delivery, so the gap may persist in a different form
+        if (action === 'keepForFuture' || action === 'cancel') {
+          setAnimatingOutGaps(prev => new Set(prev).add(gapKey));
+          // Wait for animation, then reload
+          setTimeout(async () => {
+            setAnimatingOutGaps(prev => {
+              const next = new Set(prev);
+              next.delete(gapKey);
+              return next;
+            });
+            await loadTasks({ suppressLoading: true });
+          }, 400);
+        } else {
+          // For harvestEarly, just reload immediately - tray will appear in harvest section
+          await loadTasks({ suppressLoading: true });
+        }
+      } else {
+        showNotification('error', 'Action failed. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('[DailyFlow] Error in reallocation action:', error);
+      showNotification('error', error?.message || 'Action failed');
+    }
+  }, [gapReallocationConfirm, loadTasks, showNotification]);
 
   const handleHarvestNearestTray = useCallback(async () => {
     if (!nearReadyTrayModal) return;
@@ -1147,10 +1432,151 @@ export default function DailyFlow() {
     }
   };
 
-  const closeBatchHarvestModal = () => {
+  const closeBatchHarvestModal = async () => {
+    // If there are pending early harvest trays, revert their dates
+    if (pendingEarlyHarvestTrays.length > 0) {
+      try {
+        for (const { trayStepId, originalDate } of pendingEarlyHarvestTrays) {
+          await updateHarvestStepDate(trayStepId, originalDate);
+        }
+        showNotification('info', 'Harvest cancelled. Tray dates reverted.');
+        // Reload tasks to reflect the reverted dates
+        void loadTasks({ suppressLoading: true });
+      } catch (error) {
+        console.error('[closeBatchHarvestModal] Error reverting dates:', error);
+        showNotification('error', 'Failed to revert harvest dates');
+      }
+      setPendingEarlyHarvestTrays([]);
+    }
     resetBatchHarvestState();
     setBatchHarvestModalGroup(null);
   };
+
+  // Get mismatched trays for a harvest group (same customer, matching products)
+  // Only returns the MINIMUM trays needed to fill gaps, not all mismatched trays
+  const getMismatchedTraysForGroup = useCallback((group: HarvestGroup): MismatchedAssignedTray[] => {
+    if (!group.customerName) return [];
+
+    // Get customer ID from the first task
+    const customerId = group.tasks[0]?.customerId;
+    if (!customerId) return [];
+
+    // Find gaps for this customer to determine how many trays are actually needed
+    const customerGaps = activeOrderGaps.filter(gap => gap.customer_id === customerId);
+
+    // For each gap, get only the minimum trays needed
+    const selectedTrays: MismatchedAssignedTray[] = [];
+
+    for (const gap of customerGaps) {
+      const gapKey = `${gap.customer_id}-${gap.product_id}`;
+      const mismatchedForGap = gapMismatchedTrays[gapKey] || [];
+
+      if (mismatchedForGap.length === 0) continue;
+
+      // Group trays by recipe_id to handle variety-specific needs
+      const traysByRecipe = new Map<number, MismatchedAssignedTray[]>();
+      for (const tray of mismatchedForGap) {
+        const existing = traysByRecipe.get(tray.recipe_id) || [];
+        existing.push(tray);
+        traysByRecipe.set(tray.recipe_id, existing);
+      }
+
+      // For each recipe, take only the trays needed (gap count, typically 1 per variety)
+      // Sort by harvest date (earliest first) to minimize impact on future deliveries
+      for (const [recipeId, trays] of traysByRecipe) {
+        // Sort by harvest date - earliest dates first (closest to ready)
+        const sorted = [...trays].sort((a, b) => {
+          const dateA = new Date(a.harvest_date).getTime();
+          const dateB = new Date(b.harvest_date).getTime();
+          return dateA - dateB;
+        });
+
+        // For a mix product, we need 1 tray per variety
+        // For single products, we might need more (based on gap)
+        // Use gap count as the max, but typically it's 1 per recipe/variety
+        const traysNeeded = gap.is_mix ? 1 : Math.min(gap.gap, sorted.length);
+        const selected = sorted.slice(0, traysNeeded);
+        selectedTrays.push(...selected);
+      }
+    }
+
+    return selectedTrays;
+  }, [gapMismatchedTrays, activeOrderGaps]);
+
+  // Open the early harvest confirmation modal
+  const openEarlyHarvestConfirm = useCallback((group: HarvestGroup) => {
+    const mismatchedTrays = getMismatchedTraysForGroup(group);
+    const readyVarieties = group.tasks.map(t => t.crop);
+
+    setEarlyHarvestConfirm({
+      group,
+      mismatchedTrays,
+      readyVarieties,
+    });
+  }, [getMismatchedTraysForGroup]);
+
+  // Process early harvest: update harvest dates for mismatched trays, then open batch harvest modal
+  const handleConfirmEarlyHarvest = useCallback(async () => {
+    if (!earlyHarvestConfirm) return;
+
+    const { group, mismatchedTrays } = earlyHarvestConfirm;
+
+    setIsProcessingEarlyHarvest(true);
+    try {
+      // Store original dates for potential revert
+      const pendingTrays = mismatchedTrays.map(tray => ({
+        trayStepId: tray.tray_step_id,
+        originalDate: tray.harvest_date,
+      }));
+      setPendingEarlyHarvestTrays(pendingTrays);
+
+      // Update all mismatched trays to harvest today
+      for (const tray of mismatchedTrays) {
+        await updateHarvestStepToToday(tray.tray_step_id);
+      }
+
+      // Build enhanced group with early harvest trays included
+      // Create synthetic tasks for the early harvest trays
+      const earlyHarvestTasks: DailyTask[] = mismatchedTrays.map(tray => ({
+        id: `early-harvest-${tray.tray_id}`,
+        action: `Harvest ${tray.variety_name || tray.recipe_name}`,
+        crop: tray.variety_name || tray.recipe_name,
+        batchId: 'Early',
+        location: 'N/A',
+        dayCurrent: 0,
+        dayTotal: 0,
+        trays: 1,
+        status: 'urgent' as const,
+        trayIds: [tray.tray_id],
+        recipeId: tray.recipe_id,
+        taskSource: 'tray_step' as const,
+        quantity: 1,
+        customerName: group.customerName,
+        customerId: tray.customer_id,
+        deliveryDate: group.deliveryDate,
+      }));
+
+      // Create enhanced group with both ready and early harvest trays
+      const enhancedGroup: HarvestGroup = {
+        ...group,
+        tasks: [...group.tasks, ...earlyHarvestTasks],
+      };
+
+      // Close confirmation modal
+      setEarlyHarvestConfirm(null);
+
+      showNotification('success', 'Harvest dates updated. Ready to complete order.');
+
+      // Open the batch harvest modal with the enhanced group
+      void openBatchHarvestModal(enhancedGroup);
+    } catch (error) {
+      console.error('[handleConfirmEarlyHarvest] Error:', error);
+      showNotification('error', 'Failed to update harvest dates');
+      setPendingEarlyHarvestTrays([]);
+    } finally {
+      setIsProcessingEarlyHarvest(false);
+    }
+  }, [earlyHarvestConfirm, showNotification]);
 
   const handleRecordBatchHarvest = async () => {
     if (!batchHarvestModalGroup) return;
@@ -1216,6 +1642,9 @@ export default function DailyFlow() {
         'success',
         `Harvested ${selectedTrayIds.length} ${selectedTrayIds.length === 1 ? 'tray' : 'trays'} for ${orderLabel}`
       );
+
+      // Clear pending early harvest trays (don't revert dates on successful harvest)
+      setPendingEarlyHarvestTrays([]);
 
       await loadTasks({ suppressLoading: true });
       closeBatchHarvestModal();
@@ -2386,6 +2815,27 @@ export default function DailyFlow() {
 
       <div className="space-y-8">
 
+        {/* TRAY STATUS SUMMARY */}
+        {passiveTrayStatus.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="h-8 w-1 bg-slate-400 rounded-full"></span>
+              <h3 className="text-xl font-semibold text-slate-900">Tray Status</h3>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {passiveTrayStatus.map((summary) => (
+                <PassiveStepCard
+                  key={summary.stepName}
+                  stepName={summary.stepName}
+                  totalTrays={summary.totalTrays}
+                  onViewDetails={() => setPassiveStepDetails(summary)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ORDER STATUS GAPS */}
         {activeOrderGaps.length > 0 && (
           <section>
@@ -2409,60 +2859,207 @@ export default function DailyFlow() {
                 {activeOrderGaps.map((gap) => {
                   const needsUnassigned = gap.unassigned_ready > 0;
                   const hasNearReady = gap.near_ready_assigned > 0;
-                  const isFixable = needsUnassigned || hasNearReady;
-                  const message = needsUnassigned
-                    ? `⚠️ Missing ${gap.varieties_missing} ${gap.varieties_missing === 1 ? 'variety' : 'varieties'} — ${gap.unassigned_ready} unassigned ${gap.unassigned_ready === 1 ? 'tray' : 'trays'} ready to grab!`
-                    : hasNearReady
-                      ? `⏳ Ready ${formatReadyDateLabel(gap.soonest_ready_date)}`
-                      : '❌ No trays available — at risk!';
-                  const rowClass = isFixable
-                    ? 'border-amber-200 bg-amber-50 text-amber-900'
-                    : 'border-red-200 bg-red-50 text-red-900';
                   const gapKey = formatGapKey(gap);
                   const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
+                  const mismatchedTrays = gapMismatchedTrays[gapKey] || [];
                   const isMissingVarietyLoading = gapMissingVarietyTraysLoading[gapKey] || false;
-                  const showViewTrayButton = matchingTrays.length > 0 && !isMissingVarietyLoading;
-                  const showSkipDeliveryButton = !isMissingVarietyLoading && matchingTrays.length === 0 && gap.gap > 0;
+                  const isMismatchedLoading = gapMismatchedTraysLoading[gapKey] || false;
+                  const hasMismatchedTray = mismatchedTrays.length > 0;
+                  const isFixable = needsUnassigned || hasNearReady || hasMismatchedTray;
+                  const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+                  const isAnimatingOut = animatingOutGaps.has(gapKey);
+
+                  // Build variety breakdown for mix products or any gap with variety info
+                  const varietyBreakdown = buildVarietyBreakdown(gap, mismatchedTrays, matchingTrays);
+                  const showVarietyBreakdown = varietyBreakdown.length > 0;
+
+                  // Determine the message based on gap status
+                  let message: string;
+                  if (showVarietyBreakdown) {
+                    // Summary message for variety breakdown
+                    const mismatchCount = varietyBreakdown.filter(v => v.status === 'date_mismatch').length;
+                    const missingCount = varietyBreakdown.filter(v => v.status === 'missing').length;
+                    const readyCount = varietyBreakdown.filter(v => v.status === 'ready').length;
+                    const parts: string[] = [];
+                    if (mismatchCount > 0) parts.push(`${mismatchCount} date mismatch`);
+                    if (missingCount > 0) parts.push(`${missingCount} missing`);
+                    if (readyCount > 0) parts.push(`${readyCount} ready`);
+                    message = parts.length > 0 ? parts.join(' • ') : 'Checking varieties...';
+                  } else if (needsUnassigned) {
+                    message = `⚠️ Missing ${gap.varieties_missing} ${gap.varieties_missing === 1 ? 'variety' : 'varieties'} — ${gap.unassigned_ready} unassigned ${gap.unassigned_ready === 1 ? 'tray' : 'trays'} ready to grab!`;
+                  } else if (hasNearReady) {
+                    message = `⏳ Ready ${formatReadyDateLabel(gap.soonest_ready_date)}`;
+                  } else {
+                    message = '❌ No trays available — at risk!';
+                  }
+
+                  const rowClass = hasMismatchedTray
+                    ? 'border-l-4 border-orange-400 bg-orange-50 text-orange-900'
+                    : isFixable
+                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                      : 'border-red-200 bg-red-50 text-red-900';
+                  const showViewTrayButton = matchingTrays.length > 0 && !isMissingVarietyLoading && !hasMismatchedTray;
+                  const showSkipDeliveryButton = !isMissingVarietyLoading && matchingTrays.length === 0 && gap.gap > 0 && !hasMismatchedTray && !showVarietyBreakdown;
                   return (
                     <div
                       key={`${gap.customer_id}-${gap.product_id}`}
                       className={cn(
-                        'rounded-2xl border p-3 space-y-1',
-                        rowClass
+                        'rounded-2xl border p-3 space-y-2 transition-all duration-300',
+                        rowClass,
+                        isAnimatingOut && 'opacity-0 -translate-x-full scale-95'
                       )}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-semibold text-current">
                           {gap.customer_name} — {gap.product_name}
                         </p>
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            'text-[0.6rem] uppercase tracking-[0.25em]',
-                            isFixable ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                        <div className="flex items-center gap-2">
+                          {deliveryDate && (
+                            <span className="text-[0.65rem] text-current/70">
+                              {formatLocalDate(deliveryDate)}
+                            </span>
                           )}
-                        >
-                          Gap {gap.gap}
-                        </Badge>
+                          <Badge
+                            variant="secondary"
+                            className={cn(
+                              'text-[0.6rem] uppercase tracking-[0.25em]',
+                              hasMismatchedTray ? 'bg-orange-100 text-orange-700' : isFixable ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                            )}
+                          >
+                            Gap {gap.gap}
+                          </Badge>
+                        </div>
                       </div>
-                      <p className="text-sm leading-relaxed">{message}</p>
-                  {gap.is_mix && gap.varieties_in_product > 0 && (
-                    <p className="text-xs text-current/80">
-                      {gap.varieties_missing}/{gap.varieties_in_product} varieties missing
-                    </p>
-                  )}
-                  {gap.missing_varieties && (
-                    <p className="text-xs text-current/80">
-                      Missing: {gap.missing_varieties}
-                    </p>
-                  )}
+
+                      {/* Variety breakdown for mix products */}
+                      {showVarietyBreakdown ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-current/70 uppercase tracking-wide">
+                            {varietyBreakdown.length} {varietyBreakdown.length === 1 ? 'variety' : 'varieties'} needed:
+                          </p>
+                          <div className="space-y-1">
+                            {varietyBreakdown.map((v, idx) => (
+                              <div
+                                key={`${v.varietyName}-${idx}`}
+                                className={cn(
+                                  'flex items-center justify-between text-xs px-2 py-1.5 rounded-lg',
+                                  v.status === 'ready' && 'bg-emerald-100/50 text-emerald-800',
+                                  v.status === 'date_mismatch' && 'bg-orange-100/50 text-orange-800',
+                                  v.status === 'missing' && 'bg-red-100/50 text-red-800'
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span>
+                                    {v.status === 'ready' && '✓'}
+                                    {v.status === 'date_mismatch' && '⚠️'}
+                                    {v.status === 'missing' && '❌'}
+                                  </span>
+                                  <span className="font-medium capitalize">{v.varietyName}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {v.status === 'ready' && (
+                                    <span className="text-emerald-600">Ready</span>
+                                  )}
+                                  {v.status === 'date_mismatch' && v.tray && (
+                                    <>
+                                      <span className="text-orange-700">
+                                        #{v.tray.tray_id} ready {formatLocalDate(v.readyDate)}
+                                      </span>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 px-2 text-[0.65rem] text-orange-700 hover:bg-orange-200"
+                                        onClick={() => openReallocationConfirm(gap, v.tray!, 'harvestEarly')}
+                                      >
+                                        Harvest Early
+                                      </Button>
+                                    </>
+                                  )}
+                                  {v.status === 'missing' && (
+                                    <span className="text-red-600">No tray</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Summary action buttons for all mismatched varieties */}
+                          {mismatchedTrays.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-current/10">
+                              <Button
+                                size="sm"
+                                className="text-xs bg-orange-600 hover:bg-orange-700"
+                                onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'keepForFuture')}
+                              >
+                                Keep All for Original Dates
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-orange-600 hover:text-orange-800 hover:bg-orange-100"
+                                onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'cancel')}
+                              >
+                                Cancel Delivery
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm leading-relaxed">{message}</p>
+                          {gap.is_mix && gap.varieties_in_product > 0 && (
+                            <p className="text-xs text-current/80">
+                              {gap.varieties_missing}/{gap.varieties_in_product} varieties missing
+                            </p>
+                          )}
+                          {gap.missing_varieties && (
+                            <p className="text-xs text-current/80">
+                              Missing: {gap.missing_varieties}
+                            </p>
+                          )}
+                        </>
+                      )}
                     <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {needsUnassigned && (
+                      {/* Mismatched tray reallocation options (only show when NOT using variety breakdown) */}
+                      {hasMismatchedTray && !isMismatchedLoading && !showVarietyBreakdown && (
+                        <>
+                          <Button
+                            size="sm"
+                            className="text-sm bg-orange-600 hover:bg-orange-700"
+                            onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'harvestEarly')}
+                          >
+                            Harvest Early & Use Today
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-sm border-orange-300 text-orange-700 hover:bg-orange-100"
+                            onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'keepForFuture')}
+                          >
+                            Keep for {formatLocalDate(mismatchedTrays[0].harvest_date)}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-sm text-orange-600 hover:text-orange-800 hover:bg-orange-100"
+                            onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'cancel')}
+                          >
+                            Cancel Delivery
+                          </Button>
+                        </>
+                      )}
+                      {isMismatchedLoading && !showVarietyBreakdown && (
+                        <Button variant="outline" size="sm" className="text-sm" disabled>
+                          Checking assigned trays...
+                        </Button>
+                      )}
+
+                      {/* Original gap handling options */}
+                    {needsUnassigned && !hasMismatchedTray && (
                       <Button className="text-sm" onClick={() => openAssignModal(gap)}>
                         Assign Tray
                       </Button>
                     )}
-                      {isMissingVarietyLoading && (
+                      {isMissingVarietyLoading && !hasMismatchedTray && (
                         <Button variant="outline" size="sm" className="text-sm" disabled>
                           Checking trays...
                         </Button>
@@ -2487,12 +3084,24 @@ export default function DailyFlow() {
                           Skip Delivery
                         </Button>
                       )}
-                      {!needsUnassigned && !hasNearReady && gap.gap > 0 && (
+                      {!needsUnassigned && !hasNearReady && !hasMismatchedTray && gap.gap > 0 && (
                         <Badge variant="destructive" className="text-[0.6rem] uppercase tracking-[0.25em]">
                           At Risk
                         </Badge>
                       )}
                     </div>
+
+                    {/* Warning for harvest early option */}
+                    {hasMismatchedTray && (
+                      <div className="mt-2 p-2 bg-orange-100 border border-orange-200 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                          <p className="text-xs text-orange-800">
+                            Harvesting early will remove coverage for a future scheduled delivery
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     </div>
                   );
                 })}
@@ -2542,6 +3151,8 @@ export default function DailyFlow() {
                 const traysReady = group.tasks.reduce((sum, task) => sum + (Number(task.quantity) || 0), 0);
                 const groupLabel = group.customerName ? `${group.customerName} Order` : 'Unassigned Trays';
                 const deliveryLabel = formatShortDateLabel(group.deliveryDate);
+                const groupMismatchedTrays = getMismatchedTraysForGroup(group);
+                const hasMismatchedVarieties = groupMismatchedTrays.length > 0;
                 return (
                   <div
                     key={group.key}
@@ -2561,19 +3172,34 @@ export default function DailyFlow() {
                             ? `${group.customerName}: ${group.tasks.length} ${group.tasks.length === 1 ? 'variety' : 'varieties'} ready`
                             : `${traysReady} ${traysReady === 1 ? 'tray' : 'trays'} ready`}
                         </p>
+                        {hasMismatchedVarieties && (
+                          <p className="text-xs text-orange-600 mt-1">
+                            +{groupMismatchedTrays.length} {groupMismatchedTrays.length === 1 ? 'variety' : 'varieties'} need early harvest
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant="secondary" className="bg-slate-100 text-slate-700 mt-1 md:mt-0">
                           {group.tasks.length} {group.tasks.length === 1 ? 'variety' : 'varieties'}
                         </Badge>
                         {group.customerName && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void openBatchHarvestModal(group)}
-                        >
-                            Harvest Order
-                          </Button>
+                          hasMismatchedVarieties ? (
+                            <Button
+                              size="sm"
+                              className="bg-orange-600 hover:bg-orange-700"
+                              onClick={() => openEarlyHarvestConfirm(group)}
+                            >
+                              Complete Order & Harvest Early
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void openBatchHarvestModal(group)}
+                            >
+                              Harvest Order
+                            </Button>
+                          )
                         )}
                       </div>
                     </div>
@@ -2923,26 +3549,6 @@ export default function DailyFlow() {
         )}
 
         {/* SECTION 3: TRAY STATUS (Passive Steps) - Now uses direct DB query */}
-        {passiveTrayStatus.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="h-8 w-1 bg-slate-400 rounded-full"></span>
-              <h3 className="text-xl font-semibold text-slate-900">Tray Status</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {passiveTrayStatus.map((summary) => (
-                <PassiveStepCard
-                  key={summary.stepName}
-                  stepName={summary.stepName}
-                  totalTrays={summary.totalTrays}
-                  onViewDetails={() => setPassiveStepDetails(summary)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
         {/* Empty State */}
         {tasks.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -4261,6 +4867,192 @@ export default function DailyFlow() {
         </DialogContent>
       </Dialog>
 
+      {/* Tray Reallocation Confirmation Dialog */}
+      <Dialog open={!!gapReallocationConfirm} onOpenChange={(open) => !open && setGapReallocationConfirm(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700">
+              <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              {gapReallocationConfirm?.action === 'harvestEarly' && 'Harvest Early?'}
+              {gapReallocationConfirm?.action === 'keepForFuture' && 'Skip Today\'s Delivery?'}
+              {gapReallocationConfirm?.action === 'cancel' && 'Cancel Delivery?'}
+            </DialogTitle>
+            <DialogDescription>
+              {gapReallocationConfirm?.action === 'harvestEarly' && 'This will move the harvest date to today'}
+              {gapReallocationConfirm?.action === 'keepForFuture' && 'Keep the tray for its scheduled delivery date'}
+              {gapReallocationConfirm?.action === 'cancel' && 'Cancel this delivery entirely'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {gapReallocationConfirm && (
+            <div className="space-y-4 py-4">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-xs text-orange-600 font-medium uppercase">Customer</p>
+                      <p className="text-lg font-bold text-orange-900">{gapReallocationConfirm.gap.customer_name}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-orange-600 font-medium uppercase">Tray</p>
+                      <p className="text-lg font-bold text-orange-900">#{gapReallocationConfirm.tray.tray_id}</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div>
+                      <p className="text-xs text-orange-600 font-medium uppercase">Delivery Date</p>
+                      <p className="text-orange-800">
+                        {formatLocalDate(gapReallocationConfirm.gap.scheduled_delivery_date || gapReallocationConfirm.gap.delivery_date)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-orange-600 font-medium uppercase">Harvest Ready</p>
+                      <p className="text-orange-800">
+                        {formatLocalDate(gapReallocationConfirm.tray.harvest_date)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {gapReallocationConfirm.action === 'harvestEarly' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-amber-800">
+                      {gapReallocationConfirm.nextDeliveryDate
+                        ? `This will remove coverage for the ${formatLocalDate(gapReallocationConfirm.nextDeliveryDate)} delivery. You may need to plant more trays to cover that date.`
+                        : 'This tray was scheduled for a future delivery. You may need to plant more trays to cover that date.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {gapReallocationConfirm.action === 'keepForFuture' && (
+                <p className="text-sm text-slate-600">
+                  Today's delivery will be skipped. The tray will remain assigned for the {formatLocalDate(gapReallocationConfirm.nextDeliveryDate || gapReallocationConfirm.tray.harvest_date)} delivery.
+                </p>
+              )}
+
+              {gapReallocationConfirm.action === 'cancel' && (
+                <p className="text-sm text-slate-600">
+                  This will cancel today's scheduled delivery for {gapReallocationConfirm.gap.customer_name}.
+                </p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setGapReallocationConfirm(null)}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReallocationConfirm}
+              className={cn(
+                "flex-1",
+                gapReallocationConfirm?.action === 'harvestEarly' && "bg-orange-600 hover:bg-orange-700",
+                gapReallocationConfirm?.action === 'keepForFuture' && "bg-blue-600 hover:bg-blue-700",
+                gapReallocationConfirm?.action === 'cancel' && "bg-slate-600 hover:bg-slate-700"
+              )}
+            >
+              {gapReallocationConfirm?.action === 'harvestEarly' && 'Harvest Early'}
+              {gapReallocationConfirm?.action === 'keepForFuture' && 'Keep for Later'}
+              {gapReallocationConfirm?.action === 'cancel' && 'Cancel Delivery'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Early Harvest Confirmation Dialog - for completing orders with early harvest */}
+      <Dialog open={!!earlyHarvestConfirm} onOpenChange={(open) => !open && setEarlyHarvestConfirm(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700">
+              <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              Complete Order Early?
+            </DialogTitle>
+            <DialogDescription>
+              Some varieties will be harvested before their scheduled date
+            </DialogDescription>
+          </DialogHeader>
+
+          {earlyHarvestConfirm && (
+            <div className="space-y-4 py-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                <p className="text-xs text-emerald-600 font-medium uppercase mb-2">Ready to Harvest</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {earlyHarvestConfirm.readyVarieties.map((variety, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-emerald-100 text-emerald-800 rounded-full"
+                    >
+                      <span className="text-emerald-600">✓</span>
+                      {variety}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <p className="text-xs text-orange-600 font-medium uppercase mb-2">
+                  Will be Harvested Early ({earlyHarvestConfirm.mismatchedTrays.length})
+                </p>
+                <div className="space-y-2">
+                  {earlyHarvestConfirm.mismatchedTrays.map((tray) => (
+                    <div
+                      key={tray.tray_id}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="font-medium text-orange-900">
+                        {tray.variety_name || tray.recipe_name}
+                      </span>
+                      <span className="text-orange-700">
+                        Tray #{tray.tray_id} • was due {formatLocalDate(tray.harvest_date)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-amber-800">
+                    Harvesting early may affect future deliveries. You may need to plant additional trays to cover those dates.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setEarlyHarvestConfirm(null)}
+              className="flex-1"
+              disabled={isProcessingEarlyHarvest}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmEarlyHarvest}
+              className="flex-1 bg-orange-600 hover:bg-orange-700"
+              disabled={isProcessingEarlyHarvest}
+            >
+              {isProcessingEarlyHarvest ? 'Processing...' : 'Confirm & Complete Order'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Lost Tray Dialog - for marking trays as lost/failed */}
       <Dialog open={!!lostTask} onOpenChange={(open) => !open && setLostTask(null)}>
         <DialogContent className="sm:max-w-[500px]">
@@ -4561,15 +5353,15 @@ const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCar
   };
 
   return (
-    <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-md border-slate-200 bg-slate-50/50">
-      <div className="p-5">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center">
+    <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-md border border-slate-200/70 bg-slate-50/80 rounded-2xl">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
             {getIcon()}
           </div>
-          <div className="flex-1">
-            <h4 className="font-semibold text-lg text-slate-900">{stepName}</h4>
-            <p className="text-2xl font-bold text-slate-700 mt-1">
+          <div className="flex-1 min-w-0">
+            <h4 className="font-semibold text-base text-slate-900 leading-tight truncate">{stepName}</h4>
+            <p className="text-xl font-bold text-slate-700 mt-1">
               {totalTrays} {totalTrays === 1 ? 'Tray' : 'Trays'}
             </p>
           </div>
@@ -4577,7 +5369,8 @@ const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCar
         
         <Button
           variant="outline"
-          className="w-full border-slate-300 text-slate-700 hover:bg-slate-100"
+          size="sm"
+          className="w-full border-slate-300 text-slate-700 hover:bg-slate-100 h-9"
           onClick={onViewDetails}
         >
           <Eye className="h-4 w-4 mr-2" />
@@ -4596,6 +5389,75 @@ interface AtRiskTaskCardProps {
   onViewDetails?: (task: DailyTask) => void;
   isAnimatingOut?: boolean;
 }
+
+type AtRiskActionConfig = {
+  actionType: FulfillmentActionType;
+  icon: LucideIcon;
+  label: string;
+  borderClass: string;
+  hoverClass: string;
+  strokeColor: string;
+};
+
+const atRiskActionConfigs: AtRiskActionConfig[] = [
+  {
+    actionType: 'contacted',
+    icon: Phone,
+    label: 'Log customer contact',
+    borderClass: 'border-blue-200',
+    hoverClass: 'hover:bg-blue-50',
+    strokeColor: '#2563eb',
+  },
+  {
+    actionType: 'skip',
+    icon: SkipForward,
+    label: 'Skip this item',
+    borderClass: 'border-amber-200',
+    hoverClass: 'hover:bg-amber-50',
+    strokeColor: '#c2410c',
+  },
+  {
+    actionType: 'substitute',
+    icon: RefreshCw,
+    label: 'Substitute this item',
+    borderClass: 'border-emerald-200',
+    hoverClass: 'hover:bg-emerald-50',
+    strokeColor: '#15803d',
+  },
+  {
+    actionType: 'note',
+    icon: FileText,
+    label: 'Add a note',
+    borderClass: 'border-slate-300',
+    hoverClass: 'hover:bg-slate-100',
+    strokeColor: '#475467',
+  },
+];
+
+const AtRiskActionCircle = ({
+  config,
+  onClick,
+}: {
+  config: AtRiskActionConfig;
+  onClick: () => void;
+}) => {
+  const Icon = config.icon;
+  return (
+    <button
+      type="button"
+      className={cn(
+        'h-8 w-8 rounded-full border-2 bg-white flex items-center justify-center transition focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-300',
+        config.borderClass,
+        config.hoverClass
+      )}
+      title={config.label}
+      aria-label={config.label}
+      onClick={onClick}
+    >
+      <Icon className="h-4 w-4" stroke={config.strokeColor} strokeWidth={1.8} />
+    </button>
+  );
+};
 
 const AtRiskTaskCard = ({ task, onAction, actionHistory = [], onViewDetails, isAnimatingOut = false }: AtRiskTaskCardProps) => {
   const formatDate = (dateStr: string) => {
@@ -4673,43 +5535,14 @@ const AtRiskTaskCard = ({ task, onAction, actionHistory = [], onViewDetails, isA
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-4 gap-1 mb-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAction(task, 'contacted')}
-            className="h-8 text-xs bg-white hover:bg-blue-50 border-blue-200"
-            title="Log customer contact"
-          >
-            <Phone className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAction(task, 'skip')}
-            className="h-8 text-xs bg-white hover:bg-amber-50 border-amber-200"
-            title="Skip this item"
-          >
-            <SkipForward className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAction(task, 'substitute')}
-            className="h-8 text-xs bg-white hover:bg-green-50 border-green-200"
-            title="Substitute with different recipe"
-          >
-            <RefreshCw className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAction(task, 'note')}
-            className="h-8 text-xs bg-white hover:bg-slate-50 border-slate-200"
-            title="Add note"
-          >
-            <FileText className="h-3 w-3" />
-          </Button>
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {atRiskActionConfigs.map((config) => (
+            <AtRiskActionCircle
+              key={config.actionType}
+              config={config}
+              onClick={() => onAction(task, config.actionType)}
+            />
+          ))}
         </div>
 
         {/* Action History */}

@@ -38,6 +38,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 // --- Custom Icon Component for that "Material" feel ---
 const DashboardIcon = ({ icon: Icon, colorClass, bgClass }: { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>, colorClass: string, bgClass: string }) => (
@@ -55,6 +56,62 @@ interface InsightData {
 }
 
 type InsightType = 'opportunity' | 'risk' | 'inventory';
+
+// --- STAT CARD MODAL TYPES ---
+type StatModalType = 'trays' | 'orders' | 'harvest' | 'tasks' | 'catalog' | null;
+
+interface ActiveTrayDetail {
+  tray_id: number;
+  tray_unique_id: string;
+  sow_date: string;
+  location: string | null;
+  recipe_name: string;
+  variety_name: string;
+}
+
+interface ActiveOrderDetail {
+  schedule_id: number;
+  order_name: string;
+  customer_name: string;
+  scheduled_delivery_date: string;
+  status: string;
+}
+
+interface HarvestSoonDetail {
+  tray_step_id: number;
+  tray_id: number;
+  tray_unique_id: string;
+  variety_name: string;
+  scheduled_date: string;
+  days_until: number;
+  location: string | null;
+}
+
+interface TaskDetail {
+  id: string;
+  type: 'tray_step' | 'watering' | 'maintenance';
+  name: string;
+  description?: string;
+  tray_id?: number;
+  tray_unique_id?: string;
+  variety_name?: string;
+}
+
+interface CatalogDetail {
+  variety_id: number;
+  variety_name: string;
+  description: string | null;
+  active_trays: number;
+  recipe_count: number;
+}
+
+type StatModalData =
+  | { type: 'trays'; data: ActiveTrayDetail[] }
+  | { type: 'orders'; data: ActiveOrderDetail[] }
+  | { type: 'harvest'; data: HarvestSoonDetail[] }
+  | { type: 'tasks'; data: TaskDetail[] }
+  | { type: 'catalog'; data: CatalogDetail[] }
+  | null;
 
 const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightData | null, isVisible: boolean, onClose: () => void, navigate: (path: string) => void }) => {
   const MESSAGE_PREVIEW_LENGTH = 200;
@@ -658,7 +715,20 @@ const getWateringTrayCount = async (farmUuid: string, today: Date): Promise<numb
       return recipeId ? !completedRecipeIds.has(recipeId) : true;
     });
 
-    return remainingTrays.length;
+    const finalCount = remainingTrays.length;
+    const distinctTrays = activeTrays || [];
+    const traysWithFutureHarvestList = Array.from(traysWithFutureHarvest || []);
+
+    console.log('[DEBUG] getWateringTrayCount breakdown:', {
+      totalTraysFound: distinctTrays.length,
+      traysWithFutureHarvest: traysWithFutureHarvestList.length,
+      completedRecipes: completedRecipeIds.size,
+      finalCount,
+      trayIds: distinctTrays.map((t: any) => t.tray_id),
+      recipeIds: distinctTrays.map((t: any) => t.recipe_id)
+    });
+
+    return finalCount;
   } catch (error) {
     console.error('[Dashboard] Unexpected error while counting watering trays:', error);
     return 0;
@@ -678,7 +748,7 @@ const Dashboard = () => {
   const [chartDimensions, setChartDimensions] = useState({ bar: { width: 0, height: 0 }, pie: { width: 0, height: 0 } });
   
   // Morning Briefing State
-  const [showBriefing, setShowBriefing] = useState(true);
+  const [showBriefing, setShowBriefing] = useState(false);
   const [briefingData, setBriefingData] = useState<InsightData | null>(null);
   const insightsTableExistsRef = useRef<boolean | null>(null); // null = unknown, true = exists, false = doesn't exist
   const isFetchingRef = useRef<boolean>(false); // Prevent multiple simultaneous fetches
@@ -711,6 +781,11 @@ const Dashboard = () => {
     description: string;
     occurred_at: string;
   }>>([]);
+
+  // Stat Card Modal State
+  const [activeModal, setActiveModal] = useState<StatModalType>(null);
+  const [modalData, setModalData] = useState<StatModalData>(null);
+  const [modalLoading, setModalLoading] = useState(false);
 
   // Vibrant Material-like colors
   const PIE_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6'];
@@ -779,7 +854,7 @@ const Dashboard = () => {
         upcomingHarvestsCount,
         productsCount,
         standingOrdersCount,
-        todaysDeliveriesCount,
+        todaysDeliveriesResult,
         actionableTrayStepsCount,
         wateringTrayCount,
         maintenanceTasksCount
@@ -811,17 +886,21 @@ const Dashboard = () => {
           console.log('[DEBUG] Standing Orders query result:', { count: r.count, error: r.error });
           return r;
         }, () => ({ count: 0, error: null })),
-        // Active Orders = today's pending order schedules
+        // Active Orders = today's pending order schedules (count unique deliveries)
         getSupabaseClient()
           .from('order_schedules')
-          .select('*, standing_orders!inner(farm_uuid)', { count: 'exact', head: true })
+          .select('standing_order_id, scheduled_delivery_date, standing_orders!inner(farm_uuid)')
           .eq('standing_orders.farm_uuid', farmUuid)
           .eq('scheduled_delivery_date', todayStr)
           .eq('status', 'pending')
           .then(r => {
-            console.log('[DEBUG] Today\'s Pending Deliveries query result:', { count: r.count, error: r.error, scheduledDate: todayStr });
+            console.log('[DEBUG] Today\'s Pending Deliveries query result:', {
+              rowsFetched: r.data?.length,
+              error: r.error,
+              scheduledDate: todayStr,
+            });
             return r;
-          }, () => ({ count: 0, error: null })),
+          }, () => ({ data: [], error: null })),
         // Actionable tray steps
         actionableTrayStepsPromise,
         // Watering tasks (distinct trays)
@@ -833,6 +912,13 @@ const Dashboard = () => {
       const wateringTasksCountValue = wateringTrayCount || 0;
       const maintenanceTasksCountValue = maintenanceTasksCount.count || 0;
       const totalTasks = trayStepTasksCount + wateringTasksCountValue + maintenanceTasksCountValue;
+      const todaysDeliveries = todaysDeliveriesResult?.data || [];
+      const uniqueDeliveriesCount = new Set(
+        todaysDeliveries
+          .filter((schedule: any) => schedule.standing_order_id && schedule.scheduled_delivery_date)
+          .map((schedule: any) => `${schedule.standing_order_id}-${schedule.scheduled_delivery_date}`)
+      ).size;
+      console.log('[DEBUG] Unique today deliveries count:', uniqueDeliveriesCount);
 
       console.log('[DEBUG] Dashboard actionable tasks breakdown:', {
         traySteps: trayStepTasksCount,
@@ -844,7 +930,7 @@ const Dashboard = () => {
         totalTrays: traysTotal.count || 0,
         activeTrays: traysActive.count || 0,
         totalVarieties: varietiesCount.count || 0,
-        totalOrders: todaysDeliveriesCount.count || 0,
+        totalOrders: uniqueDeliveriesCount,
         recentHarvests: recentHarvestsCount.count || 0,
         upcomingHarvests: upcomingHarvestsCount.count || 0,
         totalProducts: productsCount.count || 0,
@@ -1072,6 +1158,297 @@ const Dashboard = () => {
     return 'Good Evening';
   };
 
+  // --- Stat Card Modal Handlers ---
+  const handleStatCardClick = useCallback(async (type: NonNullable<StatModalType>) => {
+    setActiveModal(type);
+    setModalLoading(true);
+    setModalData(null);
+
+    try {
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+
+      switch (type) {
+        case 'trays': {
+          const { data, error } = await getSupabaseClient()
+            .from('trays')
+            .select(`
+              tray_id,
+              tray_unique_id,
+              sow_date,
+              location,
+              recipes!inner(recipe_name, variety_name)
+            `)
+            .eq('farm_uuid', farmInfo.farmUuid)
+            .eq('status', 'active')
+            .is('harvest_date', null)
+            .order('sow_date', { ascending: false })
+            .limit(10);
+
+          if (error) throw error;
+
+          const formatted: ActiveTrayDetail[] = (data || []).map((t: any) => ({
+            tray_id: t.tray_id,
+            tray_unique_id: t.tray_unique_id || `T-${t.tray_id}`,
+            sow_date: t.sow_date,
+            location: t.location,
+            recipe_name: t.recipes?.recipe_name || 'Unknown',
+            variety_name: t.recipes?.variety_name || 'Unknown',
+          }));
+
+          setModalData({ type: 'trays', data: formatted });
+          break;
+        }
+
+        case 'orders': {
+          const { data, error } = await getSupabaseClient()
+            .from('order_schedules')
+            .select(`
+              schedule_id,
+              standing_order_id,
+              scheduled_delivery_date,
+              status,
+              standing_orders!inner(order_name, farm_uuid, customer_id)
+            `)
+            .eq('standing_orders.farm_uuid', farmInfo.farmUuid)
+            .eq('scheduled_delivery_date', todayStr)
+            .eq('status', 'pending');
+
+          if (error) throw error;
+
+          // Deduplicate by standing_order_id + scheduled_delivery_date (unique deliveries)
+          const uniqueDeliveries = new Map<string, any>();
+          (data || []).forEach((o: any) => {
+            const key = `${o.standing_order_id}-${o.scheduled_delivery_date}`;
+            if (!uniqueDeliveries.has(key)) {
+              uniqueDeliveries.set(key, o);
+            }
+          });
+
+          const uniqueOrders = Array.from(uniqueDeliveries.values()).slice(0, 10);
+
+          // Get customer names for the customer IDs
+          const customerIds = [...new Set(uniqueOrders
+            .map((o: any) => o.standing_orders?.customer_id)
+            .filter(Boolean))];
+
+          const { data: customers } = customerIds.length > 0
+            ? await getSupabaseClient()
+                .from('customers')
+                .select('customerid, name')
+                .in('customerid', customerIds)
+            : { data: [] };
+
+          const customerMap = new Map((customers || []).map((c: any) => [c.customerid, c.name]));
+
+          const formatted: ActiveOrderDetail[] = uniqueOrders.map((o: any) => ({
+            schedule_id: o.schedule_id,
+            order_name: o.standing_orders?.order_name || 'Unknown Order',
+            customer_name: customerMap.get(o.standing_orders?.customer_id) || 'Unknown Customer',
+            scheduled_delivery_date: o.scheduled_delivery_date,
+            status: o.status,
+          }));
+
+          setModalData({ type: 'orders', data: formatted });
+          break;
+        }
+
+        case 'harvest': {
+          const { data, error } = await getSupabaseClient()
+            .from('harvest_soon_view')
+            .select('tray_step_id, tray_id, scheduled_date')
+            .eq('farm_uuid', farmInfo.farmUuid)
+            .order('scheduled_date', { ascending: true })
+            .limit(10);
+
+          if (error) throw error;
+
+          // Get tray details for these harvest steps
+          const trayIds = [...new Set((data || []).map((h: any) => h.tray_id))];
+          const { data: trayData } = trayIds.length > 0
+            ? await getSupabaseClient()
+                .from('trays')
+                .select(`
+                  tray_id,
+                  tray_unique_id,
+                  location,
+                  recipes!inner(variety_name)
+                `)
+                .in('tray_id', trayIds)
+            : { data: [] };
+
+          const trayMap = new Map((trayData || []).map((t: any) => [t.tray_id, t]));
+
+          const formatted: HarvestSoonDetail[] = (data || []).map((h: any) => {
+            const tray = trayMap.get(h.tray_id) as any;
+            const scheduledDate = new Date(h.scheduled_date);
+            const daysUntil = Math.ceil((scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+            return {
+              tray_step_id: h.tray_step_id,
+              tray_id: h.tray_id,
+              tray_unique_id: tray?.tray_unique_id || `T-${h.tray_id}`,
+              variety_name: tray?.recipes?.variety_name || 'Unknown',
+              scheduled_date: h.scheduled_date,
+              days_until: daysUntil,
+              location: tray?.location || null,
+            };
+          });
+
+          setModalData({ type: 'harvest', data: formatted });
+          break;
+        }
+
+        case 'tasks': {
+          const tasks: TaskDetail[] = [];
+          const todayDow = today.getDay();
+
+          // 1. Actionable tray steps
+          const { data: traySteps } = await getSupabaseClient()
+            .from('actionable_tray_steps')
+            .select('tray_step_id, tray_id, step_name, step_description')
+            .eq('farm_uuid', farmInfo.farmUuid)
+            .eq('scheduled_date', todayStr)
+            .eq('status', 'Pending')
+            .limit(10);
+
+          // Get tray unique IDs and variety info for tray steps
+          const trayStepTrayIds = [...new Set((traySteps || []).map((s: any) => s.tray_id))];
+          const { data: trayStepTrays } = trayStepTrayIds.length > 0
+            ? await getSupabaseClient()
+                .from('trays')
+                .select('tray_id, tray_unique_id, recipes!inner(recipe_name, variety_name)')
+                .in('tray_id', trayStepTrayIds)
+            : { data: [] };
+
+          const trayStepTrayMap = new Map((trayStepTrays || []).map((t: any) => [t.tray_id, {
+            tray_unique_id: t.tray_unique_id,
+            variety_name: t.recipes?.variety_name || t.recipes?.recipe_name || 'Unknown'
+          }]));
+
+          (traySteps || []).forEach((s: any) => {
+            const trayInfo = trayStepTrayMap.get(s.tray_id);
+            tasks.push({
+              id: `step-${s.tray_step_id}`,
+              type: 'tray_step',
+              name: s.step_name || 'Tray Step',
+              description: s.step_description,
+              tray_id: s.tray_id,
+              tray_unique_id: trayInfo?.tray_unique_id || `T-${s.tray_id}`,
+              variety_name: trayInfo?.variety_name,
+            });
+          });
+
+          // 2. Maintenance tasks
+          const { data: maintenanceTasks } = await getSupabaseClient()
+            .from('maintenance_tasks')
+            .select('maintenance_task_id, task_name, task_type')
+            .eq('farm_uuid', farmInfo.farmUuid)
+            .eq('is_active', true)
+            .or(`task_date.eq.${todayStr},day_of_week.eq.${todayDow}`)
+            .limit(10);
+
+          (maintenanceTasks || []).forEach((m: any) => {
+            tasks.push({
+              id: `maint-${m.maintenance_task_id}`,
+              type: 'maintenance',
+              name: m.task_name,
+              description: m.task_type,
+            });
+          });
+
+          setModalData({ type: 'tasks', data: tasks.slice(0, 10) });
+          break;
+        }
+
+        case 'catalog': {
+          // Get varieties with counts
+          const { data: varieties, error } = await getSupabaseClient()
+            .from('varieties')
+            .select('varietyid, name, description')
+            .order('name', { ascending: true })
+            .limit(10);
+
+          if (error) throw error;
+
+          // Get active tray counts per variety
+          const { data: trayCounts } = await getSupabaseClient()
+            .from('trays')
+            .select('recipes!inner(variety_id)')
+            .eq('farm_uuid', farmInfo.farmUuid)
+            .eq('status', 'active')
+            .is('harvest_date', null);
+
+          const trayCountMap = new Map<number, number>();
+          (trayCounts || []).forEach((t: any) => {
+            const vid = t.recipes?.variety_id;
+            if (vid) {
+              trayCountMap.set(vid, (trayCountMap.get(vid) || 0) + 1);
+            }
+          });
+
+          // Get recipe counts per variety
+          const { data: recipeCounts } = await getSupabaseClient()
+            .from('recipes')
+            .select('variety_id');
+
+          const recipeCountMap = new Map<number, number>();
+          (recipeCounts || []).forEach((r: any) => {
+            if (r.variety_id) {
+              recipeCountMap.set(r.variety_id, (recipeCountMap.get(r.variety_id) || 0) + 1);
+            }
+          });
+
+          const formatted: CatalogDetail[] = (varieties || []).map((v: any) => ({
+            variety_id: v.varietyid,
+            variety_name: v.name,
+            description: v.description,
+            active_trays: trayCountMap.get(v.varietyid) || 0,
+            recipe_count: recipeCountMap.get(v.varietyid) || 0,
+          }));
+
+          // Sort by active trays descending
+          formatted.sort((a, b) => b.active_trays - a.active_trays);
+
+          setModalData({ type: 'catalog', data: formatted });
+          break;
+        }
+      }
+    } catch (error) {
+      console.error('[Dashboard] Error fetching modal data:', error);
+      setModalData(null);
+    } finally {
+      setModalLoading(false);
+    }
+  }, [farmInfo.farmUuid]);
+
+  const closeModal = useCallback(() => {
+    setActiveModal(null);
+    setModalData(null);
+  }, []);
+
+  const getModalTitle = (type: StatModalType): string => {
+    switch (type) {
+      case 'trays': return 'Active Trays';
+      case 'orders': return 'Active Orders';
+      case 'harvest': return 'Harvest Soon';
+      case 'tasks': return "Today's Tasks";
+      case 'catalog': return 'Variety Catalog';
+      default: return '';
+    }
+  };
+
+  const getModalViewAllPath = (type: StatModalType): string => {
+    switch (type) {
+      case 'trays': return '/trays';
+      case 'orders': return '/orders';
+      case 'harvest': return '/trays';
+      case 'tasks': return '/daily-flow';
+      case 'catalog': return '/varieties';
+      default: return '/';
+    }
+  };
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -1140,45 +1517,50 @@ const Dashboard = () => {
 
       {/* Stats Grid - "Command Center" Style */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-        <StatCard 
-          title="Active Trays" 
-          value={stats.activeTrays} 
-          subtitle="Growing now" 
-          icon={Sprout} 
-          color="text-emerald-600" 
-          bg="bg-emerald-100" 
+        <StatCard
+          title="Active Trays"
+          value={stats.activeTrays}
+          subtitle="Growing now"
+          icon={Sprout}
+          color="text-emerald-600"
+          bg="bg-emerald-100"
+          onClick={() => handleStatCardClick('trays')}
         />
-        <StatCard 
-          title="Active Orders" 
-          value={stats.totalOrders} 
-          subtitle="To fulfill" 
-          icon={ClipboardList} 
-          color="text-blue-600" 
-          bg="bg-blue-100" 
+        <StatCard
+          title="Active Orders"
+          value={stats.totalOrders}
+          subtitle="To fulfill"
+          icon={ClipboardList}
+          color="text-blue-600"
+          bg="bg-blue-100"
+          onClick={() => handleStatCardClick('orders')}
         />
-        <StatCard 
-          title="Harvest Soon" 
-          value={stats.upcomingHarvests} 
-          subtitle="Next 7 days" 
-          icon={Scissors} 
-          color="text-amber-600" 
-          bg="bg-amber-100" 
+        <StatCard
+          title="Harvest Soon"
+          value={stats.upcomingHarvests}
+          subtitle="Next 7 days"
+          icon={Scissors}
+          color="text-amber-600"
+          bg="bg-amber-100"
+          onClick={() => handleStatCardClick('harvest')}
         />
-        <StatCard 
-          title="Today's Tasks" 
-          value={stats.weeklyTasks} 
-          subtitle="Pending" 
-          icon={AlertCircle} 
-          color="text-rose-600" 
-          bg="bg-rose-100" 
+        <StatCard
+          title="Today's Tasks"
+          value={stats.weeklyTasks}
+          subtitle="Pending"
+          icon={AlertCircle}
+          color="text-rose-600"
+          bg="bg-rose-100"
+          onClick={() => handleStatCardClick('tasks')}
         />
-        <StatCard 
-          title="Catalog" 
-          value={stats.totalVarieties} 
-          subtitle="Varieties" 
-          icon={Package} 
-          color="text-violet-600" 
-          bg="bg-violet-100" 
+        <StatCard
+          title="Catalog"
+          value={stats.totalVarieties}
+          subtitle="Varieties"
+          icon={Package}
+          color="text-violet-600"
+          bg="bg-violet-100"
+          onClick={() => handleStatCardClick('catalog')}
         />
       </div>
 
@@ -1355,6 +1737,231 @@ const Dashboard = () => {
 
         </div>
       </div>
+
+      {/* Stat Card Detail Modal */}
+      <Dialog open={activeModal !== null} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">{getModalTitle(activeModal)}</DialogTitle>
+            <DialogDescription>
+              {activeModal === 'trays' && 'Currently growing trays in your farm'}
+              {activeModal === 'orders' && "Today's pending deliveries"}
+              {activeModal === 'harvest' && 'Trays ready for harvest in the next 7 days'}
+              {activeModal === 'tasks' && 'Tasks scheduled for today'}
+              {activeModal === 'catalog' && 'All varieties in your catalog'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto py-4">
+            {modalLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : modalData === null ? (
+              <p className="text-sm text-gray-500 text-center py-8">No data available</p>
+            ) : (
+              <>
+                {/* Active Trays Content */}
+                {modalData.type === 'trays' && (
+                  <div className="space-y-2">
+                    {modalData.data.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No active trays</p>
+                    ) : (
+                      modalData.data.map((tray) => (
+                        <div
+                          key={tray.tray_id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-100 rounded-lg">
+                              <Sprout className="h-4 w-4 text-emerald-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{tray.variety_name}</p>
+                              <p className="text-xs text-gray-500">
+                                {tray.tray_unique_id} • {tray.recipe_name}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-gray-700">
+                              {Math.ceil((new Date().getTime() - new Date(tray.sow_date).getTime()) / (1000 * 60 * 60 * 24))} days
+                            </p>
+                            <p className="text-xs text-gray-500">{tray.location || 'No location'}</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Active Orders Content */}
+                {modalData.type === 'orders' && (
+                  <div className="space-y-2">
+                    {modalData.data.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No pending orders for today</p>
+                    ) : (
+                      modalData.data.map((order) => (
+                        <div
+                          key={order.schedule_id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <ClipboardList className="h-4 w-4 text-blue-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{order.order_name}</p>
+                              <p className="text-xs text-gray-500">{order.customer_name}</p>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                            {order.status}
+                          </Badge>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Harvest Soon Content */}
+                {modalData.type === 'harvest' && (
+                  <div className="space-y-2">
+                    {modalData.data.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No upcoming harvests</p>
+                    ) : (
+                      modalData.data.map((harvest) => (
+                        <div
+                          key={harvest.tray_step_id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${harvest.days_until <= 0 ? 'bg-red-100' : harvest.days_until <= 2 ? 'bg-amber-100' : 'bg-green-100'}`}>
+                              <Scissors className={`h-4 w-4 ${harvest.days_until <= 0 ? 'text-red-600' : harvest.days_until <= 2 ? 'text-amber-600' : 'text-green-600'}`} />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{harvest.variety_name}</p>
+                              <p className="text-xs text-gray-500">
+                                {harvest.tray_unique_id} • {harvest.location || 'No location'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-sm font-medium ${harvest.days_until <= 0 ? 'text-red-600' : harvest.days_until <= 2 ? 'text-amber-600' : 'text-gray-700'}`}>
+                              {harvest.days_until <= 0 ? 'Overdue' : harvest.days_until === 1 ? 'Tomorrow' : `${harvest.days_until} days`}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(harvest.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Today's Tasks Content */}
+                {modalData.type === 'tasks' && (
+                  <div className="space-y-2">
+                    {modalData.data.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No tasks for today</p>
+                    ) : (
+                      modalData.data.map((task) => (
+                        <div
+                          key={task.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${task.type === 'tray_step' ? 'bg-rose-100' : task.type === 'watering' ? 'bg-blue-100' : 'bg-purple-100'}`}>
+                              <AlertCircle className={`h-4 w-4 ${task.type === 'tray_step' ? 'text-rose-600' : task.type === 'watering' ? 'text-blue-600' : 'text-purple-600'}`} />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">
+                                {task.name}
+                                {task.variety_name && <span className="text-emerald-600 ml-1">({task.variety_name})</span>}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {task.tray_unique_id ? `${task.tray_unique_id} • ` : ''}
+                                {task.description || task.type.replace('_', ' ')}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={
+                              task.type === 'tray_step'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : task.type === 'watering'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-purple-50 text-purple-700 border-purple-200'
+                            }
+                          >
+                            {task.type === 'tray_step' ? 'Step' : task.type === 'watering' ? 'Water' : 'Maintenance'}
+                          </Badge>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Catalog Content */}
+                {modalData.type === 'catalog' && (
+                  <div className="space-y-2">
+                    {modalData.data.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No varieties in catalog</p>
+                    ) : (
+                      modalData.data.map((variety) => (
+                        <div
+                          key={variety.variety_id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-violet-100 rounded-lg">
+                              <Package className="h-4 w-4 text-violet-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{variety.variety_name}</p>
+                              <p className="text-xs text-gray-500 line-clamp-1">
+                                {variety.description || 'No description'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-gray-700">{variety.active_trays}</p>
+                              <p className="text-xs text-gray-500">trays</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-700">{variety.recipe_count}</p>
+                              <p className="text-xs text-gray-500">recipes</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                closeModal();
+                navigate(getModalViewAllPath(activeModal));
+              }}
+              className="w-full"
+            >
+              View All
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -1368,10 +1975,14 @@ interface StatCardProps {
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   color: string;
   bg: string;
+  onClick?: () => void;
 }
 
-const StatCard = ({ title, value, subtitle, icon, color, bg }: StatCardProps) => (
-  <Card className="border-none shadow-sm hover:shadow-md transition-shadow duration-200 rounded-2xl overflow-hidden group">
+const StatCard = ({ title, value, subtitle, icon, color, bg, onClick }: StatCardProps) => (
+  <Card
+    className={`border-none shadow-sm hover:shadow-lg transition-all duration-200 rounded-2xl overflow-hidden group ${onClick ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
+    onClick={onClick}
+  >
     <CardContent className="p-5 flex items-start justify-between">
       <div>
         <p className="text-sm font-medium text-gray-500 mb-1">{title}</p>

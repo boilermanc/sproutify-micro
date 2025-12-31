@@ -1483,7 +1483,7 @@ export default function DailyFlow() {
 
       // For each recipe, take only the trays needed (gap count, typically 1 per variety)
       // Sort by harvest date (earliest first) to minimize impact on future deliveries
-      for (const [recipeId, trays] of traysByRecipe) {
+      for (const [_recipeId, trays] of traysByRecipe) {
         // Sort by harvest date - earliest dates first (closest to ready)
         const sorted = [...trays].sort((a, b) => {
           const dateA = new Date(a.harvest_date).getTime();

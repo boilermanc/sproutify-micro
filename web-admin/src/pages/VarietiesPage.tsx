@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 type SortField = 'name' | 'description' | 'status' | 'stock';
 type SortDirection = 'asc' | 'desc';
@@ -25,6 +26,8 @@ const VarietiesPage = () => {
   const [isBrowseCatalogOpen, setIsBrowseCatalogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingVariety, setEditingVariety] = useState<any>(null);
+  const [varietyBatches, setVarietyBatches] = useState<any[]>([]);
+  const [loadingVarietyBatches, setLoadingVarietyBatches] = useState(false);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [addingFromCatalog, setAddingFromCatalog] = useState(false);
@@ -35,6 +38,32 @@ const VarietiesPage = () => {
     stock: 0,
     stock_unit: 'g',
   });
+
+  const navigate = useNavigate();
+
+  const formatQuantityDisplay = (value: number | string | null | undefined) => {
+    const numeric = typeof value === 'string' ? Number(value) : value;
+    if (!Number.isFinite(numeric ?? NaN)) {
+      return '0';
+    }
+    const rounded = Math.round(numeric * 10) / 10;
+    return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
+  };
+
+  const resetEditDialogState = () => {
+    setEditingVariety(null);
+    setVarietyBatches([]);
+    setLoadingVarietyBatches(false);
+  };
+
+  const handleEditDialogOpenChange = (open: boolean) => {
+    if (!open) {
+      resetEditDialogState();
+    }
+    setIsEditDialogOpen(open);
+  };
+
+  const closeEditDialog = () => handleEditDialogOpenChange(false);
 
   const fetchVarieties = async () => {
     try {
@@ -116,6 +145,42 @@ const VarietiesPage = () => {
       setAllVarieties(normalized);
     } catch (error) {
       console.error('Error fetching all varieties:', error);
+    }
+  };
+
+  const fetchActiveBatchesForVariety = async (varietyId: number) => {
+    setVarietyBatches([]);
+    setLoadingVarietyBatches(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      const { farmUuid } = JSON.parse(sessionData);
+      if (!farmUuid) return;
+
+      const { data, error } = await getSupabaseClient()
+        .from('seedbatches')
+        .select('batchid, quantity, unit, lotnumber, purchasedate, status')
+        .eq('farm_uuid', farmUuid)
+        .eq('varietyid', varietyId)
+        .gt('quantity', 0)
+        .order('purchasedate', { ascending: false });
+
+      if (error) throw error;
+
+      const normalizedBatches = (data || []).map((batch: any) => ({
+        batch_id: batch.batchid,
+        quantity: Number(batch.quantity ?? 0),
+        unit: batch.unit || 'lbs',
+        lot_number: batch.lotnumber || null,
+        purchase_date: batch.purchasedate || null,
+        status: batch.status || null,
+      }));
+
+      setVarietyBatches(normalizedBatches);
+    } catch (error) {
+      console.error('Error fetching batches for variety:', error);
+    } finally {
+      setLoadingVarietyBatches(false);
     }
   };
 
@@ -239,11 +304,15 @@ const VarietiesPage = () => {
       ...variety,
       variety_name: variety.variety_name || variety.name || '',
       description: variety.description || '',
-      stock: variety.stock ?? 0,
-      stock_unit: variety.stock_unit || variety.stockUnit || 'g',
-      // Note: is_active is farm-specific and shown in the table, not in edit dialog
     });
-    setIsEditDialogOpen(true);
+    handleEditDialogOpenChange(true);
+
+    const varietyId = Number(variety.varietyid || variety.variety_id || 0);
+    if (varietyId > 0) {
+      fetchActiveBatchesForVariety(varietyId);
+    } else {
+      setVarietyBatches([]);
+    }
   };
 
   const handleUpdateVariety = async () => {
@@ -254,12 +323,9 @@ const VarietiesPage = () => {
       const varietyId = editingVariety.varietyid || editingVariety.variety_id;
       
       // Update variety details (varieties are global, so update the varieties table)
-      // Note: is_active is farm-specific and handled via farm_varieties, not here
       const payload: any = {
         name: editingVariety.variety_name,
         description: editingVariety.description || null,
-        stock: editingVariety.stock ?? 0,
-        stock_unit: editingVariety.stock_unit || 'g',
       };
 
       const { error } = await getSupabaseClient()
@@ -269,9 +335,8 @@ const VarietiesPage = () => {
 
       if (error) throw error;
 
-      setIsEditDialogOpen(false);
-      setEditingVariety(null);
       fetchVarieties();
+      closeEditDialog();
     } catch (error) {
       console.error('Error updating variety:', error);
       alert('Failed to update variety');
@@ -567,12 +632,12 @@ const VarietiesPage = () => {
         </Dialog>
 
         {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <Dialog open={isEditDialogOpen} onOpenChange={handleEditDialogOpenChange}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
               <DialogTitle>Edit Variety</DialogTitle>
               <DialogDescription>
-                Update the variety information and stock level.
+                Update the variety information. Stock is managed via batches.
               </DialogDescription>
             </DialogHeader>
             {editingVariety && (
@@ -596,37 +661,51 @@ const VarietiesPage = () => {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="edit-stock">Stock</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="edit-stock"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="0"
-                      value={editingVariety.stock}
-                      onChange={(e) => setEditingVariety({ ...editingVariety, stock: parseFloat(e.target.value) || 0 })}
-                    />
-                    <Select 
-                      value={editingVariety.stock_unit || 'g'} 
-                      onValueChange={(value) => setEditingVariety({ ...editingVariety, stock_unit: value })}
-                    >
-                      <SelectTrigger className="w-[100px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="g">g</SelectItem>
-                        <SelectItem value="kg">kg</SelectItem>
-                        <SelectItem value="oz">oz</SelectItem>
-                        <SelectItem value="lbs">lbs</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="flex items-end justify-between">
+                    <div className="space-y-1">
+                      <Label>Active Batches</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Quantities are tracked on the batches page.
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => navigate('/batches')}>
+                      View all
+                    </Button>
                   </div>
+                  {loadingVarietyBatches ? (
+                    <p className="text-sm text-muted-foreground">Loading batches...</p>
+                  ) : varietyBatches.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No active batches for this variety.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {varietyBatches.map((batch) => (
+                        <div
+                          key={batch.batch_id}
+                          className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-2 text-sm"
+                        >
+                          <div>
+                            <p className="font-medium">Batch #{batch.batch_id}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatQuantityDisplay(batch.quantity)} {batch.unit || 'lbs'}
+                              {batch.lot_number ? ` • Lot ${batch.lot_number}` : ''}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/batches?batchId=${batch.batch_id}`)}
+                          >
+                            Open
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button variant="outline" onClick={closeEditDialog}>
                 Cancel
               </Button>
               <Button onClick={handleUpdateVariety} disabled={updating || !editingVariety?.variety_name}>
@@ -723,7 +802,7 @@ const VarietiesPage = () => {
                     <div className="flex items-center gap-2">
                       <Package className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">
-                        {v.stock ?? 0} {v.stock_unit || 'g'}
+                        {formatQuantityDisplay(v.stock ?? 0)} {v.stock_unit || 'g'}
                       </span>
                     </div>
                   </TableCell>

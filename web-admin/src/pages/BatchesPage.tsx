@@ -3,11 +3,96 @@ import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+
+const formatQuantityDisplay = (value: number | string | null | undefined) => {
+  const numeric = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isFinite(numeric ?? NaN)) {
+    return '0';
+  }
+  const rounded = Math.round(numeric * 10) / 10;
+  return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
+};
+
+const resolveVendorId = (vendor: any) => {
+  const id = vendor?.vendor_id ?? vendor?.vendorid ?? vendor?.vendorID;
+  if (id === undefined || id === null) return '';
+  return id.toString();
+};
+
+const parseNumericValue = (value: number | string | null | undefined, fallback = 0) => {
+  const numeric = typeof value === 'string' ? Number(value) : value;
+  return Number.isFinite(numeric ?? NaN) ? numeric as number : fallback;
+};
+
+const toNullableNumber = (value: number | string | null | undefined): number | null => {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = typeof value === 'string' ? Number(value) : value;
+  return Number.isFinite(numeric as number) ? (numeric as number) : null;
+};
+
+type StockStatusTone = 'warning' | 'danger' | 'success';
+
+const stockToneClassMap: Record<StockStatusTone, string> = {
+  warning: 'text-amber-700',
+  danger: 'text-rose-600',
+  success: 'text-emerald-600',
+};
+
+const getStockStatusInfo = (quantity: number, lowStockThreshold: number | null) => {
+  const formattedQuantity = formatQuantityDisplay(quantity);
+  if (Number.isFinite(quantity) && quantity < 0.05) {
+    return {
+      text: `⚠️ DEPLETED - Too little to use (${formattedQuantity} lbs remaining). Consider marking this batch as inactive.`,
+      tone: 'warning' as StockStatusTone,
+    };
+  }
+
+  if (
+    lowStockThreshold !== null &&
+    Number.isFinite(lowStockThreshold) &&
+    Number.isFinite(quantity) &&
+    quantity <= lowStockThreshold
+  ) {
+    return {
+      text: `🔴 LOW STOCK - Order now! (${formattedQuantity} lbs remaining)`,
+      tone: 'danger' as StockStatusTone,
+    };
+  }
+
+  return {
+    text: '✅ Stock level good',
+    tone: 'success' as StockStatusTone,
+  };
+};
+
+const determineBatchStockStatus = (quantity: number | string | null | undefined, threshold: number | string | null | undefined) => {
+  const qty = parseNumericValue(quantity);
+  const thresh = parseNumericValue(threshold);
+  if (qty <= 0) return 'Out of Stock';
+  if (thresh > 0 && qty <= thresh) return 'Low Stock';
+  return 'In Stock';
+};
+
+const getBatchStatusVariant = (status?: string) => {
+  switch (status) {
+    case 'In Stock':
+      return 'default';
+    case 'Low Stock':
+      return 'secondary';
+    case 'Out of Stock':
+      return 'destructive';
+    default:
+      return 'outline';
+  }
+};
 
 const BatchesPage = () => {
   const [batches, setBatches] = useState<any[]>([]);
@@ -42,12 +127,13 @@ const BatchesPage = () => {
       // Fetch vendors first if not already loaded
       let vendorsList = vendors;
       if (vendorsList.length === 0) {
-        const { data: vendorsData } = await getSupabaseClient()
-          .from('vendors')
-          .select('*')
-          .eq('farm_uuid', farmUuid);
-        vendorsList = vendorsData || [];
-        setVendors(vendorsList);
+      const { data: vendorsData } = await getSupabaseClient()
+        .from('vendors')
+        .select('*')
+        .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
+      vendorsList = vendorsData || [];
+      console.log('Loaded vendors:', vendorsList);
+      setVendors(vendorsList);
       }
 
       const { data, error } = await getSupabaseClient()
@@ -97,6 +183,7 @@ const BatchesPage = () => {
           const vendor = vendorId ? vendorsList.find(v => 
             (v.vendor_id || (v as any).vendorid) === vendorId
           ) : null;
+          console.log(`Batch ${batch.batchid || batch.batch_id}: vendorId=${vendorId}, found vendor:`, vendor);
 
           // Find variety name if varietyid exists (actual DB column)
           const varietyId = batch.varietyid || batch.variety_id;
@@ -105,6 +192,10 @@ const BatchesPage = () => {
           ) : null;
 
           // Normalize field names - map actual DB columns to expected names
+          const thresholdValue = parseNumericValue(
+            batch.low_stock_threshold ?? batch.reorderlevel ?? batch.reorder_level
+          );
+          const quantityValue = parseNumericValue(batch.quantity);
           const normalizedBatch = {
             ...batch,
             batch_id: batch.batchid || batch.batch_id, // Map batchid to batch_id
@@ -114,8 +205,11 @@ const BatchesPage = () => {
             lot_number: batch.lot_number || batch.lotnumber || null,
             vendor_id: vendorId,
             trayCount: count || 0,
+            low_stock_threshold: thresholdValue,
+            stock_quantity: quantityValue,
+            stockStatus: determineBatchStockStatus(quantityValue, thresholdValue),
             vendors: vendor ? { 
-              vendor_name: ((vendor as any).vendor_name || (vendor as any).vendorname || '') as string 
+              vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string 
             } : null,
           };
           return normalizedBatch;
@@ -328,13 +422,18 @@ const BatchesPage = () => {
       batch_id: batchId,
       variety_id: varietyId ? varietyId.toString() : '',
       vendor_id: vendorId ? vendorId.toString() : '',
-      quantity: batch.quantity?.toString() || '',
+      quantity: formatQuantityDisplay(batch.quantity),
       unit: batch.unit || 'lbs',
       lot_number: batch.lot_number || batch.lotnumber || '',
       purchase_date: batch.purchase_date || batch.purchasedate 
         ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
       cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
+      low_stock_threshold: batch.low_stock_threshold ?? null,
+      originalQuantity: parseNumericValue(batch.quantity),
+      actualQuantity: '',
+      adjustmentReason: '',
+      is_active: batch.is_active !== undefined ? batch.is_active : true,
     };
     
     setEditingBatch(editData);
@@ -348,26 +447,60 @@ const BatchesPage = () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
-      const { farmUuid } = JSON.parse(sessionData);
+      const session = JSON.parse(sessionData);
+      const { farmUuid, userId } = session;
 
       const batchId = editingBatch.batch_id;
+      const parsedQuantity = toNullableNumber(editingBatch.quantity) ?? 0;
+      const actualQuantityInput =
+        editingBatch.actualQuantity !== undefined && editingBatch.actualQuantity !== ''
+          ? toNullableNumber(editingBatch.actualQuantity)
+          : null;
+      const hasActualQuantity = actualQuantityInput !== null && Number.isFinite(actualQuantityInput);
+      const quantityForUpdate = hasActualQuantity ? actualQuantityInput as number : parsedQuantity;
+      const recordedQuantity =
+        Number.isFinite(editingBatch.originalQuantity) ? editingBatch.originalQuantity : parsedQuantity;
 
-      // Map to actual DB column names: varietyid, vendorid, purchasedate
       const payload: any = {
         varietyid: parseInt(editingBatch.variety_id), // Actual DB column
         vendorid: editingBatch.vendor_id ? parseInt(editingBatch.vendor_id) : null, // Actual DB column
-        quantity: parseFloat(editingBatch.quantity),
+        quantity: quantityForUpdate,
         lot_number: editingBatch.lot_number || null,
         purchasedate: editingBatch.purchase_date, // Actual DB column
       };
+      const isActiveValue = editingBatch.is_active !== undefined ? editingBatch.is_active : true;
+      payload.is_active = isActiveValue;
+      payload.status = isActiveValue ? 'active' : 'inactive';
 
       // Map cost to totalprice if provided (actual DB column)
       if (editingBatch.cost) {
         payload.totalprice = parseFloat(editingBatch.cost);
         // Calculate priceperounce if we have quantity and unit
-        if (editingBatch.quantity && editingBatch.unit === 'oz') {
-          payload.priceperounce = parseFloat(editingBatch.cost) / parseFloat(editingBatch.quantity);
+        if (quantityForUpdate > 0 && editingBatch.unit === 'oz') {
+          payload.priceperounce = parseFloat(editingBatch.cost) / quantityForUpdate;
         }
+      }
+
+      const adjustmentDifference =
+        hasActualQuantity && Number.isFinite(recordedQuantity)
+          ? actualQuantityInput! - recordedQuantity
+          : null;
+
+      if (adjustmentDifference !== null && Math.abs(adjustmentDifference) >= 0.0001) {
+        const adjustmentNotes = editingBatch.adjustmentReason?.trim() || null;
+        const { error: txError } = await getSupabaseClient()
+          .from('seed_transactions')
+          .insert([
+            {
+              transaction_type: 'manual_adjustment',
+              quantity_grams: adjustmentDifference * 453.592,
+              notes: adjustmentNotes,
+              batch_id: batchId,
+              farm_uuid: farmUuid,
+              created_by: userId || null,
+            },
+          ]);
+        if (txError) throw txError;
       }
 
       const { error } = await getSupabaseClient()
@@ -463,14 +596,18 @@ const BatchesPage = () => {
                       <SelectValue placeholder={vendors.length === 0 ? "No vendors" : "Select vendor"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {vendors.length === 0 ? (
+                    {vendors.length === 0 ? (
                         <div className="px-2 py-1.5 text-sm text-muted-foreground">No vendors</div>
                       ) : (
-                        vendors.map((vendor) => (
-                          <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
-                            {vendor.vendor_name}
-                          </SelectItem>
-                        ))
+                        vendors.map((vendor) => {
+                          const vendorValue = resolveVendorId(vendor);
+                          if (!vendorValue) return null;
+                          return (
+                            <SelectItem key={vendorValue} value={vendorValue}>
+                              {vendor.vendor_name}
+                            </SelectItem>
+                          );
+                        }).filter(Boolean)
                       )}
                     </SelectContent>
                   </Select>
@@ -575,6 +712,7 @@ const BatchesPage = () => {
               <TableHead>Variety</TableHead>
               <TableHead>Purchase Date</TableHead>
               <TableHead>Quantity</TableHead>
+              <TableHead>Stock Status</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead>Trays</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -583,7 +721,7 @@ const BatchesPage = () => {
           <TableBody>
             {filteredBatches.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="p-0 border-none">
+                <TableCell colSpan={8} className="p-0 border-none">
                   <div className="p-8 flex flex-col items-center justify-center text-center">
                      {searchTerm ? (
                        <>
@@ -616,7 +754,14 @@ const BatchesPage = () => {
                   </TableCell>
                   <TableCell>{batch.variety_name || 'N/A'}</TableCell>
                   <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell>{batch.quantity ? `${batch.quantity} ${batch.unit || 'units'}` : 'N/A'}</TableCell>
+                  <TableCell>
+                    {batch.quantity ? `${formatQuantityDisplay(batch.quantity)} ${batch.unit || 'units'}` : 'N/A'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={getBatchStatusVariant(batch.stockStatus)} className="capitalize text-center">
+                      {batch.stockStatus || 'Unknown'}
+                    </Badge>
+                  </TableCell>
                   <TableCell>{batch.vendors?.vendor_name || '-'}</TableCell>
                   <TableCell>{batch.trayCount || 0}</TableCell>
                   <TableCell className="text-right">
@@ -756,11 +901,16 @@ const BatchesPage = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {vendors.map((vendor) => (
-                        <SelectItem key={vendor.vendor_id} value={vendor.vendor_id.toString()}>
-                          {vendor.vendor_name}
-                        </SelectItem>
-                      ))}
+                      {vendors.map((vendor) => {
+                        const vendorValue = resolveVendorId(vendor);
+                        if (!vendorValue) return null;
+                        const vendorLabel = vendor.vendor_name || vendor.vendorname || 'Vendor';
+                        return (
+                          <SelectItem key={vendorValue} value={vendorValue}>
+                            {vendorLabel}
+                          </SelectItem>
+                        );
+                      }).filter(Boolean)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -831,6 +981,100 @@ const BatchesPage = () => {
                   />
                 </div>
               </div>
+              {(() => {
+                const isActiveValue = editingBatch.is_active !== undefined ? editingBatch.is_active : true;
+                const recordedQuantity = toNullableNumber(editingBatch.quantity) ?? 0;
+                const lowStockThreshold = toNullableNumber(editingBatch.low_stock_threshold);
+                const stockInfo = getStockStatusInfo(recordedQuantity, lowStockThreshold);
+                const stockToneClass = stockToneClassMap[stockInfo.tone] ?? 'text-slate-900';
+                const actualQuantityValue =
+                  editingBatch.actualQuantity !== undefined && editingBatch.actualQuantity !== ''
+                    ? toNullableNumber(editingBatch.actualQuantity)
+                    : null;
+                const recordedForDifference = editingBatch.originalQuantity ?? recordedQuantity;
+                const difference =
+                  actualQuantityValue !== null && recordedForDifference !== null
+                    ? actualQuantityValue - recordedForDifference
+                    : null;
+                const differenceText =
+                  difference !== null ? `${difference >= 0 ? '+' : '-'}${formatQuantityDisplay(Math.abs(difference))} lbs` : '';
+                const inactiveSwitchId = 'edit-inactive';
+
+                return (
+                  <>
+                    <div className={`rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm ${stockToneClass}`}>
+                      {stockInfo.text}
+                    </div>
+                    <div className="mt-3 flex items-start gap-3 px-4 py-3">
+                      <Switch
+                        id={inactiveSwitchId}
+                        checked={!isActiveValue}
+                        onCheckedChange={(checked) =>
+                          setEditingBatch({ ...editingBatch, is_active: checked ? false : true })
+                        }
+                      />
+                      <div className="space-y-1 text-sm">
+                        <Label
+                          htmlFor={inactiveSwitchId}
+                          className="text-sm font-semibold text-slate-900 leading-none"
+                        >
+                          Mark as Inactive
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Inactive batches won't appear in seeding workflows
+                        </p>
+                      </div>
+                    </div>
+                    <details className="group mt-3 rounded-md border border-slate-200 bg-white">
+                      <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-slate-700">
+                        <span>Adjust Inventory</span>
+                        <span className="inline-block text-xs text-muted-foreground transition-transform duration-150 group-open:rotate-90">
+                          ▼
+                        </span>
+                      </summary>
+                      <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="adjust-actual-quantity">Actual Quantity on Hand (lbs)</Label>
+                          <Input
+                            id="adjust-actual-quantity"
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={editingBatch.actualQuantity ?? ''}
+                            onChange={(e) =>
+                              setEditingBatch({ ...editingBatch, actualQuantity: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="adjust-reason">Adjustment Reason</Label>
+                          <Textarea
+                            id="adjust-reason"
+                            rows={3}
+                            value={editingBatch.adjustmentReason ?? ''}
+                            onChange={(e) =>
+                              setEditingBatch({ ...editingBatch, adjustmentReason: e.target.value })
+                            }
+                          />
+                        </div>
+                        <p
+                          className={`text-sm ${
+                            difference !== null
+                              ? difference >= 0
+                                ? 'text-emerald-600'
+                                : 'text-rose-600'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {difference !== null
+                            ? `Difference: ${differenceText}`
+                            : 'Enter an actual quantity to calculate the adjustment.'}
+                        </p>
+                      </div>
+                    </details>
+                  </>
+                );
+              })()}
             </div>
           )}
           <DialogFooter>

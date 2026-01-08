@@ -29,6 +29,7 @@ import {
   RefreshCw,
   FileText,
   User,
+  HelpCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
@@ -78,6 +79,7 @@ import {
   rescheduleSeedingRequest,
   fetchPassiveTrayStatus,
   fetchOrderGapStatus,
+  fetchOverdueSeedingTasks,
   type PassiveTrayStatusItem,
   type OrderGapStatus
 } from '../services/dailyFlowService';
@@ -85,6 +87,12 @@ import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { resolveVarietyNameFromRelation } from '@/lib/varietyUtils';
 import {
@@ -323,6 +331,8 @@ type BatchHarvestRow = {
   taskId: string;
   recipeId?: number;
   varietyName?: string;
+  sowDate?: string | null;
+  seededBy?: string | null;
 };
 
 type HasRecipeInfo = {
@@ -338,12 +348,15 @@ const getTrayDisplayName = (source?: HasRecipeInfo) => {
 export default function DailyFlow() {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<DailyTask[]>([]);
+  const [overdueSeedingTasks, setOverdueSeedingTasks] = useState<DailyTask[]>([]);
+  const [skippedOverdueTasks, setSkippedOverdueTasks] = useState<Set<string>>(new Set());
   const [activeTraysCount, setActiveTraysCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const [viewingTask, setViewingTask] = useState<DailyTask | null>(null);
   const [harvestingTask, setHarvestingTask] = useState<DailyTask | null>(null);
   const [harvestYield, setHarvestYield] = useState<string>('');
+  const [harvestSelectedTrayIds, setHarvestSelectedTrayIds] = useState<number[]>([]);
   const [seedingTask, setSeedingTask] = useState<DailyTask | null>(null);
   const [soakTask, setSoakTask] = useState<DailyTask | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
@@ -743,11 +756,12 @@ export default function DailyFlow() {
       : Promise.resolve<OrderGapStatus[]>([]);
 
     // Force refresh to bypass any caching - pass Date and forceRefresh flag
-    const [tasksData, count, passiveStatus, orderGaps] = await Promise.all([
+    const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
       fetchDailyTasks(selectedDate, true), // Force refresh
       getActiveTraysCount(),
       fetchPassiveTrayStatus(), // Fetch passive tray status directly from DB
-      gapPromise
+      gapPromise,
+      fetchOverdueSeedingTasks(7), // Fetch overdue seedings from last 7 days
     ]);
       
       // Update passive tray status
@@ -809,8 +823,10 @@ export default function DailyFlow() {
         return [...newTasks, ...tasksToKeep];
       });
       setActiveTraysCount(count);
-      
-      console.log('[loadTasks] State updated with', tasksData.length, 'tasks');
+
+      // Update overdue seeding tasks (filter out skipped ones)
+      setOverdueSeedingTasks(overdueTasks);
+      console.log('[loadTasks] State updated with', tasksData.length, 'tasks,', overdueTasks.length, 'overdue seedings');
       
       // Load action history for at-risk tasks (only fetch if not already loaded)
       const atRiskTasksData = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
@@ -1158,6 +1174,7 @@ export default function DailyFlow() {
     if (task.action.toLowerCase().startsWith('harvest') && !task.action.toLowerCase().includes('at risk') && yieldValue === undefined) {
       setHarvestingTask(task);
       setHarvestYield('');
+      setHarvestSelectedTrayIds([]);
       return;
     }
 
@@ -1343,6 +1360,12 @@ export default function DailyFlow() {
     setBatchHarvestYields({});
   };
 
+  const closeHarvestDialog = () => {
+    setHarvestingTask(null);
+    setHarvestSelectedTrayIds([]);
+    setHarvestYield('');
+  };
+
   const enrichBatchHarvestRowsWithVariety = useCallback(
     async (rows: BatchHarvestRow[]): Promise<BatchHarvestRow[]> => {
       if (rows.length === 0) return rows;
@@ -1411,21 +1434,56 @@ export default function DailyFlow() {
     });
 
     const rows = Array.from(rowsMap.values());
+    let rowsWithDetails = rows;
+    const trayIds = rows.map((row) => row.trayId);
+    if (trayIds.length > 0) {
+      const farmUuid = getFarmUuidFromSession();
+      if (farmUuid) {
+        try {
+          const { data: trayDetails, error: trayDetailsError } = await getSupabaseClient()
+            .from('trays')
+            .select('tray_id, sow_date, created_by')
+            .in('tray_id', trayIds)
+            .eq('farm_uuid', farmUuid);
+
+          if (!trayDetailsError && trayDetails) {
+            const detailMap = new Map<number, any>();
+            trayDetails.forEach((detail: any) => {
+              if (detail?.tray_id) {
+                detailMap.set(detail.tray_id, detail);
+              }
+            });
+            rowsWithDetails = rowsWithDetails.map((row) => {
+              const detail = detailMap.get(row.trayId);
+              return {
+                ...row,
+                sowDate: detail?.sow_date ?? row.sowDate ?? null,
+                seededBy: detail?.created_by ?? row.seededBy ?? null,
+              };
+            });
+          } else if (trayDetailsError) {
+            console.error('[DailyFlow] Error fetching tray details for batch harvest modal:', trayDetailsError);
+          }
+        } catch (error) {
+          console.error('[DailyFlow] Unexpected error fetching tray details for batch harvest modal:', error);
+        }
+      }
+    }
     const initialSelected: Record<number, boolean> = {};
     const initialYields: Record<number, string> = {};
 
     rows.forEach((row) => {
-      initialSelected[row.trayId] = true;
+      initialSelected[row.trayId] = false;
       initialYields[row.trayId] = '';
     });
 
-    setBatchHarvestRows(rows);
+    setBatchHarvestRows(rowsWithDetails);
     setBatchHarvestSelected(initialSelected);
     setBatchHarvestYields(initialYields);
     setBatchHarvestModalGroup(group);
 
     try {
-      const enrichedRows = await enrichBatchHarvestRowsWithVariety(rows);
+      const enrichedRows = await enrichBatchHarvestRowsWithVariety(rowsWithDetails);
       setBatchHarvestRows(enrichedRows);
     } catch (error) {
       console.error('[DailyFlow] Error enriching batch harvest rows:', error);
@@ -1591,6 +1649,7 @@ export default function DailyFlow() {
     }
 
     setIsBatchHarvesting(true);
+    console.log('[DailyFlow] Batch harvest started', { selectedTrayIds });
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
@@ -1607,6 +1666,7 @@ export default function DailyFlow() {
       const now = new Date().toISOString();
 
       for (const trayId of selectedTrayIds) {
+        console.log('[DailyFlow] Updating tray', trayId);
         const payload: Record<string, any> = { harvest_date: now, status: 'harvested' };
         const yieldInput = batchHarvestYields[trayId];
         if (yieldInput && yieldInput.trim() !== '') {
@@ -1625,8 +1685,10 @@ export default function DailyFlow() {
         if (error) {
           throw error;
         }
+        console.log('[DailyFlow] Tray update succeeded', { trayId });
       }
 
+      console.log('[DailyFlow] Updating tray_steps for', selectedTrayIds);
       const { error: stepsError } = await client
         .from('tray_steps')
         .update({
@@ -1636,6 +1698,7 @@ export default function DailyFlow() {
         .in('tray_id', selectedTrayIds);
 
       if (stepsError) throw stepsError;
+      console.log('[DailyFlow] tray_steps update succeeded');
 
       const orderLabel = batchHarvestModalGroup.customerName || 'this order';
       showNotification(
@@ -1646,6 +1709,7 @@ export default function DailyFlow() {
       // Clear pending early harvest trays (don't revert dates on successful harvest)
       setPendingEarlyHarvestTrays([]);
 
+      console.log('[DailyFlow] Calling loadTasks');
       await loadTasks({ suppressLoading: true });
       closeBatchHarvestModal();
     } catch (error) {
@@ -1659,9 +1723,19 @@ export default function DailyFlow() {
   const handleHarvestConfirm = async () => {
     if (!harvestingTask) return;
 
+    if (harvestSelectedTrayIds.length === 0) {
+      showNotification('error', 'Select at least one tray to harvest');
+      return;
+    }
+
     const yieldValue = harvestYield ? parseFloat(harvestYield) : undefined;
-    setHarvestingTask(null);
-    await handleComplete(harvestingTask, yieldValue);
+    const taskToComplete: DailyTask = {
+      ...harvestingTask,
+      trayIds: harvestSelectedTrayIds,
+    };
+
+    closeHarvestDialog();
+    await handleComplete(taskToComplete, yieldValue);
   };
 
   const fetchAvailableBatchesForRecipe = async (task: DailyTask) => {
@@ -2522,7 +2596,7 @@ export default function DailyFlow() {
         animatingOutRef.current.add(task.id);
         setAnimatingOut(prev => new Set(prev).add(task.id));
         showNotification('success', `Skipped ${task.action} for ${task.trays} ${task.trays === 1 ? 'tray' : 'trays'}`);
-        
+
         // Wait for animation, then remove and reload
         setTimeout(() => {
           setTasks(prev => prev.filter(t => t.id !== task.id));
@@ -2547,6 +2621,31 @@ export default function DailyFlow() {
         return next;
       });
     }
+  };
+
+  // Handler for skipping overdue seeding tasks (local skip - removes from view for this session)
+  const handleSkipOverdueSeeding = (task: DailyTask) => {
+    if (!confirm(`Skip this overdue seeding for ${task.crop}? You decided not to seed for this delivery.`)) {
+      return;
+    }
+    setSkippedOverdueTasks(prev => new Set(prev).add(task.id));
+    showNotification('success', `Skipped overdue seeding for ${task.crop}`);
+  };
+
+  // Handler for seeding an overdue task (opens the seeding dialog)
+  const handleSeedOverdueTask = async (task: DailyTask) => {
+    // Open the seeding dialog with the overdue task
+    setSeedingTask(task);
+    setSelectedBatchId(null);
+    setAvailableBatches([]);
+    setSeedQuantityCompleted('');
+    setIsSoakVariety(false);
+    setMissedStepForSeeding(null);
+    setLoadingBatches(true);
+    setAvailableSoakedSeed(null);
+
+    // Fetch available batches for this recipe
+    await fetchAvailableBatchesForRecipe(task);
   };
 
   const handleSkipMissed = async (_task: DailyTask, missedStep: MissedStep) => {
@@ -2759,6 +2858,7 @@ export default function DailyFlow() {
   }
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="min-h-screen bg-white p-4 md:p-8">
       
       {/* 1. TOP HEADER: High Level Stats */}
@@ -2821,6 +2921,15 @@ export default function DailyFlow() {
             <div className="flex items-center gap-2">
               <span className="h-8 w-1 bg-slate-400 rounded-full"></span>
               <h3 className="text-xl font-semibold text-slate-900">Tray Status</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Current Tray Overview</p>
+                  <p>Summary of all trays in passive growth phases. These don't need immediate action but you can click "View Details" to check on individual trays.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -2843,6 +2952,15 @@ export default function DailyFlow() {
             <div className="flex flex-wrap items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-700" />
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-amber-900">Order Gaps</h3>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="h-4 w-4 text-amber-600 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-xs">
+                    <p className="font-medium mb-1">What are Order Gaps?</p>
+                    <p>These are upcoming orders that don't have enough ready trays assigned. You need to either assign available trays, adjust harvest dates of existing trays, or contact the customer about alternatives.</p>
+                  </TooltipContent>
+                </Tooltip>
                 <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs uppercase tracking-[0.2em]">
                   {activeOrderGaps.length} gap{activeOrderGaps.length === 1 ? '' : 's'}
                 </Badge>
@@ -3118,6 +3236,15 @@ export default function DailyFlow() {
               <span className="h-8 w-1 bg-amber-500 rounded-full"></span>
               <AlertTriangle className="h-5 w-5 text-amber-500" />
               <h3 className="text-xl font-semibold text-slate-900">Catch Up Required</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-amber-500 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Missed Steps</p>
+                  <p>These trays have steps that were scheduled but not completed. You can either complete them now (if still applicable) or skip them to move forward.</p>
+                </TooltipContent>
+              </Tooltip>
               <Badge variant="secondary" className="bg-amber-100 text-amber-700 ml-2">
                 {tasksWithMissedSteps.reduce((acc, t) => acc + (t.missedSteps?.length || 0), 0)} missed steps
               </Badge>
@@ -3144,6 +3271,15 @@ export default function DailyFlow() {
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-emerald-500 rounded-full"></span>
               <h3 className="text-xl font-semibold text-slate-900">Ready for Harvest</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Trays Ready to Harvest</p>
+                  <p>These trays have completed their growing cycle and are ready to be cut. Customer orders are grouped at the top. Click on individual trays to record harvest details.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
             
             <div className="space-y-6">
@@ -3232,6 +3368,15 @@ export default function DailyFlow() {
               <span className="h-8 w-1 bg-amber-500 rounded-full"></span>
               <AlertTriangle className="h-5 w-5 text-amber-500" />
               <h3 className="text-xl font-semibold text-slate-900">At Risk</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-amber-500 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Orders At Risk</p>
+                  <p>These orders may not be fulfilled on time. Use the action buttons to: contact the customer, skip the item, substitute with another product, or add notes.</p>
+                </TooltipContent>
+              </Tooltip>
               <Badge variant="secondary" className="bg-amber-100 text-amber-700 ml-2">
                 {atRiskTasks.length} {atRiskTasks.length === 1 ? 'item' : 'items'}
               </Badge>
@@ -3411,6 +3556,15 @@ export default function DailyFlow() {
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-amber-500 rounded-full"></span>
               <h3 className="text-xl font-semibold text-slate-900">Available Soaked Seed</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Leftover Soaked Seeds</p>
+                  <p>Seeds that were soaked but not fully used. Use them before they expire by clicking "Use" to create new trays, or "Discard" if they're no longer viable.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {allAvailableSoakedSeed.map((soaked: any) => {
@@ -3492,14 +3646,106 @@ export default function DailyFlow() {
           </section>
         )}
 
+        {/* SECTION 1.4: MISSED SEEDLINGS (Overdue seeding tasks) */}
+        {overdueSeedingTasks.filter(t => !skippedOverdueTasks.has(t.id)).length > 0 && (
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="h-8 w-1 bg-amber-500 rounded-full"></span>
+              <h3 className="text-xl font-semibold text-slate-900">Missed Seedings</h3>
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 font-mono">
+                {overdueSeedingTasks.filter(t => !skippedOverdueTasks.has(t.id)).length} overdue
+              </Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Missed Seeding Tasks</p>
+                  <p>These seedings were scheduled but not completed. Click "Seed Now" to catch up, or "Skip" if you've decided not to fulfill this order.</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {overdueSeedingTasks
+                .filter(task => !skippedOverdueTasks.has(task.id))
+                .map(task => {
+                  const formatOverdueDate = (dateStr: string | undefined) => {
+                    if (!dateStr) return '';
+                    const date = new Date(dateStr + 'T12:00:00');
+                    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                  };
+
+                  return (
+                    <Card key={task.id} className="relative overflow-hidden border-2 border-amber-300 bg-amber-50">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
+                      <div className="p-5">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h4 className="font-bold text-lg text-slate-900">{task.crop}</h4>
+                            <p className="text-xs text-slate-500 font-medium tracking-wide uppercase mt-1">
+                              {task.trays} {task.trays === 1 ? 'tray' : 'trays'} to seed
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-700 font-mono">
+                            {task.daysOverdue} day{task.daysOverdue !== 1 ? 's' : ''} late
+                          </Badge>
+                        </div>
+
+                        <div className="mb-4 space-y-1 text-sm text-slate-600">
+                          <p>Was scheduled: {formatOverdueDate(task.sowDate)}</p>
+                          {task.customerName && <p>Customer: {task.customerName}</p>}
+                          {task.deliveryDate && (
+                            <p>Delivery: {new Date(task.deliveryDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleSeedOverdueTask(task)}
+                            disabled={completingIds.has(task.id)}
+                            className="flex-1 bg-amber-600 hover:bg-amber-700"
+                          >
+                            <Sprout className="h-4 w-4 mr-2" />
+                            Seed Now
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSkipOverdueSeeding(task)}
+                            className="flex-1 text-slate-600 hover:text-slate-700"
+                          >
+                            <SkipForward className="h-4 w-4 mr-2" />
+                            Skip
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+            </div>
+          </section>
+        )}
+
         {/* SECTION 1.5: PREP TASKS (Soak & Seed) */}
         {prepTasks.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-purple-500 rounded-full"></span>
               <h3 className="text-xl font-semibold text-slate-900">Preparation Tasks</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Soak & Seed Tasks</p>
+                  <p><strong>Soak:</strong> Start soaking seeds in water. Click "Begin Soak" to record the soak start time and select a seed batch.</p>
+                  <p className="mt-1"><strong>Seed:</strong> Plant soaked seeds into trays. Click "Start Seeding" to create new trays from soaked seeds.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {prepTasks.map(task => (
                 <TaskCard
@@ -3522,6 +3768,15 @@ export default function DailyFlow() {
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-blue-500 rounded-full"></span>
               <h3 className="text-xl font-semibold text-slate-900">Tasks & Maintenance</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="h-4 w-4 text-slate-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="font-medium mb-1">Daily Care Tasks</p>
+                  <p>Routine tasks for your growing trays. Click "Mark Done" after completing each task. Use the menu (...) to skip tasks or mark trays as lost if needed.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -3737,7 +3992,7 @@ export default function DailyFlow() {
       </Dialog>
 
       {/* Harvest Dialog - with instructions and yield recording */}
-      <Dialog open={!!harvestingTask} onOpenChange={(open) => !open && setHarvestingTask(null)}>
+      <Dialog open={!!harvestingTask} onOpenChange={(open) => !open && closeHarvestDialog()}>
         <DialogContent className="sm:max-w-[550px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-emerald-700">
@@ -3801,6 +4056,40 @@ export default function DailyFlow() {
                 </ul>
               </div>
 
+              {harvestingTask && (() => {
+                console.log('[Harvest Dialog] harvestSelectedTrayIds:', harvestSelectedTrayIds);
+                console.log('[Harvest Dialog] task.trayIds:', harvestingTask.trayIds);
+                return null;
+              })()}
+
+              {/* Tray Selection */}
+              {harvestingTask && harvestingTask.trayIds && harvestingTask.trayIds.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-700">
+                    Select Trays to Harvest ({harvestSelectedTrayIds.length} of {harvestingTask.trayIds.length} selected)
+                  </Label>
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-3 space-y-2">
+                    {harvestingTask.trayIds.map((trayId) => (
+                      <label key={trayId} className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 p-2 rounded">
+                        <input
+                          type="checkbox"
+                          checked={harvestSelectedTrayIds.includes(trayId)}
+                          onChange={() => {
+                            setHarvestSelectedTrayIds((prev) =>
+                              prev.includes(trayId)
+                                ? prev.filter((id) => id !== trayId)
+                                : [...prev, trayId]
+                            );
+                          }}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span className="text-sm text-slate-700">Tray #{trayId}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Yield Recording */}
               <div className="space-y-2">
                 <Label htmlFor="yield" className="flex items-center gap-2">
@@ -3830,7 +4119,7 @@ export default function DailyFlow() {
           <DialogFooter className="flex gap-2 sm:gap-2">
             <Button
               variant="outline"
-              onClick={() => setHarvestingTask(null)}
+              onClick={closeHarvestDialog}
               className="flex-1"
             >
               Cancel
@@ -3901,6 +4190,11 @@ export default function DailyFlow() {
                           Tray {row.trayId}
                           {row.batchId ? ` • ${row.batchId}` : ''}
                         </p>
+                        {row.sowDate && (
+                          <p className="text-xs text-slate-400">
+                            Seeded {formatShortDateLabel(row.sowDate) ?? row.sowDate}
+                          </p>
+                        )}
                       </div>
                     </label>
                     <div className="flex items-center gap-2">
@@ -5332,6 +5626,7 @@ export default function DailyFlow() {
         </Dialog>
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -5343,41 +5638,68 @@ interface PassiveStepCardProps {
 }
 
 const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCardProps) => {
-  // Get icon based on step name
-  const getIcon = () => {
+  // Get icon and tooltip based on step name
+  const getIconAndTooltip = () => {
     const name = stepName.toLowerCase();
-    if (name.includes('germination')) return <Sprout className="h-6 w-6 text-slate-500" />;
-    if (name.includes('blackout')) return <Sun className="h-6 w-6 text-slate-500" />;
-    if (name.includes('growing') || name === 'grow') return <Droplets className="h-6 w-6 text-slate-500" />;
-    return <Clock className="h-6 w-6 text-slate-500" />;
+    if (name.includes('germination')) {
+      return {
+        icon: <Sprout className="h-6 w-6 text-slate-500" />,
+        tooltip: "Trays currently germinating. These are covered and developing roots. No action needed - just monitor progress."
+      };
+    }
+    if (name.includes('blackout')) {
+      return {
+        icon: <Sun className="h-6 w-6 text-slate-500" />,
+        tooltip: "Trays in blackout phase. Keep covered to encourage stem growth. Check for mold and moisture levels."
+      };
+    }
+    if (name.includes('growing') || name === 'grow') {
+      return {
+        icon: <Droplets className="h-6 w-6 text-slate-500" />,
+        tooltip: "Trays actively growing under lights. Monitor watering schedule and check for any issues like yellowing or pests."
+      };
+    }
+    return {
+      icon: <Clock className="h-6 w-6 text-slate-500" />,
+      tooltip: `Trays in the ${stepName} phase. Click View Details to see individual trays and their status.`
+    };
   };
 
+  const { icon, tooltip } = getIconAndTooltip();
+
   return (
-    <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-md border border-slate-200/70 bg-slate-50/80 rounded-2xl">
-      <div className="p-4 space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
-            {getIcon()}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-md border border-slate-200/70 bg-slate-50/80 rounded-2xl cursor-help">
+          <div className="p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
+                {icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-semibold text-base text-slate-900 leading-tight truncate">{stepName}</h4>
+                <p className="text-xl font-bold text-slate-700 mt-1">
+                  {totalTrays} {totalTrays === 1 ? 'Tray' : 'Trays'}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-slate-300 text-slate-700 hover:bg-slate-100 h-9"
+              onClick={onViewDetails}
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              View Details
+            </Button>
           </div>
-          <div className="flex-1 min-w-0">
-            <h4 className="font-semibold text-base text-slate-900 leading-tight truncate">{stepName}</h4>
-            <p className="text-xl font-bold text-slate-700 mt-1">
-              {totalTrays} {totalTrays === 1 ? 'Tray' : 'Trays'}
-            </p>
-          </div>
-        </div>
-        
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full border-slate-300 text-slate-700 hover:bg-slate-100 h-9"
-          onClick={onViewDetails}
-        >
-          <Eye className="h-4 w-4 mr-2" />
-          View Details
-        </Button>
-      </div>
-    </Card>
+        </Card>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        <p>{tooltip}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 };
 

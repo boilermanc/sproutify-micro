@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import {
   fetchOrderFulfillmentDetails,
@@ -94,6 +95,8 @@ const WeeklyTasksPage = () => {
   const [actionReason, setActionReason] = useState('');
   const [actionNotes, setActionNotes] = useState('');
   const [actionSaving, setActionSaving] = useState(false);
+  const [availableSubstitutes, setAvailableSubstitutes] = useState<any[]>([]);
+  const [selectedSubstitute, setSelectedSubstitute] = useState<string>('');
 
   useEffect(() => {
     if (detailsOpen && details.length > 0) {
@@ -217,6 +220,28 @@ const WeeklyTasksPage = () => {
     }
   };
 
+  const fetchAvailableSubstitutes = async (item: OrderFulfillmentStatus) => {
+    if (!farmUuid) {
+      setAvailableSubstitutes([]);
+      return;
+    }
+    try {
+      const { data } = await getSupabaseClient()
+        .from('order_fulfillment_status')
+        .select('recipe_id, recipe_name, trays_ready, harvest_date')
+        .eq('farm_uuid', farmUuid)
+        .eq('delivery_date', item.delivery_date)
+        .neq('recipe_id', item.recipe_id)
+        .gte('trays_ready', 1);
+
+      const filtered = (data || []).filter((sub: any) => sub.harvest_date && sub.harvest_date <= item.delivery_date);
+      setAvailableSubstitutes(filtered);
+    } catch (error) {
+      console.error('Error fetching substitutes:', error);
+      setAvailableSubstitutes([]);
+    }
+  };
+
   const handleSelectDelivery = (item: OrderFulfillmentSummary) => {
     const key = { deliveryDate: item.delivery_date, customerName: item.customer_name, orderStatus: item.order_status };
     setSelectedDelivery(key);
@@ -293,6 +318,10 @@ const WeeklyTasksPage = () => {
 
   const handleActionConfirm = async () => {
     if (!farmUuid || !actionDialog.item || !actionDialog.type) return;
+    if (actionDialog.type === 'substitute' && !selectedSubstitute) {
+      alert('Please select a substitute variety');
+      return;
+    }
     try {
       setActionSaving(true);
       await recordFulfillmentAction({
@@ -303,11 +332,15 @@ const WeeklyTasksPage = () => {
         p_action_type: actionDialog.type,
         p_notes: actionNotes || actionReason || null,
         p_original_quantity: actionDialog.item.trays_needed,
+        p_substitute_recipe_id:
+          actionDialog.type === 'substitute' ? parseInt(selectedSubstitute, 10) : null,
         p_created_by: userId,
       });
       setActionDialog({ type: null, item: null });
       setActionReason('');
       setActionNotes('');
+      setSelectedSubstitute('');
+      setAvailableSubstitutes([]);
       if (selectedDelivery) {
         loadDetails(selectedDelivery);
         loadSummary(farmUuid, dateRange.start, dateRange.end);
@@ -315,6 +348,7 @@ const WeeklyTasksPage = () => {
       setDetailsOpen(false);
     } catch (error) {
       console.error('Error recording fulfillment action', error);
+      alert('Failed to record action');
     } finally {
       setActionSaving(false);
     }
@@ -756,7 +790,14 @@ const WeeklyTasksPage = () => {
                                   <XCircle className="h-4 w-4 mr-2" />
                                   Skip
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setActionDialog({ type: 'substitute', item })}>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSelectedSubstitute('');
+                                    setAvailableSubstitutes([]);
+                                    fetchAvailableSubstitutes(item);
+                                    setActionDialog({ type: 'substitute', item });
+                                  }}
+                                >
                                   <RefreshCw className="h-4 w-4 mr-2" />
                                   Check substitutes
                                 </DropdownMenuItem>
@@ -880,6 +921,8 @@ const WeeklyTasksPage = () => {
           setActionDialog({ type: null, item: null });
           setActionReason('');
           setActionNotes('');
+          setSelectedSubstitute('');
+          setAvailableSubstitutes([]);
         }
       }}>
         <DialogContent className="sm:max-w-[480px]">
@@ -897,6 +940,29 @@ const WeeklyTasksPage = () => {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {actionDialog.type === 'substitute' && (
+              <div className="space-y-2">
+                <Label>Select Substitute</Label>
+                <Select value={selectedSubstitute} onValueChange={setSelectedSubstitute}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a substitute variety" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableSubstitutes.length === 0 ? (
+                      <SelectItem value="none" disabled>
+                        No available substitutes
+                      </SelectItem>
+                    ) : (
+                      availableSubstitutes.map((sub) => (
+                        <SelectItem key={sub.recipe_id} value={sub.recipe_id.toString()}>
+                          {sub.recipe_name} ({sub.trays_ready} tray{sub.trays_ready !== 1 ? 's' : ''} ready)
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Reason</Label>
               <Input
@@ -923,11 +989,20 @@ const WeeklyTasksPage = () => {
                 setActionDialog({ type: null, item: null });
                 setActionReason('');
                 setActionNotes('');
+                setSelectedSubstitute('');
+                setAvailableSubstitutes([]);
               }}
             >
               Cancel
             </Button>
-            <Button onClick={handleActionConfirm} disabled={actionSaving || !actionDialog.type}>
+            <Button
+              onClick={handleActionConfirm}
+              disabled={
+                actionSaving ||
+                !actionDialog.type ||
+                (actionDialog.type === 'substitute' && !selectedSubstitute)
+              }
+            >
               {actionSaving ? 'Saving...' : 'Save'}
             </Button>
           </DialogFooter>

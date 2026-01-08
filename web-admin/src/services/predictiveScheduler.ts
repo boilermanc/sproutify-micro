@@ -153,7 +153,8 @@ export const calculateStandingOrderSowDates = (
     end_date: Date | null;
     items: Array<{ recipe_id: number; quantity: number }>;
   },
-  recipes: Recipe[]
+  recipes: Recipe[],
+  seedingDays: string[] | null = null
 ): SowSchedule[] => {
   const schedules: SowSchedule[] = [];
   const dayMap: Record<string, number> = {
@@ -166,7 +167,26 @@ export const calculateStandingOrderSowDates = (
     'Sunday': 0,
   };
 
-  const deliveryDayNumbers = standingOrder.delivery_days.map(day => dayMap[day] || -1).filter(d => d >= 0);
+  const deliveryDayNumbers = standingOrder.delivery_days.map(day => dayMap[day] ?? -1).filter(d => d >= 0);
+  const allowedSeedingDayNumbers = (seedingDays ?? [])
+    .map(day => dayMap[day])
+    .filter((day): day is number => typeof day === 'number' && day >= 0);
+
+  const alignToSeedingDays = (date: Date) => {
+    if (allowedSeedingDayNumbers.length === 0) {
+      return date;
+    }
+
+    const adjusted = new Date(date);
+    for (let offset = 0; offset <= 6; offset++) {
+      if (allowedSeedingDayNumbers.includes(adjusted.getDay())) {
+        return adjusted;
+      }
+      adjusted.setDate(adjusted.getDate() - 1);
+    }
+
+    return adjusted;
+  };
   if (deliveryDayNumbers.length === 0) return schedules;
 
   const currentDate = new Date(standingOrder.start_date);
@@ -197,11 +217,12 @@ export const calculateStandingOrderSowDates = (
 
         const sowDate = new Date(deliveryDate);
         sowDate.setDate(sowDate.getDate() - recipe.total_days);
+        const adjustedSowDate = alignToSeedingDays(sowDate);
 
         schedules.push({
           recipe_id: item.recipe_id,
           recipe_name: recipe.recipe_name,
-          sow_date: sowDate,
+          sow_date: adjustedSowDate,
           delivery_date: deliveryDate,
           quantity: item.quantity,
           days_before_delivery: recipe.total_days,

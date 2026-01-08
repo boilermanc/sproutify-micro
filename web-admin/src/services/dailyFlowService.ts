@@ -3857,3 +3857,169 @@ export const rescheduleSeedingRequest = async (
   }
 };
 
+/**
+ * Fetch overdue seeding tasks (missed seedlings from past days)
+ * Returns seeding tasks from the last 7 days that were not completed
+ */
+export const fetchOverdueSeedingTasks = async (
+  daysBack: number = 7
+): Promise<DailyTask[]> => {
+  const farmUuid = localStorage.getItem('selectedFarmUuid');
+  if (!farmUuid) {
+    console.warn('[fetchOverdueSeedingTasks] No farm UUID found');
+    return [];
+  }
+
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = formatDateString(today);
+
+    // Calculate date range for past days
+    const pastDate = new Date(today);
+    pastDate.setDate(pastDate.getDate() - daysBack);
+    const pastDateStr = formatDateString(pastDate);
+
+    console.log('[fetchOverdueSeedingTasks] Fetching overdue tasks from', pastDateStr, 'to', todayStr);
+
+    // Fetch all schedules in the date range
+    const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
+      .from('planting_schedule_view')
+      .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, customer_id, standing_order_id, schedule_id, delivery_date')
+      .eq('farm_uuid', farmUuid)
+      .gte('sow_date', pastDateStr)
+      .lt('sow_date', todayStr); // Exclude today (those are shown in regular tasks)
+
+    if (scheduleError) {
+      console.error('[fetchOverdueSeedingTasks] Error fetching schedules:', scheduleError);
+      return [];
+    }
+
+    if (!allSchedules || allSchedules.length === 0) {
+      console.log('[fetchOverdueSeedingTasks] No past schedules found');
+      return [];
+    }
+
+    // Fetch recipe data for variety names
+    const recipeIds = [...new Set(allSchedules.map((s: any) => s.recipe_id).filter(Boolean))];
+    const { data: recipesData } = recipeIds.length > 0 ? await getSupabaseClient()
+      .from('recipes')
+      .select('recipe_id, variety_name')
+      .in('recipe_id', recipeIds)
+      .eq('farm_uuid', farmUuid) : { data: null };
+
+    // Create variety name map
+    const varietyNameMap: Record<number, string> = {};
+    if (recipesData) {
+      recipesData.forEach((recipe: any) => {
+        if (recipe.recipe_id && recipe.variety_name) {
+          varietyNameMap[recipe.recipe_id] = recipe.variety_name;
+        }
+      });
+    }
+
+    // Fetch completed tasks in the date range
+    const { data: completedTasks } = await getSupabaseClient()
+      .from('task_completions')
+      .select('recipe_id, task_type, task_date')
+      .eq('farm_uuid', farmUuid)
+      .gte('task_date', pastDateStr)
+      .lt('task_date', todayStr)
+      .in('task_type', ['sowing', 'soaking'])
+      .eq('status', 'completed');
+
+    // Create set of completed task keys
+    const completedTaskKeys = new Set<string>();
+    if (completedTasks) {
+      completedTasks.forEach((ct: any) => {
+        const key = `${ct.task_type}-${ct.recipe_id}-${ct.task_date}`;
+        completedTaskKeys.add(key);
+      });
+    }
+
+    // Also check for existing trays created on those dates (seeding was done outside the task system)
+    const { data: existingTrays } = await getSupabaseClient()
+      .from('trays')
+      .select('recipe_id, sow_date')
+      .eq('farm_uuid', farmUuid)
+      .gte('sow_date', pastDateStr)
+      .lt('sow_date', todayStr);
+
+    const existingTrayKeys = new Set<string>();
+    if (existingTrays) {
+      existingTrays.forEach((tray: any) => {
+        if (tray.recipe_id && tray.sow_date) {
+          const sowDateStr = formatDateString(parseLocalDate(tray.sow_date) || new Date());
+          existingTrayKeys.add(`${tray.recipe_id}-${sowDateStr}`);
+        }
+      });
+    }
+
+    // Build overdue tasks
+    const overdueTasks: DailyTask[] = [];
+
+    for (const schedule of allSchedules) {
+      if (!schedule.sow_date || !schedule.recipe_id) continue;
+
+      const sowDate = parseLocalDate(schedule.sow_date);
+      if (!sowDate) continue;
+
+      const sowDateStr = formatDateString(sowDate);
+
+      // Check if seeding was completed via task system
+      const seedingKey = `sowing-${schedule.recipe_id}-${sowDateStr}`;
+      if (completedTaskKeys.has(seedingKey)) {
+        continue; // Task was completed
+      }
+
+      // Check if trays were created directly (outside task system)
+      const trayKey = `${schedule.recipe_id}-${sowDateStr}`;
+      if (existingTrayKeys.has(trayKey)) {
+        continue; // Trays exist for this date
+      }
+
+      // Calculate days overdue
+      const daysOverdue = Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
+
+      overdueTasks.push({
+        id: `overdue-seed-${schedule.recipe_id}-${sowDateStr}`,
+        action: 'Seed',
+        crop: varietyName,
+        batchId: 'N/A',
+        location: 'Not set',
+        dayCurrent: 0,
+        dayTotal: 0,
+        trays: schedule.trays_needed || 0,
+        status: 'urgent',
+        trayIds: [],
+        recipeId: schedule.recipe_id,
+        taskSource: 'planting_schedule',
+        quantity: schedule.trays_needed || 0,
+        customerName: schedule.customer_name || null,
+        customerId: schedule.customer_id ?? undefined,
+        standingOrderId: schedule.standing_order_id ?? undefined,
+        orderScheduleId: schedule.schedule_id ?? undefined,
+        deliveryDate: schedule.delivery_date || null,
+        isOverdue: true,
+        daysOverdue,
+        sowDate: sowDateStr,
+      });
+    }
+
+    // Sort by sow date (most recent first)
+    overdueTasks.sort((a, b) => {
+      const dateA = a.sowDate || '';
+      const dateB = b.sowDate || '';
+      return dateB.localeCompare(dateA);
+    });
+
+    console.log('[fetchOverdueSeedingTasks] Found', overdueTasks.length, 'overdue tasks');
+    return overdueTasks;
+  } catch (error) {
+    console.error('[fetchOverdueSeedingTasks] Error:', error);
+    return [];
+  }
+};
+

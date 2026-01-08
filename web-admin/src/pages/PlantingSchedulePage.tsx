@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Sprout, Package, Clock, AlertCircle, ChevronRight, Check } from 'lucide-react';
+import { Calendar, Sprout, Package, Clock, AlertCircle, AlertTriangle, ChevronRight, Check, Printer, X } from 'lucide-react';
+import SeedingPlanPrint from '../components/print/SeedingPlanPrint';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { calculateStandingOrderSowDates } from '../services/predictiveScheduler';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,6 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import EmptyState from '../components/onboarding/EmptyState';
+
+const ALL_WEEK_SEEDING_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 interface StandingOrder {
   standing_order_id: number;
@@ -39,6 +42,8 @@ interface Recipe {
   recipe_name: string;
   variety_name: string;
   total_days: number;
+  seed_quantity?: number;
+  seed_quantity_unit?: string;
 }
 
 interface ProductRecipeMapping {
@@ -64,15 +69,17 @@ interface PlantingSchedule {
   product_name?: string;
   variant_name?: string;
   isSeeded?: boolean; // Flag to track if trays have already been created
+  seed_quantity?: number; // Seed quantity per tray (in grams)
+  seed_quantity_unit?: string; // Unit for seed quantity
 }
 
-interface SeedBatch {
-  batchid: number;
-  quantity: number;
-  unit: string;
-  lot_number: string | null;
-  purchasedate: string | null;
+interface SeedSelectionOption {
+  key: string;
+  source: 'seedbatch' | 'soaked_seed';
+  actualBatchId: number;
   variety_name: string;
+  label: string;
+  description: string;
 }
 
 const PlantingSchedulePage = () => {
@@ -84,24 +91,72 @@ const PlantingSchedulePage = () => {
   
   // Seeding dialog state
   const [seedingSchedule, setSeedingSchedule] = useState<PlantingSchedule | null>(null);
-  const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
-  const [availableBatches, setAvailableBatches] = useState<SeedBatch[]>([]);
+  const [seedingScheduleKey, setSeedingScheduleKey] = useState<string>('');
+  const [seedingScheduleRef, setSeedingScheduleRef] = useState<PlantingSchedule | null>(null);
+  const [selectedBatchOption, setSelectedBatchOption] = useState<SeedSelectionOption | null>(null);
+  const [availableBatches, setAvailableBatches] = useState<SeedSelectionOption[]>([]);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [seedingDate, setSeedingDate] = useState('');
   const [isCreatingTray, setIsCreatingTray] = useState(false);
   const isSubmittingSeeding = useRef(false);
 
+  // Print dialog state
+  const [showPrintDialog, setShowPrintDialog] = useState(false);
+  const [selectedPrintDate, setSelectedPrintDate] = useState<string | null>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [farmName, setFarmName] = useState<string>('');
+  const [seedingDays, setSeedingDays] = useState<string[]>([...ALL_WEEK_SEEDING_DAYS]);
+
+  // Skipped schedules state (persisted for this session)
+  const [skippedSchedules, setSkippedSchedules] = useState<Set<string>>(new Set());
+  const [toastNotification, setToastNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Animation state for removing schedules
+  const [removingScheduleKey, setRemovingScheduleKey] = useState<string | null>(null);
+
+  // Helper to generate unique key for a schedule (index required for uniqueness)
+  const getScheduleKey = (schedule: PlantingSchedule, index: number): string => {
+    const sowDateKey = getLocalDateKey(new Date(schedule.sow_date));
+    return `${schedule.standing_order_id}-${schedule.recipe_id}-${sowDateKey}-${schedule.customer_name || ''}-${schedule.product_name || ''}-${index}`;
+  };
+
   useEffect(() => {
     fetchPlantingSchedule();
   }, []);
 
+  useEffect(() => {
+    if (!toastNotification) return;
+    const timer = setTimeout(() => setToastNotification(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toastNotification]);
+
   const fetchPlantingSchedule = async () => {
     try {
       setLoading(true);
+      const defaultSeedingDays = [...ALL_WEEK_SEEDING_DAYS];
+      let farmSeedingDaysForSchedule: string[] | null = null;
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
+
+      // Fetch farm name and seeding days for print
+      const { data: farmData } = await getSupabaseClient()
+        .from('farms')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .single();
+      if (farmData?.farmname) {
+        setFarmName(farmData.farmname);
+      }
+      if (farmData) {
+        const validatedSeedingDays = Array.isArray(farmData.seeding_days) && farmData.seeding_days.length > 0
+          ? farmData.seeding_days
+          : null;
+        farmSeedingDaysForSchedule = validatedSeedingDays;
+        setSeedingDays(validatedSeedingDays ?? defaultSeedingDays);
+      }
 
       // 1. Fetch active standing orders with items
       const { data: standingOrdersData, error: ordersError } = await getSupabaseClient()
@@ -154,10 +209,10 @@ const PlantingSchedulePage = () => {
         })
       );
 
-      // 3. Fetch all recipes with their total days
+      // 3. Fetch all recipes with their total days and seed quantities
       const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
-        .select('recipe_id, recipe_name, variety_name')
+        .select('recipe_id, recipe_name, variety_name, seed_quantity, seed_quantity_unit')
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
 
@@ -188,11 +243,20 @@ const PlantingSchedulePage = () => {
             return sum + duration;
           }, 0);
 
+          // Convert seed quantity to grams for consistency
+          let seedQuantityGrams = recipe.seed_quantity || 0;
+          const seedUnit = recipe.seed_quantity_unit || 'grams';
+          if (seedUnit === 'oz') {
+            seedQuantityGrams = seedQuantityGrams * 28.35;
+          }
+
           return {
             recipe_id: recipe.recipe_id,
             recipe_name: recipe.recipe_name,
             variety_name: recipe.variety_name || '',
             total_days: totalDays || 10, // Default to 10 if no steps
+            seed_quantity: seedQuantityGrams,
+            seed_quantity_unit: 'grams', // Always store in grams for consistency
           };
         })
       );
@@ -273,7 +337,8 @@ const PlantingSchedulePage = () => {
             end_date: order.end_date ? new Date(order.end_date) : null,
             items: recipeItems,
           },
-          recipes
+          recipes,
+          farmSeedingDaysForSchedule
         );
 
         // 6. Convert to PlantingSchedule format with order context
@@ -283,6 +348,9 @@ const PlantingSchedulePage = () => {
             const mappings = mappingsByProduct[item.product_id] || [];
             return mappings.some(m => m.recipe_id === schedule.recipe_id);
           });
+
+          // Find the recipe to get seed quantity info
+          const recipeInfo = recipes.find(r => r.recipe_id === schedule.recipe_id);
 
           allSchedules.push({
             sow_date: schedule.sow_date,
@@ -296,6 +364,8 @@ const PlantingSchedulePage = () => {
             customer_name: order.customer_name,
             product_name: productInfo?.product_name,
             variant_name: productInfo?.variant_name || undefined,
+            seed_quantity: recipeInfo?.seed_quantity,
+            seed_quantity_unit: recipeInfo?.seed_quantity_unit,
           });
         }
       }
@@ -328,94 +398,70 @@ const PlantingSchedulePage = () => {
       if (traysError) {
         console.error('[PlantingSchedule] Error fetching existing trays:', traysError);
       }
-      
-      // Fetch all completed sowing tasks for these recipes (no date filter - we need all of them)
-      const { data: completedTasks, error: tasksError } = await getSupabaseClient()
-        .from('task_completions')
-        .select('recipe_id, task_date')
-        .eq('farm_uuid', farmUuid)
-        .in('recipe_id', recipeIds)
-        .eq('task_type', 'sowing')
-        .eq('status', 'completed');
-      
-      if (tasksError) {
-        console.error('[PlantingSchedule] Error fetching completed tasks:', tasksError);
-      }
-      
-      // Create a map of recipe_id -> set of seeded dates (for flexible matching)
-      // This allows us to check if a schedule is fulfilled by early seeding
-      const seededDatesByRecipe = new Map<number, Set<string>>();
-      
-      // Add dates for existing trays
+
+      // Build seeded trays map from the trays table (source of truth)
+      // Note: task_completions is used for audit/tracking purposes only, not for filtering
+      const seededTraysByRecipeDate = new Map<number, Map<string, number>>();
+
+      const incrementSeededTrays = (recipeId: number, dateKey: string, count: number) => {
+        if (typeof recipeId !== 'number' || Number.isNaN(recipeId) || !dateKey || count <= 0) {
+          return;
+        }
+        if (!seededTraysByRecipeDate.has(recipeId)) {
+          seededTraysByRecipeDate.set(recipeId, new Map<string, number>());
+        }
+        const recipeMap = seededTraysByRecipeDate.get(recipeId)!;
+        recipeMap.set(dateKey, (recipeMap.get(dateKey) || 0) + count);
+      };
+
       if (existingTrays && existingTrays.length > 0) {
         console.log(`[PlantingSchedule] Found ${existingTrays.length} existing trays for these recipes`);
         existingTrays.forEach((tray: any) => {
-          if (tray.sow_date) {
-            const recipeId = tray.recipe_id;
-            const traySowDateStr = new Date(tray.sow_date).toISOString().split('T')[0];
-            if (!seededDatesByRecipe.has(recipeId)) {
-              seededDatesByRecipe.set(recipeId, new Set<string>());
-            }
-            seededDatesByRecipe.get(recipeId)!.add(traySowDateStr);
+          if (tray.recipe_id && tray.sow_date) {
+            const trayDateKey = getLocalDateKey(new Date(tray.sow_date));
+            incrementSeededTrays(tray.recipe_id, trayDateKey, 1);
           }
         });
       }
-      
-      // Add dates for completed tasks
-      if (completedTasks && completedTasks.length > 0) {
-        console.log(`[PlantingSchedule] Found ${completedTasks.length} completed sowing tasks for these recipes`);
-        completedTasks.forEach((task: any) => {
-          const taskDateStr = task.task_date ? (task.task_date.includes('T') ? task.task_date.split('T')[0] : task.task_date) : '';
-          if (taskDateStr) {
-            const recipeId = task.recipe_id;
-            if (!seededDatesByRecipe.has(recipeId)) {
-              seededDatesByRecipe.set(recipeId, new Set<string>());
-            }
-            seededDatesByRecipe.get(recipeId)!.add(taskDateStr);
-          }
-        });
-      }
-      
+
       console.log(`[PlantingSchedule] Total schedules before filtering: ${allSchedules.length}`);
-      
-      // Filter schedules: remove any that have trays or task_completions for that recipe
-      // on the scheduled date OR within ±1 day (handles same-day or next-day seeding)
+
       const DATE_TOLERANCE_DAYS = 1;
+      const candidateOffsets = [0, -1, 1];
       let filteredCount = 0;
-      
+
       for (const schedule of allSchedules) {
         const scheduleDate = new Date(schedule.sow_date);
         scheduleDate.setHours(0, 0, 0, 0);
-        const scheduleDateMs = scheduleDate.getTime();
-        
-        const seededDates = seededDatesByRecipe.get(schedule.recipe_id);
-        if (!seededDates || seededDates.size === 0) {
-          // No trays/tasks for this recipe, keep the schedule
-          filteredSchedules.push(schedule);
-          continue;
-        }
-        
-        // Check if any seeded date is within tolerance of the schedule date
-        let isFulfilled = false;
-        for (const seededDateStr of seededDates) {
-          const seededDate = new Date(seededDateStr + 'T00:00:00');
-          const seededDateMs = seededDate.getTime();
-          const daysDiff = Math.abs(seededDateMs - scheduleDateMs) / (1000 * 60 * 60 * 24);
-          
-          // If seeded within tolerance days of the scheduled date, the schedule is fulfilled
-          if (daysDiff <= DATE_TOLERANCE_DAYS) {
-            isFulfilled = true;
-            break;
+        const scheduledTrays = Math.max(1, Math.ceil(schedule.quantity || 0));
+        const recipeSeedMap = seededTraysByRecipeDate.get(schedule.recipe_id);
+
+        if (recipeSeedMap && recipeSeedMap.size > 0) {
+          let remainingToCover = scheduledTrays;
+          for (const offset of candidateOffsets) {
+            if (remainingToCover <= 0) {
+              break;
+            }
+            const candidateDate = new Date(scheduleDate);
+            candidateDate.setDate(candidateDate.getDate() + offset);
+            const candidateKey = getLocalDateKey(candidateDate);
+            const available = recipeSeedMap.get(candidateKey) || 0;
+            if (available <= 0) {
+              continue;
+            }
+            const used = Math.min(available, remainingToCover);
+            recipeSeedMap.set(candidateKey, available - used);
+            remainingToCover -= used;
+          }
+          if (remainingToCover <= 0) {
+            filteredCount++;
+            continue;
           }
         }
-        
-        if (isFulfilled) {
-          filteredCount++;
-        } else {
-          filteredSchedules.push(schedule);
-        }
+
+        filteredSchedules.push(schedule);
       }
-      
+
       console.log(`[PlantingSchedule] Filtered out ${filteredCount} already-seeded schedules`);
       console.log(`[PlantingSchedule] Total schedules after filtering: ${filteredSchedules.length}`);
       
@@ -454,10 +500,17 @@ const PlantingSchedulePage = () => {
         endDate = new Date('2099-12-31');
     }
 
+    // Include overdue schedules from the last 7 days
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const filtered = schedules.filter(schedule => {
       const sowDate = new Date(schedule.sow_date);
       sowDate.setHours(0, 0, 0, 0);
-      return sowDate >= now && sowDate <= endDate;
+      // Include past 7 days (overdue) OR future dates within range
+      const isOverdue = sowDate >= sevenDaysAgo && sowDate < now;
+      const isInRange = sowDate >= now && sowDate <= endDate;
+      return isOverdue || isInRange;
     });
 
     setFilteredSchedules(filtered);
@@ -470,7 +523,8 @@ const PlantingSchedulePage = () => {
   const groupSchedulesByDate = (schedules: PlantingSchedule[]) => {
     const grouped: Record<string, PlantingSchedule[]> = {};
     schedules.forEach(schedule => {
-      const dateKey = schedule.sow_date.toISOString().split('T')[0];
+      // Use local date key to match scheduler calculations
+      const dateKey = getLocalDateKey(new Date(schedule.sow_date));
       if (!grouped[dateKey]) {
         grouped[dateKey] = [];
       }
@@ -503,17 +557,107 @@ const PlantingSchedulePage = () => {
     return `${year}-${month}-${day}`;
   };
 
-  const handleCreateTray = async (schedule: PlantingSchedule) => {
+  // Helper to get local date key (YYYY-MM-DD) from a Date object
+  const getLocalDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Get unique dates that have seeding tasks, filtered by farm's seeding days
+  // Includes past 7 days (for catch-up) plus future dates from filteredSchedules
+  const getAvailablePrintDates = () => {
+    const dateSet = new Set<string>();
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // Use local time for comparisons (scheduler uses local time)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Use ALL schedules (not just filtered) to catch missed past dates
+    schedules.forEach(schedule => {
+      const sowDate = new Date(schedule.sow_date);
+      const dateKey = getLocalDateKey(sowDate);
+      // Use local getDay() to match how scheduler calculates day of week
+      const dayOfWeek = dayNames[sowDate.getDay()];
+
+      // Include dates from last 7 days OR future dates within the filtered range
+      const sowDateMidnight = new Date(sowDate);
+      sowDateMidnight.setHours(0, 0, 0, 0);
+      const isRecentPast = sowDateMidnight >= sevenDaysAgo && sowDateMidnight < today;
+      const isInFilteredRange = filteredSchedules.some(fs => {
+        return getLocalDateKey(new Date(fs.sow_date)) === dateKey;
+      });
+
+      // Only include dates that fall on configured seeding days
+      if (seedingDays.length === 0 || seedingDays.includes(dayOfWeek)) {
+        if (isRecentPast || isInFilteredRange) {
+          dateSet.add(dateKey);
+        }
+      }
+    });
+
+    return Array.from(dateSet).sort();
+  };
+
+  // Helper to check if a date is in the past (uses local time)
+  const isDatePast = (dateKey: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Parse as local time by using noon to avoid timezone shifts
+    const date = new Date(dateKey + 'T12:00:00');
+    date.setHours(0, 0, 0, 0);
+    return date < today;
+  };
+
+  const handlePrintDate = (dateKey: string) => {
+    setSelectedPrintDate(dateKey);
+    setShowPrintDialog(false);
+    // Show preview dialog instead of immediately printing
+    setShowPrintPreview(true);
+  };
+
+  const handlePrint = () => {
+    // Close preview dialog and print
+    setShowPrintPreview(false);
+    // Small delay to allow dialog to close before printing
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  // Handle skipping an overdue schedule
+  const handleSkipSchedule = (schedule: PlantingSchedule) => {
+    const scheduleKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${getLocalDateKey(new Date(schedule.sow_date))}`;
+    setSkippedSchedules(prev => new Set([...prev, scheduleKey]));
+  };
+
+  // Check if a schedule has been skipped
+  const isScheduleSkipped = (schedule: PlantingSchedule) => {
+    const scheduleKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${getLocalDateKey(new Date(schedule.sow_date))}`;
+    return skippedSchedules.has(scheduleKey);
+  };
+
+  const handleCreateTray = async (schedule: PlantingSchedule, index: number) => {
     setSeedingSchedule(schedule);
+    setSeedingScheduleKey(getScheduleKey(schedule, index));
+    setSeedingScheduleRef(schedule); // Keep reference for removal
     // Set default seeding date to the schedule's sow_date
     setSeedingDate(formatDateForInput(schedule.sow_date));
-    setSelectedBatchId(null);
+    setSelectedBatchOption(null);
     setAvailableBatches([]);
+    setBatchNotice(null);
     await fetchAvailableBatchesForRecipe(schedule);
   };
 
   const fetchAvailableBatchesForRecipe = async (schedule: PlantingSchedule) => {
     setLoadingBatches(true);
+    setSelectedBatchOption(null);
+    setAvailableBatches([]);
+    setBatchNotice(null);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
@@ -523,7 +667,6 @@ const PlantingSchedulePage = () => {
 
       const { farmUuid } = JSON.parse(sessionData);
 
-      // Fetch recipe to get variety_id and seed_quantity
       const { data: recipeData, error: recipeError } = await getSupabaseClient()
         .from('recipes')
         .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit')
@@ -533,29 +676,162 @@ const PlantingSchedulePage = () => {
 
       if (recipeError || !recipeData) {
         console.error('[PlantingSchedule] Error fetching recipe:', recipeError);
-        setAvailableBatches([]);
         return;
       }
 
-      // Calculate seed quantity needed per tray (convert to grams)
       let seedQuantityPerTray = 0;
       if (recipeData.seed_quantity) {
         const unit = recipeData.seed_quantity_unit || 'grams';
         seedQuantityPerTray = unit === 'oz' ? recipeData.seed_quantity * 28.35 : recipeData.seed_quantity;
       }
 
-      // Total seed needed for all trays (quantity is the number of trays)
-      const numberOfTrays = Math.ceil(schedule.quantity);
+      const numberOfTrays = Math.max(1, Math.ceil(schedule.quantity));
       const totalSeedNeeded = seedQuantityPerTray * numberOfTrays;
 
       if (!recipeData.variety_id) {
         console.error('[PlantingSchedule] Recipe has no variety_id');
-        setAvailableBatches([]);
         return;
       }
 
-      // Query available batches matching the requirements
-      let query = getSupabaseClient()
+      let varietyName = recipeData.variety_name || '';
+      let requiresSoaking = false;
+      try {
+        const { data: varietyData, error: varietyError } = await getSupabaseClient()
+          .from('varieties')
+          .select('varietyid, name, soakingtimehours')
+          .eq('varietyid', recipeData.variety_id)
+          .single();
+        if (varietyError && !varietyData) {
+          console.error('[PlantingSchedule] Error fetching variety info:', varietyError);
+        }
+        if (varietyData) {
+          varietyName = varietyData.name || varietyName;
+          requiresSoaking = Number(varietyData.soakingtimehours ?? 0) > 0;
+        }
+      } catch (error) {
+        console.error('[PlantingSchedule] Unexpected error fetching variety info:', error);
+      }
+
+      console.log('[PlantingSchedule] Recipe data for batch lookup:', {
+        recipe_id: recipeData.recipe_id,
+        variety_id: recipeData.variety_id,
+        variety_name: varietyName,
+        seed_quantity: recipeData.seed_quantity,
+        seed_quantity_unit: recipeData.seed_quantity_unit,
+        seedQuantityPerTray,
+        numberOfTrays,
+        totalSeedNeeded,
+        requiresSoaking,
+      });
+
+      const convertToGrams = (quantity: number | string | null | undefined, unit?: string | null) => {
+        const numeric = typeof quantity === 'number' ? quantity : Number(quantity ?? 0);
+        if (!Number.isFinite(numeric)) return 0;
+        const normalizedUnit = (unit || 'grams').toLowerCase();
+        if (normalizedUnit.includes('lb')) {
+          return numeric * 453.592;
+        }
+        return numeric;
+      };
+
+      const formatBatchQuantityText = (quantity: number | string | null | undefined, unit?: string | null) => {
+        const numeric = typeof quantity === 'number' ? quantity : Number(quantity ?? 0);
+        const formattedValue = Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
+        return `${formattedValue} ${unit || 'grams'} available`;
+      };
+
+      const formatDateLabel = (value?: string | null) => {
+        if (!value) return 'unknown date';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return 'unknown date';
+        return parsed.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        });
+      };
+
+      const resolveBatchIdFromSoaked = (record: any): number | null => {
+        const candidates = [
+          record.seedbatch_id,
+          record.seedbatchid,
+          record.seed_batch_id,
+          record.batchid,
+          record.batch_id,
+        ];
+        for (const candidate of candidates) {
+          if (candidate || candidate === 0) {
+            const parsed = typeof candidate === 'number' ? candidate : Number(candidate);
+            if (!Number.isNaN(parsed)) {
+              return parsed;
+            }
+          }
+        }
+        return null;
+      };
+
+      if (requiresSoaking) {
+        const { data: soakedSeedsData, error: soakedSeedsError } = await getSupabaseClient()
+          .from('soaked_seed')
+          .select('soaked_id, seedbatch_id, quantity_remaining, unit, soak_date, expires_at')
+          .eq('farm_uuid', farmUuid)
+          .eq('variety_id', recipeData.variety_id)
+          .eq('status', 'available')
+          .order('soak_date', { ascending: false });
+
+        if (soakedSeedsError) {
+          console.error('[PlantingSchedule] Error fetching soaked seeds:', soakedSeedsError);
+          setBatchNotice('This variety requires soaking. No soaked seeds available.');
+          return;
+        }
+
+        const soakedOptions = (soakedSeedsData || [])
+          .map<SeedSelectionOption | null>((soaked: any, index: number) => {
+            const quantityGrams = convertToGrams(soaked.quantity_remaining ?? 0, soaked.unit);
+            const hasEnough = totalSeedNeeded > 0 ? quantityGrams >= totalSeedNeeded : true;
+            if (!hasEnough) return null;
+            const actualBatchId = resolveBatchIdFromSoaked(soaked);
+            if (!actualBatchId) return null;
+            const soakIdentifier = soaked.soaked_id ?? index;
+            const soakDateLabel = formatDateLabel(soaked.soak_date);
+            const displayQuantity = `${quantityGrams.toFixed(2)} g remaining`;
+            const expiresLabel = soaked.expires_at ? `Expires ${formatDateLabel(soaked.expires_at)}` : 'Available';
+            return {
+              key: `soaked-${soakIdentifier}`,
+              source: 'soaked_seed',
+              actualBatchId,
+              variety_name: varietyName,
+              label: `${varietyName || 'Variety'} • Soaked on ${soakDateLabel} - ${displayQuantity}`,
+              description: `${expiresLabel} • Batch #${actualBatchId}`,
+            };
+          })
+          .filter((option): option is SeedSelectionOption => option !== null);
+
+        if (soakedOptions.length === 0) {
+          setBatchNotice('This variety requires soaking. No soaked seeds available.');
+          return;
+        }
+
+        setAvailableBatches(soakedOptions);
+        setBatchNotice(null);
+        return;
+      }
+
+      const { data: allBatches, error: allBatchesError } = await getSupabaseClient()
+        .from('seedbatches')
+        .select('*')
+        .eq('farm_uuid', farmUuid);
+
+      if (allBatchesError) {
+        console.error('[PlantingSchedule] Error fetching all batches for debug:', allBatchesError);
+      } else {
+        console.log('[PlantingSchedule] All batches for farm:', {
+          count: allBatches?.length || 0,
+          batches: allBatches,
+        });
+      }
+
+      const { data: batchesData, error: batchesError } = await getSupabaseClient()
         .from('seedbatches')
         .select(`
           batchid,
@@ -567,56 +843,48 @@ const PlantingSchedulePage = () => {
         `)
         .eq('farm_uuid', farmUuid)
         .eq('varietyid', recipeData.variety_id)
-        .eq('is_active', true);
-
-      // Only filter by quantity if we have a seed requirement
-      if (totalSeedNeeded > 0) {
-        query = query.gte('quantity', totalSeedNeeded);
-      }
-
-      const { data: batchesData, error: batchesError } = await query
         .order('purchasedate', { ascending: true });
-
-      // Fetch variety name separately
-      let varietyName = recipeData.variety_name || '';
-      if (recipeData.variety_id) {
-        const { data: varietyData } = await getSupabaseClient()
-          .from('varieties')
-          .select('name')
-          .eq('varietyid', recipeData.variety_id)
-          .single();
-        if (varietyData) {
-          varietyName = varietyData.name || varietyName;
-        }
-      }
 
       if (batchesError) {
         console.error('[PlantingSchedule] Error fetching batches:', batchesError);
-        setAvailableBatches([]);
         return;
       }
 
-      // Format batches for display
-      const formattedBatches = (batchesData || []).map((batch: any) => ({
-        batchid: batch.batchid,
-        quantity: batch.quantity,
-        unit: batch.unit || 'grams',
-        lot_number: batch.lot_number || null,
-        purchasedate: batch.purchasedate,
-        variety_name: varietyName,
-      }));
+      const qualifyingBatches = (batchesData || []).filter((batch: any) => {
+        const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
+        const passes = totalSeedNeeded > 0 ? batchQuantityGrams >= totalSeedNeeded : true;
+        return passes;
+      });
 
-      setAvailableBatches(formattedBatches);
+      const formattedOptions = qualifyingBatches.map((batch: any) => {
+        const quantityText = formatBatchQuantityText(batch.quantity, batch.unit);
+        const descriptionParts = [quantityText];
+        if (batch.lot_number) {
+          descriptionParts.push(`Lot: ${batch.lot_number}`);
+        }
+        if (batch.purchasedate) {
+          descriptionParts.push(`Purchased: ${formatDateLabel(batch.purchasedate)}`);
+        }
+        return {
+          key: `seedbatch-${batch.batchid}`,
+          source: 'seedbatch',
+          actualBatchId: batch.batchid,
+          variety_name: varietyName,
+          label: `${varietyName} - Batch #${batch.batchid}`,
+          description: descriptionParts.join(' • '),
+        };
+      });
+
+      setAvailableBatches(formattedOptions);
     } catch (error) {
       console.error('[PlantingSchedule] Error in fetchAvailableBatchesForRecipe:', error);
-      setAvailableBatches([]);
     } finally {
       setLoadingBatches(false);
     }
   };
 
   const handleSeedingConfirm = async () => {
-    if (!seedingSchedule || !selectedBatchId) {
+    if (!seedingSchedule || !selectedBatchOption || !selectedBatchOption.actualBatchId) {
       alert('Please select a seed batch');
       return;
     }
@@ -662,6 +930,7 @@ const PlantingSchedulePage = () => {
       const sowDateISO = new Date(seedingDate + 'T00:00:00').toISOString();
 
       // Create tray creation requests (one per tray)
+      const batchIdForRequest = selectedBatchOption.actualBatchId;
       const requests = Array.from({ length: numberOfTrays }, () => ({
         customer_name: null,
         variety_name: varietyName,
@@ -669,13 +938,13 @@ const PlantingSchedulePage = () => {
         farm_uuid: farmUuid,
         user_id: userId,
         requested_at: sowDateISO,
-        batch_id: selectedBatchId,
+        batch_id: batchIdForRequest,
       }));
 
       console.log('[PlantingSchedule] Creating tray creation requests:', {
         numberOfTrays,
         recipeName: recipeData.recipe_name,
-        batchId: selectedBatchId,
+        batchId: batchIdForRequest,
         sowDate: sowDateISO,
       });
 
@@ -696,19 +965,20 @@ const PlantingSchedulePage = () => {
         .from('task_completions')
         .upsert({
           farm_uuid: farmUuid,
-          user_id: userId,
           task_type: 'sowing',
           task_date: sowDateStr,
           recipe_id: seedingSchedule.recipe_id,
           status: 'completed',
           completed_at: new Date().toISOString(),
           completed_by: userId,
-          batch_id: selectedBatchId,
-          yield_quantity: null,
-          yield_unit: null,
+          batch_id: batchIdForRequest,
+          quantity_used: numberOfTrays,
+          quantity_unit: 'trays',
+          customer_name: seedingSchedule.customer_name || null,
+          product_name: seedingSchedule.product_name || null,
           notes: 'Seeding completed from Planting Schedule',
         }, {
-          onConflict: 'farm_uuid,task_type,task_date,recipe_id'
+          onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
         });
 
       if (completionError) {
@@ -722,20 +992,35 @@ const PlantingSchedulePage = () => {
         });
       }
 
-      // Close dialog
+      // Get the schedule key and reference that were stored when dialog opened
+      const scheduleKey = seedingScheduleKey;
+      const scheduleToRemove = seedingScheduleRef;
+      const recipeDisplayName = recipeData.variety_name || recipeData.recipe_name || 'recipe';
+
+      // Close dialog immediately
       setSeedingSchedule(null);
-      setSelectedBatchId(null);
+      setSeedingScheduleKey('');
+      setSeedingScheduleRef(null);
+      setSelectedBatchOption(null);
       setAvailableBatches([]);
+      setBatchNotice(null);
       setSeedingDate('');
-      
-      // Wait a moment for database triggers to complete before refreshing
-      // The trigger creates trays asynchronously, so we need to give it time
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Refresh the schedule to show updated data
-      await fetchPlantingSchedule();
-      
-      alert(`Successfully created ${numberOfTrays} ${numberOfTrays === 1 ? 'tray' : 'trays'}!`);
+
+      // Show success toast immediately
+      setToastNotification({
+        type: 'success',
+        message: `Successfully seeded ${numberOfTrays} ${numberOfTrays === 1 ? 'tray' : 'trays'} of ${recipeDisplayName}!`,
+      });
+
+      // Trigger fade-out animation
+      setRemovingScheduleKey(scheduleKey);
+
+      // After animation completes, remove from local state (optimistic update)
+      // Use object reference to ensure we remove the exact schedule that was seeded
+      setTimeout(() => {
+        setSchedules(prev => prev.filter(s => s !== scheduleToRemove));
+        setRemovingScheduleKey(null);
+      }, 300);
     } catch (error) {
       console.error('[PlantingSchedule] Error creating trays:', error);
       const errorMessage = (error instanceof Error ? error.message : String(error)) || 'Failed to create trays. Please try again.';
@@ -790,6 +1075,14 @@ const PlantingSchedulePage = () => {
               <SelectItem value="all">All Upcoming</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            onClick={() => setShowPrintDialog(true)}
+            variant="outline"
+            disabled={filteredSchedules.length === 0}
+          >
+            <Printer className="h-4 w-4 mr-2" />
+            Print Seeding Plan
+          </Button>
           <Button onClick={() => navigate('/standing-orders')} variant="outline">
             Manage Standing Orders
           </Button>
@@ -856,28 +1149,49 @@ const PlantingSchedulePage = () => {
         <div className="space-y-6">
           {dateKeys.map(dateKey => {
             const daySchedules = groupedSchedules[dateKey];
-            const sowDate = new Date(dateKey);
+            // Parse as local time (noon) to avoid timezone shifts
+            const sowDate = new Date(dateKey + 'T12:00:00');
             const daysUntil = getDaysUntil(sowDate);
             const isToday = daysUntil === 0;
             const isPast = daysUntil < 0;
 
             return (
-              <Card key={dateKey} className={isToday ? 'border-emerald-500 border-2' : ''}>
-                <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b">
+              <Card key={dateKey} className={
+                isToday
+                  ? 'border-emerald-500 border-2'
+                  : isPast
+                  ? 'border-amber-500 border-2 bg-amber-50/30'
+                  : ''
+              }>
+                <CardHeader className={
+                  isPast
+                    ? 'bg-gradient-to-r from-amber-50 to-amber-25 border-b'
+                    : 'bg-gradient-to-r from-gray-50 to-white border-b'
+                }>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${isToday ? 'bg-emerald-100' : 'bg-gray-100'}`}>
-                        <Calendar className={`h-5 w-5 ${isToday ? 'text-emerald-600' : 'text-gray-600'}`} />
+                      <div className={`p-2 rounded-lg ${
+                        isToday
+                          ? 'bg-emerald-100'
+                          : isPast
+                          ? 'bg-amber-100'
+                          : 'bg-gray-100'
+                      }`}>
+                        {isPast ? (
+                          <AlertTriangle className="h-5 w-5 text-amber-600" />
+                        ) : (
+                          <Calendar className={`h-5 w-5 ${isToday ? 'text-emerald-600' : 'text-gray-600'}`} />
+                        )}
                       </div>
                       <div>
-                        <CardTitle className="text-lg font-bold text-gray-800">
+                        <CardTitle className={`text-lg font-bold ${isPast ? 'text-amber-800' : 'text-gray-800'}`}>
                           {formatDate(sowDate)}
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription className={isPast ? 'text-amber-700' : ''}>
                           {isToday
                             ? 'Today - Plant Now!'
                             : isPast
-                            ? `${Math.abs(daysUntil)} days ago`
+                            ? `${Math.abs(daysUntil)} ${Math.abs(daysUntil) === 1 ? 'day' : 'days'} overdue - Seed now or skip`
                             : daysUntil === 1
                             ? 'Tomorrow'
                             : `${daysUntil} days away`}
@@ -890,24 +1204,41 @@ const PlantingSchedulePage = () => {
                         Action Required
                       </Badge>
                     )}
+                    {isPast && (
+                      <Badge className="bg-amber-500 text-white">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        OVERDUE
+                      </Badge>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="divide-y divide-gray-100">
-                    {daySchedules.map((schedule, index) => (
+                    {daySchedules
+                      .filter(schedule => !isScheduleSkipped(schedule))
+                      .map((schedule, index) => {
+                        const scheduleKey = getScheduleKey(schedule, index);
+                        const isRemoving = removingScheduleKey === scheduleKey;
+                        return (
                       <div
-                        key={`${schedule.standing_order_id}-${schedule.recipe_id}-${index}`}
-                        className="p-4 hover:bg-gray-50 transition-colors"
+                        key={scheduleKey}
+                        className={`p-4 transition-all duration-300 ease-out ${
+                          isRemoving
+                            ? 'opacity-0 -translate-y-2'
+                            : 'opacity-100 translate-y-0'
+                        } ${isPast ? 'hover:bg-amber-50' : 'hover:bg-gray-50'}`}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <h3 className="font-semibold text-gray-900">{schedule.recipe_name}</h3>
-                              <Badge variant="outline" className="text-xs">
+                              <h3 className={`font-semibold ${isPast ? 'text-amber-900' : 'text-gray-900'}`}>
+                                {schedule.recipe_name}
+                              </h3>
+                              <Badge variant="outline" className={`text-xs ${isPast ? 'border-amber-400 text-amber-700' : ''}`}>
                                 {Math.ceil(schedule.quantity)} {Math.ceil(schedule.quantity) === 1 ? 'tray' : 'trays'}
                               </Badge>
                             </div>
-                            <div className="space-y-1 text-sm text-gray-600">
+                            <div className={`space-y-1 text-sm ${isPast ? 'text-amber-700' : 'text-gray-600'}`}>
                               <div className="flex items-center gap-2">
                                 <Package className="h-4 w-4" />
                                 <span>
@@ -927,24 +1258,38 @@ const PlantingSchedulePage = () => {
                               <div className="flex items-center gap-2">
                                 <Clock className="h-4 w-4" />
                                 <span>
-                                  <strong>Delivery:</strong> {formatDate(schedule.delivery_date)} 
+                                  <strong>Delivery:</strong> {formatDate(schedule.delivery_date)}
                                   {' '}({schedule.days_before_delivery} days to grow)
                                 </span>
                               </div>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCreateTray(schedule)}
-                            className="flex items-center gap-1"
-                          >
-                            Create Tray
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            {isPast && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleSkipSchedule(schedule)}
+                                className="text-amber-700 border-amber-400 hover:bg-amber-100"
+                              >
+                                <X className="h-4 w-4 mr-1" />
+                                Skip
+                              </Button>
+                            )}
+                            <Button
+                              variant={isPast ? "default" : "ghost"}
+                              size="sm"
+                              onClick={() => handleCreateTray(schedule, index)}
+                              className={isPast ? "bg-amber-600 hover:bg-amber-700 text-white" : "flex items-center gap-1"}
+                            >
+                              {isPast ? 'Seed Now' : 'Create Tray'}
+                              <ChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
-                    ))}
+                        );
+                      })}
                   </div>
                 </CardContent>
               </Card>
@@ -953,12 +1298,38 @@ const PlantingSchedulePage = () => {
         </div>
       )}
 
+      {toastNotification && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <Card className="border border-gray-200 shadow-lg bg-white">
+            <div className="flex items-start gap-3">
+              <div className="h-8 w-8 rounded-full bg-emerald-500 flex items-center justify-center text-white">
+                <Check className="h-4 w-4" />
+              </div>
+              <div className="flex-1 space-y-1">
+                <p className="text-xs font-semibold uppercase text-emerald-600">Success</p>
+                <p className="text-sm text-slate-700">{toastNotification.message}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-slate-500 hover:text-slate-900"
+                onClick={() => setToastNotification(null)}
+                aria-label="Dismiss success message"
+              >
+                <span className="text-lg leading-none">×</span>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Seeding Dialog */}
       <Dialog open={!!seedingSchedule} onOpenChange={(open) => {
         if (!open) {
           setSeedingSchedule(null);
-          setSelectedBatchId(null);
+          setSelectedBatchOption(null);
           setAvailableBatches([]);
+          setBatchNotice(null);
           setSeedingDate('');
         }
       }}>
@@ -1010,32 +1381,37 @@ const PlantingSchedulePage = () => {
                   <div className="text-sm text-slate-500">Loading available batches...</div>
                 ) : availableBatches.length === 0 ? (
                   <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    No available batches found for this recipe. Please ensure you have:
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>A seed batch for this variety</li>
-                      <li>Sufficient quantity for {Math.ceil(seedingSchedule.quantity)} {Math.ceil(seedingSchedule.quantity) === 1 ? 'tray' : 'trays'}</li>
-                      <li>An active batch status</li>
-                    </ul>
+                    <p>
+                      {batchNotice ?? 'No available batches found for this recipe. Please ensure you have:'}
+                    </p>
+                    {!batchNotice && (
+                      <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li>A seed batch for this variety</li>
+                        <li>Sufficient quantity for {Math.ceil(seedingSchedule.quantity)} {Math.ceil(seedingSchedule.quantity) === 1 ? 'tray' : 'trays'}</li>
+                        <li>An active batch status</li>
+                      </ul>
+                    )}
                   </div>
                 ) : (
                   <Select
-                    value={selectedBatchId?.toString() || ''}
-                    onValueChange={(value) => setSelectedBatchId(parseInt(value, 10))}
+                    value={selectedBatchOption?.key || ''}
+                    onValueChange={(value) => {
+                      const option = availableBatches.find(batch => batch.key === value);
+                      setSelectedBatchOption(option || null);
+                    }}
                   >
                     <SelectTrigger id="batch-select" className="w-full">
                       <SelectValue placeholder="Select a seed batch" />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableBatches.map((batch) => (
-                        <SelectItem key={batch.batchid} value={batch.batchid.toString()}>
+                      {availableBatches.map((option) => (
+                        <SelectItem key={option.key} value={option.key}>
                           <div className="flex flex-col">
                             <span className="font-medium">
-                              {batch.variety_name} - Batch #{batch.batchid}
+                              {option.label}
                             </span>
                             <span className="text-xs text-slate-500">
-                              {batch.quantity} {batch.unit || 'grams'} available
-                              {batch.lot_number && ` • Lot: ${batch.lot_number}`}
-                              {batch.purchasedate && ` • Purchased: ${new Date(batch.purchasedate).toLocaleDateString()}`}
+                              {option.description}
                             </span>
                           </div>
                         </SelectItem>
@@ -1043,7 +1419,7 @@ const PlantingSchedulePage = () => {
                     </SelectContent>
                   </Select>
                 )}
-                {selectedBatchId && (
+                {selectedBatchOption && (
                   <div className="text-xs text-slate-500">
                     Selected batch will be used to create {Math.ceil(seedingSchedule.quantity)} {Math.ceil(seedingSchedule.quantity) === 1 ? 'tray' : 'trays'}
                   </div>
@@ -1087,7 +1463,7 @@ const PlantingSchedulePage = () => {
             <Button
               onClick={handleSeedingConfirm}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700"
-              disabled={!selectedBatchId || !seedingDate || isSubmittingSeeding.current || availableBatches.length === 0 || isCreatingTray}
+              disabled={!selectedBatchOption || !seedingDate || isSubmittingSeeding.current || availableBatches.length === 0 || isCreatingTray}
             >
               {isCreatingTray ? (
                 'Creating...'
@@ -1101,6 +1477,248 @@ const PlantingSchedulePage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Print Date Selection Dialog */}
+      <Dialog open={showPrintDialog} onOpenChange={setShowPrintDialog}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                <Printer className="h-5 w-5 text-emerald-600" />
+              </div>
+              Print Seeding Plan
+            </DialogTitle>
+            <DialogDescription>
+              Select which day's seeding plan you want to print
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-2">
+            {getAvailablePrintDates().length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">
+                No seeding tasks available for the selected date range.
+              </p>
+            ) : (
+              getAvailablePrintDates().map((dateKey) => {
+                // Use local time (no Z) for display so day names match correctly
+                const dateObj = new Date(dateKey + 'T12:00:00');
+                const isPast = isDatePast(dateKey);
+                // Use ALL schedules for past dates, filtered for future
+                const schedulesForDate = schedules.filter(
+                  s => getLocalDateKey(new Date(s.sow_date)) === dateKey
+                );
+                const totalTrays = schedulesForDate.reduce((sum, s) => sum + Math.ceil(s.quantity), 0);
+                const uniqueRecipes = new Set(schedulesForDate.map(s => s.recipe_id)).size;
+
+                return (
+                  <button
+                    key={dateKey}
+                    onClick={() => handlePrintDate(dateKey)}
+                    className={`w-full p-4 text-left rounded-lg border transition-colors ${
+                      isPast
+                        ? 'border-amber-300 bg-amber-50 hover:border-amber-500 hover:bg-amber-100'
+                        : 'border-gray-200 hover:border-emerald-500 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-gray-900">
+                            {formatDate(dateObj)}
+                          </p>
+                          {isPast && (
+                            <Badge className="bg-amber-500 text-white text-xs">
+                              Overdue
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500">
+                          {uniqueRecipes} {uniqueRecipes === 1 ? 'variety' : 'varieties'} • {totalTrays} {totalTrays === 1 ? 'tray' : 'trays'}
+                        </p>
+                      </div>
+                      <Printer className={`h-5 w-5 ${isPast ? 'text-amber-500' : 'text-gray-400'}`} />
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPrintDialog(false)} className="w-full">
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Print Preview Dialog */}
+      <Dialog open={showPrintPreview} onOpenChange={setShowPrintPreview}>
+        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                <Printer className="h-5 w-5 text-emerald-600" />
+              </div>
+              Print Preview
+            </DialogTitle>
+            <DialogDescription>
+              Preview your seeding plan before printing
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Scrollable Preview Content */}
+          <div className="flex-1 overflow-y-auto border rounded-lg bg-white p-6 my-4" style={{ maxHeight: '60vh' }}>
+            {selectedPrintDate && (() => {
+              const dateSchedules = schedules.filter(s => {
+                return getLocalDateKey(new Date(s.sow_date)) === selectedPrintDate;
+              });
+
+              const groupedByRecipe = dateSchedules.reduce((acc, schedule) => {
+                const key = schedule.recipe_id;
+                if (!acc[key]) {
+                  acc[key] = {
+                    recipe_id: schedule.recipe_id,
+                    recipe_name: schedule.recipe_name,
+                    seed_quantity: schedule.seed_quantity || 0,
+                    total_trays: 0,
+                    orders: [] as { order_name: string; customer_name?: string; quantity: number; delivery_date: Date }[],
+                  };
+                }
+                acc[key].total_trays += Math.ceil(schedule.quantity);
+                acc[key].orders.push({
+                  order_name: schedule.order_name,
+                  customer_name: schedule.customer_name,
+                  quantity: Math.ceil(schedule.quantity),
+                  delivery_date: schedule.delivery_date,
+                });
+                return acc;
+              }, {} as Record<number, { recipe_id: number; recipe_name: string; seed_quantity: number; total_trays: number; orders: { order_name: string; customer_name?: string; quantity: number; delivery_date: Date }[] }>);
+
+              const consolidatedSchedules = Object.values(groupedByRecipe);
+              const sowDate = new Date(selectedPrintDate + 'T12:00:00');
+
+              const formatSeedQuantity = (grams: number) => {
+                if (grams >= 1000) return `${(grams / 1000).toFixed(2)} kg`;
+                return `${grams.toFixed(1)} g`;
+              };
+
+              return (
+                <div className="text-black font-sans">
+                  {/* Header */}
+                  <div className="text-center mb-6 border-b-2 border-black pb-4">
+                    <div className="flex items-center justify-center gap-3 mb-2">
+                      <Sprout className="h-8 w-8" />
+                      <h1 className="text-2xl font-bold tracking-tight">SEEDING PLAN</h1>
+                    </div>
+                    {farmName && <p className="text-lg text-gray-600">{farmName}</p>}
+                    <p className="text-xl font-semibold mt-2">
+                      {sowDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-3 gap-4 mb-6 text-center">
+                    <div className="border border-gray-300 rounded p-3">
+                      <p className="text-sm text-gray-600">Total Varieties</p>
+                      <p className="text-2xl font-bold">{consolidatedSchedules.length}</p>
+                    </div>
+                    <div className="border border-gray-300 rounded p-3">
+                      <p className="text-sm text-gray-600">Total Trays</p>
+                      <p className="text-2xl font-bold">
+                        {consolidatedSchedules.reduce((sum, s) => sum + s.total_trays, 0)}
+                      </p>
+                    </div>
+                    <div className="border border-gray-300 rounded p-3">
+                      <p className="text-sm text-gray-600">Total Seed Needed</p>
+                      <p className="text-2xl font-bold">
+                        {formatSeedQuantity(
+                          consolidatedSchedules.reduce((sum, s) => sum + (s.seed_quantity * s.total_trays), 0)
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Seeding Tasks */}
+                  <div className="space-y-4">
+                    {consolidatedSchedules.map((schedule, index) => (
+                      <div key={schedule.recipe_id} className="border border-gray-400 rounded-lg p-4">
+                        <div className="flex items-start gap-4 mb-3">
+                          <div className="flex-shrink-0 w-8 h-8 border-2 border-gray-600 rounded flex items-center justify-center text-lg font-bold">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1">
+                            <h2 className="text-lg font-bold">{schedule.recipe_name}</h2>
+                            <div className="grid grid-cols-3 gap-4 mt-2 text-sm">
+                              <div>
+                                <span className="text-gray-600">Trays:</span>{' '}
+                                <span className="font-semibold">{schedule.total_trays}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Seed/Tray:</span>{' '}
+                                <span className="font-semibold">{formatSeedQuantity(schedule.seed_quantity)}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Total Seed:</span>{' '}
+                                <span className="font-semibold">{formatSeedQuantity(schedule.seed_quantity * schedule.total_trays)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Orders */}
+                        <div className="ml-12 text-sm">
+                          <p className="text-gray-600 mb-1">For Orders:</p>
+                          <ul className="space-y-1">
+                            {schedule.orders.map((order, i) => (
+                              <li key={i} className="flex items-center gap-2">
+                                <span className="w-2 h-2 bg-gray-400 rounded-full"></span>
+                                <span>
+                                  {order.order_name}
+                                  {order.customer_name && ` (${order.customer_name})`}
+                                  {' - '}{order.quantity} {order.quantity === 1 ? 'tray' : 'trays'}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPrintPreview(false);
+                setSelectedPrintDate(null);
+              }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handlePrint}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hidden Print Component - Only visible when printing */}
+      {selectedPrintDate && (
+        <SeedingPlanPrint
+          schedules={schedules}
+          selectedDate={selectedPrintDate}
+          farmName={farmName}
+        />
+      )}
     </div>
   );
 };

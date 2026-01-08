@@ -67,3 +67,98 @@
     min-height: 100vh;
   }
 }
+
+/* Print Styles */
+@media print {
+  /* Force light mode CSS variables for printing */
+  :root,
+  .dark {
+    --background: 0 0% 100% !important;
+    --foreground: 0 0% 0% !important;
+    --card: 0 0% 100% !important;
+    --card-foreground: 0 0% 0% !important;
+    --popover: 0 0% 100% !important;
+    --popover-foreground: 0 0% 0% !important;
+    --primary: 0 0% 0% !important;
+    --primary-foreground: 0 0% 100% !important;
+    --secondary: 0 0% 96% !important;
+    --secondary-foreground: 0 0% 0% !important;
+    --muted: 0 0% 96% !important;
+    --muted-foreground: 0 0% 45% !important;
+    --accent: 0 0% 96% !important;
+    --accent-foreground: 0 0% 0% !important;
+    --border: 0 0% 80% !important;
+  }
+
+  /* Hide everything except print content */
+  body {
+    background: white !important;
+    background-color: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide navigation, sidebar, dialogs, buttons */
+  nav,
+  aside,
+  header,
+  .no-print,
+  button,
+  [role="dialog"],
+  [data-radix-popper-content-wrapper] {
+    display: none !important;
+  }
+
+  /* Show print-only content */
+  .print-only {
+    display: block !important;
+    background: white !important;
+    background-color: white !important;
+    color: black !important;
+  }
+
+  /* Force all print content to have white background */
+  .print-only,
+  .print-only * {
+    background-color: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Allow specific background colors for styling */
+  .print-only .bg-gray-100,
+  .print-only .bg-gray-50 {
+    background-color: #f9fafb !important;
+  }
+
+  /* Border colors */
+  .print-only .border,
+  .print-only .border-gray-300,
+  .print-only .border-gray-400 {
+    border-color: #9ca3af !important;
+  }
+
+  /* Text colors */
+  .print-only .text-gray-500,
+  .print-only .text-gray-600 {
+    color: #6b7280 !important;
+  }
+
+  /* Reset page margins */
+  @page {
+    margin: 0.5in;
+    size: letter portrait;
+  }
+
+  /* Ensure print content is visible */
+  .print-only * {
+    visibility: visible;
+  }
+
+  /* Better page breaks */
+  .break-inside-avoid {
+    break-inside: avoid;
+  }
+}

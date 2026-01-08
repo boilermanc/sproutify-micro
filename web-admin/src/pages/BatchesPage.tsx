@@ -46,6 +46,8 @@ const stockToneClassMap: Record<StockStatusTone, string> = {
   success: 'text-emerald-600',
 };
 
+const GRAMS_PER_POUND = 453.592;
+
 const getStockStatusInfo = (quantity: number, lowStockThreshold: number | null) => {
   const formattedQuantity = formatQuantityDisplay(quantity);
   if (Number.isFinite(quantity) && quantity < 0.05) {
@@ -73,18 +75,67 @@ const getStockStatusInfo = (quantity: number, lowStockThreshold: number | null) 
   };
 };
 
-const determineBatchStockStatus = (quantity: number | string | null | undefined, threshold: number | string | null | undefined) => {
+const determineBatchStockStatus = (
+  quantity: number | string | null | undefined,
+  threshold: number | string | null | undefined,
+  varietyId?: number | string | null | undefined,
+  minSeedMap?: Record<string, number>,
+  context?: { batchId?: string | number; varietyName?: string }
+) => {
   const qty = parseNumericValue(quantity);
   const thresh = parseNumericValue(threshold);
-  if (qty <= 0) return 'Out of Stock';
-  if (thresh > 0 && qty <= thresh) return 'Low Stock';
-  return 'In Stock';
+  const varietyKey =
+    varietyId !== undefined && varietyId !== null
+      ? varietyId.toString()
+      : undefined;
+  const minSeedRequirement =
+    varietyKey && minSeedMap && Object.prototype.hasOwnProperty.call(minSeedMap, varietyKey)
+      ? minSeedMap[varietyKey]
+      : undefined;
+  const quantityInGrams = Number.isFinite(qty) ? qty * GRAMS_PER_POUND : undefined;
+
+  if (qty <= 0) {
+    console.log('Batch stock status', {
+      batchId: context?.batchId,
+      varietyName: context?.varietyName,
+      quantityInGrams,
+      minSeedPerTray: minSeedRequirement,
+      status: 'Out of Stock',
+    });
+    return 'Out of Stock';
+  }
+
+  let computedStatus = 'In Stock';
+  if (
+    minSeedRequirement !== undefined &&
+    Number.isFinite(minSeedRequirement) &&
+    minSeedRequirement > 0 &&
+    quantityInGrams !== undefined &&
+    Number.isFinite(quantityInGrams) &&
+    quantityInGrams < minSeedRequirement
+  ) {
+    computedStatus = "Can't Seed";
+  } else if (thresh > 0 && qty <= thresh) {
+    computedStatus = 'Low Stock';
+  }
+
+  console.log('Batch stock status', {
+    batchId: context?.batchId,
+    varietyName: context?.varietyName,
+    quantityInGrams,
+    minSeedPerTray: minSeedRequirement,
+    status: computedStatus,
+  });
+
+  return computedStatus;
 };
 
 const getBatchStatusVariant = (status?: string) => {
   switch (status) {
     case 'In Stock':
       return 'default';
+    case "Can't Seed":
+      return 'warning';
     case 'Low Stock':
       return 'secondary';
     case 'Out of Stock':
@@ -100,6 +151,7 @@ const BatchesPage = () => {
   const [vendors, setVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [minSeedPerVariety, setMinSeedPerVariety] = useState<Record<string, number>>({});
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -116,13 +168,53 @@ const BatchesPage = () => {
     purchase_date: new Date().toISOString().split('T')[0],
     cost: '',
   });
+  const vendorOptions = vendors
+    .map((vendor) => {
+      const vendorValue = resolveVendorId(vendor);
+      if (!vendorValue) return null;
+      const vendorLabel = vendor.vendor_name || vendor.vendorname || vendor.name || 'Vendor';
+      return { value: vendorValue, label: vendorLabel };
+    })
+    .filter((option): option is { value: string; label: string } => option !== null);
 
-  const fetchBatches = async () => {
+  const fetchMinSeedRequirements = async () => {
+    try {
+      const { data, error } = await getSupabaseClient()
+        .from('recipes')
+        .select('variety_id, seed_quantity_grams')
+        .not('seed_quantity_grams', 'is', null);
+
+      if (error) throw error;
+
+      const minMap: Record<string, number> = {};
+      (data || []).forEach((recipe) => {
+        const varietyId = recipe.variety_id ?? recipe.varietyid;
+        if (varietyId === undefined || varietyId === null) return;
+
+        const grams = parseNumericValue(recipe.seed_quantity_grams);
+        if (!Number.isFinite(grams) || grams <= 0) return;
+
+        const key = varietyId.toString();
+        if (!Object.prototype.hasOwnProperty.call(minMap, key) || grams < minMap[key]) {
+          minMap[key] = grams;
+        }
+      });
+
+      setMinSeedPerVariety(minMap);
+      return minMap;
+    } catch (error) {
+      console.error('Error fetching recipe seed requirements:', error);
+      return {};
+    }
+  };
+
+  const fetchBatches = async (seedRequirements?: Record<string, number>) => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
 
       const { farmUuid } = JSON.parse(sessionData);
+      const recipeMinSeedMap = seedRequirements ?? minSeedPerVariety;
 
       // Fetch vendors first if not already loaded
       let vendorsList = vendors;
@@ -207,7 +299,16 @@ const BatchesPage = () => {
             trayCount: count || 0,
             low_stock_threshold: thresholdValue,
             stock_quantity: quantityValue,
-            stockStatus: determineBatchStockStatus(quantityValue, thresholdValue),
+            stockStatus: determineBatchStockStatus(
+              quantityValue,
+              thresholdValue,
+              varietyId,
+              recipeMinSeedMap,
+              {
+                batchId,
+                varietyName: variety?.variety_name || variety?.name || '',
+              }
+            ),
             vendors: vendor ? { 
               vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string 
             } : null,
@@ -294,7 +395,7 @@ const BatchesPage = () => {
         const { data, error } = await getSupabaseClient()
           .from('vendors')
           .select('*')
-          .eq('farm_uuid', farmUuid);
+          .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
         return { data, error };
       };
 
@@ -333,7 +434,7 @@ const BatchesPage = () => {
       
       const normalizedVendors = (vendorsResult.data || []).map((v: any) => ({
         ...v,
-        vendor_name: v.vendor_name || v.vendorname || '',
+        vendor_name: v.vendor_name || v.vendorname || v.name || '',
       })).sort((a: any, b: any) => {
         const nameA = (a.vendor_name || '').toLowerCase();
         const nameB = (b.vendor_name || '').toLowerCase();
@@ -348,8 +449,13 @@ const BatchesPage = () => {
   };
 
   useEffect(() => {
-    fetchBatches();
-    fetchFormData();
+    const loadInitialData = async () => {
+      const minSeedMap = await fetchMinSeedRequirements();
+      await fetchBatches(minSeedMap);
+      await fetchFormData();
+    };
+
+    void loadInitialData();
   }, []);
 
   const handleAddBatch = async () => {
@@ -364,7 +470,7 @@ const BatchesPage = () => {
       // Map to actual DB column names: varietyid, vendorid, purchasedate
       const payload: any = {
         varietyid: parseInt(newBatch.variety_id), // Actual DB column
-        vendorid: newBatch.vendor_id ? parseInt(newBatch.vendor_id) : null, // Actual DB column
+        vendorid: toNullableNumber(newBatch.vendor_id),
         quantity: parseFloat(newBatch.quantity),
         lot_number: newBatch.lot_number,
         purchasedate: newBatch.purchase_date, // Actual DB column
@@ -463,7 +569,7 @@ const BatchesPage = () => {
 
       const payload: any = {
         varietyid: parseInt(editingBatch.variety_id), // Actual DB column
-        vendorid: editingBatch.vendor_id ? parseInt(editingBatch.vendor_id) : null, // Actual DB column
+        vendorid: toNullableNumber(editingBatch.vendor_id),
         quantity: quantityForUpdate,
         lot_number: editingBatch.lot_number || null,
         purchasedate: editingBatch.purchase_date, // Actual DB column
@@ -590,24 +696,20 @@ const BatchesPage = () => {
                   <Select 
                     value={newBatch.vendor_id} 
                     onValueChange={(value) => setNewBatch({ ...newBatch, vendor_id: value })}
-                    disabled={vendors.length === 0}
+                    disabled={vendorOptions.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder={vendors.length === 0 ? "No vendors" : "Select vendor"} />
+                      <SelectValue placeholder={vendorOptions.length === 0 ? "No vendors" : "Select vendor"} />
                     </SelectTrigger>
                     <SelectContent>
-                    {vendors.length === 0 ? (
+                    {vendorOptions.length === 0 ? (
                         <div className="px-2 py-1.5 text-sm text-muted-foreground">No vendors</div>
                       ) : (
-                        vendors.map((vendor) => {
-                          const vendorValue = resolveVendorId(vendor);
-                          if (!vendorValue) return null;
-                          return (
-                            <SelectItem key={vendorValue} value={vendorValue}>
-                              {vendor.vendor_name}
-                            </SelectItem>
-                          );
-                        }).filter(Boolean)
+                        vendorOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))
                       )}
                     </SelectContent>
                   </Select>
@@ -862,7 +964,7 @@ const BatchesPage = () => {
 
       {/* Edit Batch Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Batch</DialogTitle>
             <DialogDescription>
@@ -901,16 +1003,11 @@ const BatchesPage = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {vendors.map((vendor) => {
-                        const vendorValue = resolveVendorId(vendor);
-                        if (!vendorValue) return null;
-                        const vendorLabel = vendor.vendor_name || vendor.vendorname || 'Vendor';
-                        return (
-                          <SelectItem key={vendorValue} value={vendorValue}>
-                            {vendorLabel}
-                          </SelectItem>
-                        );
-                      }).filter(Boolean)}
+                      {vendorOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

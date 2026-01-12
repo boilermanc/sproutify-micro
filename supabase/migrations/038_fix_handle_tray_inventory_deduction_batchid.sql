@@ -136,3 +136,4 @@ COMMENT ON FUNCTION handle_tray_inventory_deduction() IS 'Trigger function to de
 
 
 
+

@@ -72,3 +72,4 @@ CREATE TRIGGER trigger_update_supplies_updated_at
 
 
 
+

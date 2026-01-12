@@ -186,6 +186,12 @@ const formatShortDateLabel = (value?: string): string | undefined => {
   return undefined;
 };
 
+type TraySelectionDetail = {
+  trayId: number;
+  varietyName?: string;
+  sowDate?: string;
+};
+
 // Format date string to local date display (handles timezone correctly)
 const formatLocalDate = (value?: string | null): string => {
   if (!value) return 'N/A';
@@ -347,6 +353,31 @@ const getTrayDisplayName = (source?: HasRecipeInfo) => {
 
 export default function DailyFlow() {
   const navigate = useNavigate();
+  const [traySelectionModal, setTraySelectionModal] = useState<{ trayDetails: TraySelectionDetail[]; groupLabel?: string } | null>(null);
+
+  const handleViewTrayDetail = useCallback(
+    (trayId: number) => {
+      setTraySelectionModal(null);
+      navigate(`/trays/${trayId}?mode=edit`);
+    },
+    [navigate]
+  );
+
+  const openTraySelectionModal = useCallback(
+    (trayDetails: TraySelectionDetail[], groupLabel?: string) => {
+      if (trayDetails.length === 0) return;
+      if (trayDetails.length === 1) {
+        handleViewTrayDetail(trayDetails[0].trayId);
+        return;
+      }
+      setTraySelectionModal({ trayDetails, groupLabel });
+    },
+    [handleViewTrayDetail]
+  );
+
+  const closeTraySelectionModal = useCallback(() => {
+    setTraySelectionModal(null);
+  }, []);
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [overdueSeedingTasks, setOverdueSeedingTasks] = useState<DailyTask[]>([]);
   const [skippedOverdueTasks, setSkippedOverdueTasks] = useState<Set<string>>(new Set());
@@ -1694,11 +1725,45 @@ export default function DailyFlow() {
         .update({
           completed: true,
           completed_at: new Date().toISOString(),
+          status: 'Completed',
         })
         .in('tray_id', selectedTrayIds);
 
       if (stepsError) throw stepsError;
       console.log('[DailyFlow] tray_steps update succeeded');
+
+      // Mark order_schedules as completed if this is for a standing order
+      if (batchHarvestModalGroup.customerName && batchHarvestModalGroup.deliveryDate) {
+        // Get standing_order_id from the first task in the group
+        const standingOrderId = batchHarvestModalGroup.tasks[0]?.standingOrderId;
+        
+        if (standingOrderId) {
+          console.log('[DailyFlow] Marking order_schedule as completed:', {
+            standing_order_id: standingOrderId,
+            delivery_date: batchHarvestModalGroup.deliveryDate,
+            customer: batchHarvestModalGroup.customerName
+          });
+
+          const { error: scheduleError } = await client
+            .from('order_schedules')
+            .update({ 
+              status: 'completed'
+            })
+            .eq('standing_order_id', standingOrderId)
+            .eq('scheduled_delivery_date', batchHarvestModalGroup.deliveryDate);
+
+          if (scheduleError) {
+            console.error('[DailyFlow] Error marking order_schedule as completed:', scheduleError);
+            // Don't throw - harvest was successful, just log the error
+          } else {
+            console.log('[DailyFlow] order_schedule marked as completed successfully');
+          }
+        } else {
+          console.log('[DailyFlow] No standing_order_id found, skipping order_schedule update');
+        }
+      } else {
+        console.log('[DailyFlow] Unassigned harvest - no order_schedule to update');
+      }
 
       const orderLabel = batchHarvestModalGroup.customerName || 'this order';
       showNotification(
@@ -2065,10 +2130,13 @@ export default function DailyFlow() {
 
     try {
       const quantityGrams = parseFloat(soakQuantityGrams);
+      // ✅ Pass the selectedDate as the task_date (the soak date, not seeding date)
+      const taskDateStr = selectedDate.toISOString().split('T')[0];
       const soakedSeedId = await completeSoakTask(
         soakTask.requestId,
         selectedBatchId,
-        quantityGrams
+        quantityGrams,
+        taskDateStr // ✅ NEW: Pass the soak date (Jan 11), not seeding date (Jan 12)
       );
 
       showNotification('success', `Soak task completed! Soaked seed ID: ${soakedSeedId}`);
@@ -3283,12 +3351,18 @@ export default function DailyFlow() {
             </div>
             
             <div className="space-y-6">
-              {harvestGroups.map((group) => {
-                const traysReady = group.tasks.reduce((sum, task) => sum + (Number(task.quantity) || 0), 0);
-                const groupLabel = group.customerName ? `${group.customerName} Order` : 'Unassigned Trays';
-                const deliveryLabel = formatShortDateLabel(group.deliveryDate);
-                const groupMismatchedTrays = getMismatchedTraysForGroup(group);
-                const hasMismatchedVarieties = groupMismatchedTrays.length > 0;
+            {harvestGroups.map((group) => {
+              const traysReady = group.tasks.reduce((sum, task) => sum + (Number(task.quantity) || 0), 0);
+              const groupLabel = group.customerName ? `${group.customerName} Order` : 'Unassigned Trays';
+              const deliveryLabel = formatShortDateLabel(group.deliveryDate);
+              const groupMismatchedTrays = getMismatchedTraysForGroup(group);
+              const hasMismatchedVarieties = groupMismatchedTrays.length > 0;
+              const trayDetailCandidates = group.tasks.flatMap((task) => task.trayDetails || []);
+              const uniqueTrayDetails = Array.from(new Map(trayDetailCandidates.map((detail) => [detail.trayId, detail])).values());
+              const fallbackTrayDetails = Array.from(new Set(group.trayIds))
+                .map((trayId) => ({ trayId }));
+              const trayDetailsForModal = uniqueTrayDetails.length > 0 ? uniqueTrayDetails : fallbackTrayDetails;
+              const trayCountForModal = trayDetailsForModal.length;
                 return (
                   <div
                     key={group.key}
@@ -3318,6 +3392,16 @@ export default function DailyFlow() {
                         <Badge variant="secondary" className="bg-slate-100 text-slate-700 mt-1 md:mt-0">
                           {group.tasks.length} {group.tasks.length === 1 ? 'variety' : 'varieties'}
                         </Badge>
+                        {!group.customerName && trayCountForModal > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 h-9"
+                            onClick={() => openTraySelectionModal(trayDetailsForModal, groupLabel)}
+                          >
+                            View {trayCountForModal === 1 ? 'Tray' : `${trayCountForModal} Trays`}
+                          </Button>
+                        )}
                         {group.customerName && (
                           hasMismatchedVarieties ? (
                             <Button
@@ -3351,6 +3435,7 @@ export default function DailyFlow() {
                           isAnimatingOut={animatingOut.has(task.id)}
                           onViewDetails={handleViewDetails}
                           onMarkAsLost={handleMarkAsLost}
+                          navigate={navigate}
                         />
                       ))}
                     </div>
@@ -3756,6 +3841,7 @@ export default function DailyFlow() {
                   isCompleting={completingIds.has(task.id)}
                   isAnimatingOut={animatingOut.has(task.id)}
                   onViewDetails={handleViewDetails}
+                  navigate={navigate}
                 />
               ))}
             </div>
@@ -3797,6 +3883,7 @@ export default function DailyFlow() {
                   onViewDetails={handleViewDetails}
                   onSkip={handleSkip}
                   onMarkAsLost={handleMarkAsLost}
+                  navigate={navigate}
                 />
               ))}
             </div>
@@ -4456,7 +4543,7 @@ export default function DailyFlow() {
                     </Label>
                     <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
                       <p className="text-sm text-slate-600">
-                        <strong>Insufficient inventory:</strong> Only {availableGrams.toFixed(2)}g available, but {seedPerTray}g is needed per tray. 
+                        <strong>Insufficient inventory:</strong> Only {availableGrams.toFixed(2)}g available, but {seedPerTray.toFixed(2)}g is needed per tray. 
                         Not enough for even 1 tray. Please reschedule or cancel this request.
                       </p>
                     </div>
@@ -4608,7 +4695,7 @@ export default function DailyFlow() {
                       <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                         <p className="text-sm font-medium text-green-900 mb-2">Soaked Seed Available</p>
                         <p className="text-base text-green-800">
-                          {availableSoakedSeed.quantity_remaining} {availableSoakedSeed.unit || 'g'} READY TO SEED
+                          {Number(availableSoakedSeed.quantity_remaining).toFixed(2)} {availableSoakedSeed.unit || 'g'} READY TO SEED
                         </p>
                         <p className="text-xs text-green-600 mt-1">
                           Soaked: {new Date(availableSoakedSeed.soak_date).toLocaleDateString()} | 
@@ -4664,7 +4751,7 @@ export default function DailyFlow() {
                                   {batch.variety_name} - Batch #{batch.batchid}
                                 </span>
                                 <span className="text-xs text-slate-500">
-                                  {batch.quantity} {batch.unit || 'grams'} available
+                                  {Number(batch.quantity).toFixed(2)} {batch.unit || 'grams'} available
                                   {batch.lot_number && ` • Lot: ${batch.lot_number}`}
                                 </span>
                               </div>
@@ -4677,7 +4764,7 @@ export default function DailyFlow() {
                     {/* Calculation helper */}
                     {seedPerTray > 0 && (
                       <div className="text-xs text-slate-600">
-                        {traysToSeed || remainingTrays} tray{(traysToSeed || remainingTrays) !== 1 ? 's' : ''} × {seedPerTray}g ={' '}
+                        {traysToSeed || remainingTrays} tray{(traysToSeed || remainingTrays) !== 1 ? 's' : ''} × {seedPerTray.toFixed(2)}g ={' '}
                         {gramsNeeded.toFixed(2)}g needed
                       </div>
                     )}
@@ -4773,7 +4860,7 @@ export default function DailyFlow() {
                   </p>
                   {!isSoakVariety && selectedBatch && seedPerTray > 0 && (
                     <p className="text-xs text-slate-500">
-                      {seedQuantityCompleted ? seedQuantityCompleted : traysToSeed} tray{(seedQuantityCompleted || traysToSeed) !== 1 ? 's' : ''} × {seedPerTray}g = {gramsNeeded.toFixed(2)}g
+                      {seedQuantityCompleted ? seedQuantityCompleted : traysToSeed} tray{(seedQuantityCompleted || traysToSeed) !== 1 ? 's' : ''} × {seedPerTray.toFixed(2)}g = {gramsNeeded.toFixed(2)}g
                     </p>
                   )}
                 </div>
@@ -4829,7 +4916,7 @@ export default function DailyFlow() {
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                 <p className="text-sm font-medium text-slate-900 mb-1">{useSoakedSeedDialog.variety_name}</p>
                 <p className="text-xs text-slate-600">
-                  {useSoakedSeedDialog.quantity_remaining} {useSoakedSeedDialog.unit || 'g'} available
+                  {Number(useSoakedSeedDialog.quantity_remaining).toFixed(2)} {useSoakedSeedDialog.unit || 'g'} available
                 </p>
               </div>
               <div className="space-y-2">
@@ -5625,6 +5712,46 @@ export default function DailyFlow() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={!!traySelectionModal} onOpenChange={(open) => !open && closeTraySelectionModal()}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Choose a tray</DialogTitle>
+            <DialogDescription>
+              {traySelectionModal?.groupLabel
+                ? `This group belongs to ${traySelectionModal.groupLabel}. Pick a tray to view its details.`
+                : 'Select a tray to open its detail page.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-3">
+            {traySelectionModal?.trayDetails.map((detail) => {
+              const sowLabel = detail.sowDate ? formatShortDateLabel(detail.sowDate) : undefined;
+              return (
+                <Button
+                  key={detail.trayId}
+                  variant="outline"
+                  className="w-full justify-between border-slate-200 hover:border-slate-300"
+                  onClick={() => handleViewTrayDetail(detail.trayId)}
+                >
+                  <div className="flex flex-col items-start">
+                    <span className="font-semibold text-sm text-slate-900">Tray {detail.trayId}</span>
+                    <span className="text-xs text-slate-500">
+                      {(detail.varietyName || 'Unknown variety')}
+                      {sowLabel ? ` • Sowed ${sowLabel}` : detail.sowDate ? ` • Sowed ${detail.sowDate}` : ''}
+                    </span>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-slate-500" />
+                </Button>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeTraySelectionModal}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>
   );
@@ -5898,6 +6025,7 @@ interface TaskCardProps {
   onViewDetails?: (task: DailyTask) => void;
   onSkip?: (task: DailyTask) => void;
   onMarkAsLost?: (task: DailyTask) => void;
+  navigate?: ReturnType<typeof useNavigate>;
 }
 
 const TaskCard = ({ 
@@ -5908,8 +6036,25 @@ const TaskCard = ({
   isAnimatingOut = false, 
   onViewDetails, 
   onSkip, 
-  onMarkAsLost 
+  onMarkAsLost,
+  navigate
 }: TaskCardProps) => {
+
+  // Handle click on harvest cards to navigate to tray edit page
+  const handleCardClick = useCallback(() => {
+    if (variant !== 'harvest' || !navigate) return;
+    
+    // If we have tray IDs, navigate to the tray edit page
+    if (task.trayIds && task.trayIds.length > 0) {
+      // If single tray, go directly to edit page
+      if (task.trayIds.length === 1) {
+        navigate(`/trays/${task.trayIds[0]}?mode=edit`);
+      } else {
+        // For multiple trays, go to trays page filtered by recipe
+        navigate(`/trays?recipe=${task.recipeId}`);
+      }
+    }
+  }, [variant, task.trayIds, task.recipeId, navigate]);
 
   // Enhanced Color Schemes (Soft Backgrounds + Strong Accents)
   const styles = {
@@ -5979,15 +6124,20 @@ const TaskCard = ({
   const isCustomerOrder = variant === 'harvest' && Boolean(task.customerName);
   const progressPercent = Math.min((task.dayCurrent / task.dayTotal) * 100, 100);
   const trayCount = task.traysRemaining ?? task.trays;
+  const isHarvestClickable = variant === 'harvest' && task.trayIds && task.trayIds.length > 0;
 
   return (
-    <Card className={cn(
-      "group relative flex flex-col justify-between overflow-hidden transition-all duration-300 bg-white border",
-      "hover:shadow-lg hover:-translate-y-1", 
-      style.border,
-      isCustomerOrder && "ring-1 ring-emerald-200 shadow-emerald-200/50",
-      isAnimatingOut && "opacity-0 translate-x-10 scale-95 transition-all duration-300"
-    )}>
+    <Card 
+      className={cn(
+        "group relative flex flex-col justify-between overflow-hidden transition-all duration-300 bg-white border",
+        "hover:shadow-lg hover:-translate-y-1", 
+        style.border,
+        isCustomerOrder && "ring-1 ring-emerald-200 shadow-emerald-200/50",
+        isAnimatingOut && "opacity-0 translate-x-10 scale-95 transition-all duration-300",
+        isHarvestClickable && "cursor-pointer"
+      )}
+      onClick={isHarvestClickable ? handleCardClick : undefined}
+    >
       
       {/* 1. Header Section: Icon & Batch ID */}
       <div className="p-4 pb-2">
@@ -6118,8 +6268,15 @@ const TaskCard = ({
 
       {/* 4. Action Footer */}
       {variant === 'harvest' ? (
-        <div className="p-3 bg-white border-t border-slate-50 mt-auto text-xs text-slate-500">
-          Harvest actions are recorded from the tray details page; no inline action here.
+        <div className="p-3 bg-white border-t border-slate-50 mt-auto text-xs text-slate-500 flex items-center gap-1.5">
+          {isHarvestClickable ? (
+            <>
+              <span>Click card to view tray details and record harvest</span>
+              <ArrowRight size={12} className="text-slate-400" />
+            </>
+          ) : (
+            <span>Harvest actions are recorded from the tray details page; no inline action here.</span>
+          )}
         </div>
       ) : (
         <div className="p-3 bg-white border-t border-slate-50 mt-auto">

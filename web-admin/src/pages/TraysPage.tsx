@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { useParams } from 'react-router-dom';
 import { checkHarvestReminders } from '../services/notificationService';
@@ -27,6 +28,12 @@ type SortKey =
 type SortConfig = {
   key: SortKey;
   direction: 'asc' | 'desc';
+};
+
+const formatBatchQuantity = (quantity?: number | string | null): string => {
+  if (quantity === null || quantity === undefined || quantity === '') return '0.00';
+  const parsed = typeof quantity === 'string' ? parseFloat(quantity) : Number(quantity);
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00';
 };
 
 const TraysPage = () => {
@@ -59,6 +66,7 @@ const TraysPage = () => {
   const [trayDetails, setTrayDetails] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const { trayId: routeTrayId } = useParams<{ trayId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [hasOpenedTrayFromParam, setHasOpenedTrayFromParam] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [newTray, setNewTray] = useState<{
@@ -1159,6 +1167,8 @@ const TraysPage = () => {
     }
   }, []);
 
+  const routeMode = searchParams.get('mode');
+
   useEffect(() => {
     if (!routeTrayId) {
       setHasOpenedTrayFromParam(false);
@@ -1170,16 +1180,24 @@ const TraysPage = () => {
     const trayIdNumber = Number(routeTrayId);
     if (Number.isNaN(trayIdNumber)) return;
 
-    setHasOpenedTrayFromParam(true);
-
     const matchedTray = trays.find((tray) => tray.id === trayIdNumber);
-    if (matchedTray) {
+
+    if (routeMode === 'edit') {
+      handleEditTray(matchedTray ? { ...matchedTray, id: matchedTray.id } : { id: trayIdNumber, trayId: routeTrayId });
+    } else if (matchedTray) {
       handleViewTray(matchedTray);
-      return;
+    } else {
+      handleViewTray({ id: trayIdNumber, trayId: routeTrayId });
     }
 
-    handleViewTray({ id: trayIdNumber, trayId: routeTrayId });
-  }, [routeTrayId, trays, hasOpenedTrayFromParam, handleViewTray]);
+    setHasOpenedTrayFromParam(true);
+
+    if (routeMode) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('mode');
+      setSearchParams(nextParams);
+    }
+  }, [routeTrayId, trays, hasOpenedTrayFromParam, handleViewTray, handleEditTray, routeMode, searchParams, setSearchParams]);
 
   // Handle opening lost tray dialog
   const handleMarkAsLost = (tray: any) => {
@@ -1655,7 +1673,7 @@ const TraysPage = () => {
                 {trayDetails.batch && (
                   <div className="space-y-1">
                     <Label className="text-sm font-semibold text-muted-foreground">Batch Quantity</Label>
-                    <p className="text-base">{trayDetails.batch.quantity}g available</p>
+                    <p className="text-base">{formatBatchQuantity(trayDetails.batch.quantity)}g available</p>
                   </div>
                 )}
               </div>
@@ -1739,7 +1757,15 @@ const TraysPage = () => {
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Edit Tray</DialogTitle>
+            <DialogTitle>
+              {editingTray ? (
+                <>
+                  {editingTray.variety || editingTray.recipes?.varieties?.name || editingTray.recipes?.variety_name || 'Unknown Variety'} - Tray {editingTray.trayId || editingTray.tray_unique_id || editingTray.id}
+                </>
+              ) : (
+                'Edit Tray'
+              )}
+            </DialogTitle>
             <DialogDescription>
               Update tray information
             </DialogDescription>

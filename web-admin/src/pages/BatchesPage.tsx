@@ -145,12 +145,17 @@ const getBatchStatusVariant = (status?: string) => {
   }
 };
 
+type ActiveFilter = 'all' | 'active' | 'inactive';
+type SortOption = 'purchase_date' | 'variety' | 'quantity' | 'stock_status';
+
 const BatchesPage = () => {
   const [batches, setBatches] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('purchase_date');
   const [minSeedPerVariety, setMinSeedPerVariety] = useState<Record<string, number>>({});
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -628,13 +633,45 @@ const BatchesPage = () => {
     }
   };
 
-  const filteredBatches = batches.filter(batch => {
-    // Normalized field names should already be set
-    const varietyName = (batch.variety_name || '') as string;
-    const lotNumber = (batch.lot_number || '') as string;
-    return varietyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           lotNumber.toLowerCase().includes(searchTerm.toLowerCase());
-  });
+  const filteredBatches = batches
+    .filter(batch => {
+      // Normalized field names should already be set
+      const varietyName = (batch.variety_name || '') as string;
+      const lotNumber = (batch.lot_number || '') as string;
+      const matchesSearch = varietyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+             lotNumber.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Apply active filter
+      const isActive = batch.is_active !== undefined ? batch.is_active : true;
+      const matchesActiveFilter = 
+        activeFilter === 'all' ? true :
+        activeFilter === 'active' ? isActive :
+        !isActive;
+      
+      return matchesSearch && matchesActiveFilter;
+    })
+    .sort((a, b) => {
+      // Apply sorting
+      switch (sortBy) {
+        case 'variety':
+          return (a.variety_name || '').localeCompare(b.variety_name || '');
+        case 'quantity':
+          return parseNumericValue(b.quantity) - parseNumericValue(a.quantity);
+        case 'stock_status':
+          const statusOrder = { 'Out of Stock': 0, "Can't Seed": 1, 'Low Stock': 2, 'In Stock': 3 };
+          const aStatus = statusOrder[a.stockStatus as keyof typeof statusOrder] ?? 4;
+          const bStatus = statusOrder[b.stockStatus as keyof typeof statusOrder] ?? 4;
+          return aStatus - bStatus;
+        case 'purchase_date':
+        default:
+          const dateA = a.purchasedate || a.purchase_date || '';
+          const dateB = b.purchasedate || b.purchase_date || '';
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+          return new Date(dateB).getTime() - new Date(dateA).getTime();
+      }
+    });
 
   if (loading) {
     return (
@@ -794,15 +831,78 @@ const BatchesPage = () => {
         </Dialog>
       </div>
 
-      <div className="flex items-center space-x-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search batches..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-8"
-          />
+      <div className="space-y-4">
+        {/* Filter and Sort Chips */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-muted-foreground">Status:</span>
+          <div className="flex gap-2">
+            <Badge
+              variant={activeFilter === 'all' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setActiveFilter('all')}
+            >
+              All
+            </Badge>
+            <Badge
+              variant={activeFilter === 'active' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setActiveFilter('active')}
+            >
+              Active
+            </Badge>
+            <Badge
+              variant={activeFilter === 'inactive' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setActiveFilter('inactive')}
+            >
+              Inactive
+            </Badge>
+          </div>
+          
+          <span className="text-sm font-medium text-muted-foreground ml-4">Sort by:</span>
+          <div className="flex gap-2">
+            <Badge
+              variant={sortBy === 'purchase_date' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setSortBy('purchase_date')}
+            >
+              Purchase Date
+            </Badge>
+            <Badge
+              variant={sortBy === 'variety' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setSortBy('variety')}
+            >
+              Variety
+            </Badge>
+            <Badge
+              variant={sortBy === 'quantity' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setSortBy('quantity')}
+            >
+              Quantity
+            </Badge>
+            <Badge
+              variant={sortBy === 'stock_status' ? 'default' : 'outline'}
+              className="cursor-pointer hover:bg-primary/90"
+              onClick={() => setSortBy('stock_status')}
+            >
+              Stock Status
+            </Badge>
+          </div>
+        </div>
+
+        {/* Search Bar */}
+        <div className="flex items-center space-x-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search batches..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-8"
+            />
+          </div>
         </div>
       </div>
 
@@ -815,6 +915,7 @@ const BatchesPage = () => {
               <TableHead>Purchase Date</TableHead>
               <TableHead>Quantity</TableHead>
               <TableHead>Stock Status</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead>Trays</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -823,7 +924,7 @@ const BatchesPage = () => {
           <TableBody>
             {filteredBatches.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="p-0 border-none">
+                <TableCell colSpan={9} className="p-0 border-none">
                   <div className="p-8 flex flex-col items-center justify-center text-center">
                      {searchTerm ? (
                        <>
@@ -862,6 +963,14 @@ const BatchesPage = () => {
                   <TableCell>
                     <Badge variant={getBatchStatusVariant(batch.stockStatus)} className="capitalize text-center">
                       {batch.stockStatus || 'Unknown'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge 
+                      variant={(batch.is_active !== undefined ? batch.is_active : true) ? 'default' : 'secondary'}
+                      className="capitalize"
+                    >
+                      {(batch.is_active !== undefined ? batch.is_active : true) ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>{batch.vendors?.vendor_name || '-'}</TableCell>

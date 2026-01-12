@@ -37,6 +37,100 @@ const formatDateString = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+interface OrderFulfillmentContext {
+  orderDetails: any[];
+  orderError: any;
+  completedScheduleKeys: Set<string>;
+}
+
+const buildActiveOrderLookup = (orderDetails: any[]): Map<string, boolean> => {
+  const lookup = new Map<string, boolean>();
+  orderDetails.forEach((detail) => {
+    const normalizedCustomerName = detail.customer_name?.trim().toLowerCase();
+    const recipeId = detail.recipe_id ?? '';
+    if (!normalizedCustomerName || !detail.recipe_id) {
+      return;
+    }
+    const key = `${normalizedCustomerName}||${recipeId}`;
+    lookup.set(key, true);
+  });
+  return lookup;
+};
+
+const fetchOrderFulfillmentContext = async (
+  farmUuid: string,
+  targetDateStr: string,
+  forceRefresh: boolean
+): Promise<OrderFulfillmentContext> => {
+  const context: OrderFulfillmentContext = {
+    orderDetails: [],
+    orderError: null,
+    completedScheduleKeys: new Set<string>(),
+  };
+
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = formatDateString(today);
+
+    const { data: orderDetails, error: orderError } = await getSupabaseClient()
+      .from('order_fulfillment_status')
+      .select('*')
+      .eq('farm_uuid', farmUuid)
+      .eq('delivery_date', targetDateStr)
+      .gt('trays_needed', 0);
+
+    context.orderDetails = orderDetails || [];
+    context.orderError = orderError;
+
+    console.log('[fetchDailyTasks] Fresh fetch from order_fulfillment_status:', {
+      forceRefresh,
+      targetDate: targetDateStr,
+      totalItems: orderDetails?.length || 0,
+      allItems: orderDetails?.map((item: any) => ({
+        recipe_name: item.recipe_name,
+        recipe_id: item.recipe_id,
+        customer_name: item.customer_name,
+        delivery_date: item.delivery_date,
+        standing_order_id: item.standing_order_id,
+        sow_date: item.sow_date,
+        harvest_date: item.harvest_date,
+        trays_ready: item.trays_ready,
+        trays_needed: item.trays_needed
+      })) || [],
+      timestamp: new Date().toISOString(),
+      today: todayStr,
+    });
+
+    const { data: completedSchedules, error: completedSchedulesError } = await getSupabaseClient()
+      .from('order_schedules')
+      .select('standing_order_id, scheduled_delivery_date')
+      .eq('farm_uuid', farmUuid)
+      .eq('scheduled_delivery_date', targetDateStr)
+      .eq('status', 'completed');
+
+    if (completedSchedulesError) {
+      console.warn('[fetchDailyTasks] Error fetching completed order_schedules:', completedSchedulesError);
+    } else if (completedSchedules) {
+      completedSchedules.forEach((schedule: any) => {
+        const deliveryDate = formatDateString(parseLocalDate(schedule.scheduled_delivery_date) || new Date(schedule.scheduled_delivery_date));
+        const key = `${schedule.standing_order_id}-${deliveryDate}`;
+        context.completedScheduleKeys.add(key);
+      });
+      console.log('[fetchDailyTasks] Completed schedules for target date:', {
+        targetDate: targetDateStr,
+        count: completedSchedules.length,
+        keys: Array.from(context.completedScheduleKeys.values()),
+      });
+    }
+  } catch (error) {
+    console.warn('[fetchDailyTasks] Error fetching order fulfillment context:', error);
+    context.orderError = error;
+  }
+
+  return context;
+};
+
 export interface DailyTask {
   id: string;
   action: string;
@@ -49,6 +143,7 @@ export interface DailyTask {
   traysRemaining?: number; // Trays remaining to complete (from view)
   status: 'urgent' | 'pending';
   trayIds: number[];
+  trayDetails?: Array<{ trayId: number; varietyName?: string; sowDate?: string }>;
   recipeId: number;
   stepId?: number;
   stepDescription?: string;
@@ -181,6 +276,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             sow_date,
             batch_id,
             location,
+            customer_id,
             recipes(
               recipe_id,
               recipe_name,
@@ -195,6 +291,23 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         if (!traysError && activeTrays && activeTrays.length > 0) {
           const traysWithRecipes = activeTrays.filter((t: any) => t.recipes && t.recipe_id);
           const recipeIds = [...new Set(traysWithRecipes.map((t: any) => t.recipe_id).filter(Boolean))];
+          
+          // Build customer name lookup map for supplemental tray step tasks
+          const trayCustomerIds = [...new Set(traysWithRecipes.map((t: any) => t.customer_id).filter(Boolean))];
+          const trayCustomerMap: Record<number, string> = {};
+          if (trayCustomerIds.length > 0) {
+            const { data: customersData } = await getSupabaseClient()
+              .from('customers')
+              .select('customerid, name')
+              .in('customerid', trayCustomerIds);
+            if (customersData) {
+              customersData.forEach((customer: any) => {
+                if (customer.customerid && customer.name) {
+                  trayCustomerMap[customer.customerid] = customer.name;
+                }
+              });
+            }
+          }
           
           if (recipeIds.length > 0) {
             // Fetch steps for these recipes
@@ -333,15 +446,30 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 
                 // Only add if it's scheduled for today and not already in tasksData
                 if (isToday && currentStep && !isStepCompleted && !isStepSkipped) {
-                  // Add the step task itself (unless the step is just watering or seeding-related)
-                  // Seeding steps should only appear before trays are created, not for active trays
+                  // Add the step task itself (unless the step is just watering or seeding/soaking/harvest-related)
+                  // Seeding and soaking steps should only appear before trays are created, not for active trays
+                  // Harvest steps are handled by the dedicated harvest task generation code
                   const stepNameLower = stepName?.toLowerCase() || '';
                   const isSeedingStep = stepNameLower.includes('seed') && 
                                        (stepNameLower.includes('tray') || stepNameLower === 'seed' || stepNameLower === 'seeding');
+                  const isSoakingStep = stepNameLower.includes('soak');
+                  const isHarvestStep = stepNameLower.includes('harvest'); // ✅ FIX: Exclude harvest steps - handled by dedicated harvest logic
+                  
+                  if (isHarvestStep) {
+                    console.log('[fetchDailyTasks] Filtering out harvest step from supplemental tray_step tasks:', {
+                      tray_id: tray.tray_id,
+                      step_name: stepName,
+                      recipe_id: recipeId,
+                      reason: 'Harvest tasks are handled by dedicated harvest logic'
+                    });
+                  }
+                  
                   if (stepName && 
                       stepNameLower !== 'water' && 
                       !stepNameLower.includes('mist') && 
-                      !isSeedingStep) {
+                      !isSeedingStep &&
+                      !isSoakingStep &&
+                      !isHarvestStep) { // ✅ FIX: Don't create harvest tasks - those are handled separately
                     // Check if this task already exists in tasksData (by recipe_id + step_id + action)
                     // Also check if any tray from this task is already in an existing task
                     const existsInView = tasksData?.some((t: any) => {
@@ -364,11 +492,21 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                         t.action === stepName
                       );
 
+                      // Get customer info for this tray
+                      const customerName = tray.customer_id ? trayCustomerMap[tray.customer_id] : undefined;
+                      
                       if (existingTask) {
                         // Add tray to existing task
                         existingTask.trayIds.push(tray.tray_id);
                         existingTask.trays += 1;
                         existingTask.traysRemaining = (existingTask.traysRemaining || 0) + 1;
+                        
+                        // Preserve customerName if this tray has a customer
+                        // Note: If multiple trays in same task have different customers, preserve the first one
+                        if (!existingTask.customerName && customerName) {
+                          existingTask.customerName = customerName;
+                          existingTask.customerId = tray.customer_id;
+                        }
                       } else {
                         // Create new aggregated task - use same ID format as view tasks
                         supplementalTasks.push({
@@ -377,6 +515,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                           crop: recipe.variety_name || recipe.recipe_name || 'Unknown',
                           batchId: tray.batch_id ? `B-${tray.batch_id}` : 'N/A',
                           location: tray.location || 'Not set',
+                          customerName: customerName || undefined,
+                          customerId: tray.customer_id || undefined,
                           dayCurrent: daysSinceSow,
                           dayTotal: totalDays,
                           trays: 1,
@@ -418,6 +558,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     }
 
     const targetDateStr = targetDate ? formatDateString(targetDate) : taskDate;
+    const orderFulfillmentContext = targetDate
+      ? await fetchOrderFulfillmentContext(farmUuid, targetDateStr, forceRefresh)
+      : null;
 
     // Fetch seeding/soaking tasks from planting_schedule_view where sow_date = today
     const seedingTasks: DailyTask[] = [];
@@ -482,7 +625,9 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
               const unit = (step.duration_unit || 'Days').toUpperCase();
               let days = duration;
               if (unit === 'HOURS') {
-                days = duration >= 12 ? 1 : 0;
+                // Any soak >= 6 hours should be done the day before to allow for evening soak and morning seeding
+                // This covers typical overnight soaks (6-12+ hours)
+                days = duration >= 6 ? 1 : 0;
               }
               soakDurationByRecipe[step.recipe_id] = days;
             }
@@ -742,6 +887,11 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             }
           });
 
+          const respectsOrderContext = !!orderFulfillmentContext && !orderFulfillmentContext.orderError;
+          const activeOrderLookup = orderFulfillmentContext
+            ? buildActiveOrderLookup(orderFulfillmentContext.orderDetails)
+            : new Map<string, boolean>();
+
           const readyTrays = (activeTrays || []).reduce((acc: Array<{ tray: any; daysSinceSow: number; totalDays: number }>, tray: any) => {
             if (!tray.recipes || !tray.recipe_id || !tray.sow_date) {
               return acc;
@@ -805,6 +955,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             quantity: number;
             dayCurrent: number;
             dayTotal: number;
+            trayInfos: Array<{ trayId: number; varietyName?: string; sowDate?: string }>;
           }>();
 
           readyTrays.forEach((item: any) => {
@@ -827,6 +978,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 quantity: 0,
                 dayCurrent: 0,
                 dayTotal: 0,
+                trayInfos: [],
               });
             }
             const group = traysByCustomer.get(key)!;
@@ -840,6 +992,11 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             group.quantity += 1;
             group.dayCurrent = Math.max(group.dayCurrent, item.daysSinceSow);
             group.dayTotal = Math.max(group.dayTotal, item.totalDays);
+            group.trayInfos.push({
+              trayId: tray.tray_id,
+              varietyName: currentVarietyName,
+              sowDate: tray.sow_date || undefined,
+            });
           });
 
           traysByCustomer.forEach((group) => {
@@ -848,26 +1005,44 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
               ? (group.batchIds.size === 1 ? `B-${[...group.batchIds][0]}` : `Multiple (${group.batchIds.size})`)
               : 'N/A';
             const customerName = group.customerId ? trayCustomerMap[group.customerId] : undefined;
-            const key = `harvest-${group.recipeName}-${group.customerId ?? 'unassigned'}-${targetDateStr}-${group.location || 'unknown'}`;
-            const dayCurrent = group.dayCurrent || recipeTotalDays[group.recipeId] || 0;
-            const dayTotal = group.dayTotal || recipeTotalDays[group.recipeId] || 0;
-            harvestTasks.push({
-              id: key,
+            const normalizedCustomerName = customerName?.trim().toLowerCase();
+            const orderLookupKey = `${normalizedCustomerName || ''}||${group.recipeId}`;
+            const hasActiveOrder = !respectsOrderContext
+              ? true
+              : !!(normalizedCustomerName && activeOrderLookup.has(orderLookupKey));
+
+            // Always preserve customerName if tray has customer_id
+            // Only use hasActiveOrder to determine deliveryDate
+            const task: DailyTask = {
+              id: `harvest-${group.recipeName}-${group.customerId ?? 'unassigned'}-${targetDateStr}-${group.location || 'unknown'}`,
               action: `Harvest ${group.varietyName || group.recipeName}`,
               crop: group.varietyName || group.recipeName,
               batchId: batchIdDisplay,
               location: group.location || 'Not set',
-              customerName: customerName || undefined,
+              customerName: customerName || undefined, // Preserve if tray has customer_id
               customerId: group.customerId,
-              deliveryDate: targetDateStr,
-              dayCurrent,
-              dayTotal,
+              deliveryDate: hasActiveOrder ? targetDateStr : undefined, // Only set if active order today
+              dayCurrent: group.dayCurrent || recipeTotalDays[group.recipeId] || 0,
+              dayTotal: group.dayTotal || recipeTotalDays[group.recipeId] || 0,
               trays: group.quantity,
               status: 'urgent',
               trayIds: group.trayIds,
               recipeId: group.recipeId,
               taskSource: 'tray_step',
               quantity: group.quantity,
+              trayDetails: group.trayInfos,
+              notes: customerName && !hasActiveOrder ? `Ready for ${customerName} but no active order today` : undefined,
+            };
+
+            harvestTasks.push(task);
+            console.log('[fetchDailyTasks] Supplemental harvest task created:', {
+              count: harvestTasks.length,
+              customerName: task.customerName,
+              customerId: task.customerId,
+              hasActiveOrder,
+              deliveryDate: task.deliveryDate,
+              recipeId: group.recipeId,
+              trays: group.quantity,
             });
           });
         }
@@ -1326,60 +1501,16 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         today.setHours(0, 0, 0, 0);
         const todayStr = formatDateString(today);
         const targetDateStr = formatDateString(targetDate);
-        
-        // Get orders ONLY for today's delivery date
-        // Note: order_fulfillment_status view filters out skipped items correctly
-        // Daily Flow shows only today's at-risk items
-        const { data: orderDetails, error: orderError } = await getSupabaseClient()
-          .from('order_fulfillment_status')
-          .select('*')
-          .eq('farm_uuid', farmUuid)
-          .eq('delivery_date', targetDateStr) // Only items due today
-          .gt('trays_needed', 0); // Only items that need trays
-        
-        console.log('[fetchDailyTasks] Fresh fetch from order_fulfillment_status:', {
-          forceRefresh,
-          targetDate: targetDateStr,
-          totalItems: orderDetails?.length || 0,
-          allItems: orderDetails?.map((item: any) => ({
-            recipe_name: item.recipe_name,
-            recipe_id: item.recipe_id,
-            customer_name: item.customer_name,
-            delivery_date: item.delivery_date,
-            standing_order_id: item.standing_order_id,
-            sow_date: item.sow_date,
-            harvest_date: item.harvest_date,
-            trays_ready: item.trays_ready,
-            trays_needed: item.trays_needed
-          })) || [],
-          timestamp: new Date().toISOString()
-        });
+        const orderContext = orderFulfillmentContext || {
+          orderDetails: [],
+          orderError: null,
+          completedScheduleKeys: new Set<string>(),
+        };
+        const orderDetails = orderContext.orderDetails || [];
+        const orderError = orderContext.orderError;
+        const completedScheduleKeys = orderContext.completedScheduleKeys || new Set<string>();
 
-        // Fetch completed order schedules for this delivery date to suppress already-fulfilled items
-        const completedScheduleKeys = new Set<string>();
-        const { data: completedSchedules, error: completedSchedulesError } = await getSupabaseClient()
-          .from('order_schedules')
-          .select('standing_order_id, scheduled_delivery_date')
-          .eq('farm_uuid', farmUuid)
-          .eq('scheduled_delivery_date', targetDateStr)
-          .eq('status', 'completed');
-
-        if (completedSchedulesError) {
-          console.warn('[fetchDailyTasks] Error fetching completed order_schedules:', completedSchedulesError);
-        } else if (completedSchedules) {
-          completedSchedules.forEach((schedule: any) => {
-            const deliveryDate = formatDateString(parseLocalDate(schedule.scheduled_delivery_date) || new Date(schedule.scheduled_delivery_date));
-            const key = `${schedule.standing_order_id}-${deliveryDate}`;
-            completedScheduleKeys.add(key);
-          });
-          console.log('[fetchDailyTasks] Completed schedules for target date:', {
-            targetDate: targetDateStr,
-            count: completedSchedules.length,
-            keys: Array.from(completedScheduleKeys.values()),
-          });
-        }
-
-        if (!orderError && orderDetails) {
+        if (!orderError && orderDetails.length > 0) {
           console.log('[fetchDailyTasks] Processing', orderDetails.length, 'items from order_fulfillment_status');
           
           // Aggregate by recipe + customer + delivery_date to avoid duplicates
@@ -1599,8 +1730,24 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
     // Combine tasks from view only - supplemental, harvest, and at-risk tasks will be added later
     const allTasksData = [...(tasksData || [])];
+    console.log('[fetchDailyTasks] View task data snapshot before supplemental logic:', {
+      tasksDataLength: tasksData?.length ?? 0,
+      allTasksDataLength: allTasksData.length,
+      harvestTasksCount: harvestTasks.length,
+      supplementalTasksCount: supplementalTasks.length,
+    });
 
-    if (allTasksData.length === 0) {
+    if (
+      allTasksData.length === 0 &&
+      harvestTasks.length === 0 &&
+      supplementalTasks.length === 0 &&
+      atRiskTasks.length === 0
+    ) {
+      console.log('[fetchDailyTasks] No tasks from any source, returning empty', {
+        harvestTasksCount: harvestTasks.length,
+        supplementalTasksCount: supplementalTasks.length,
+        atRiskTasksCount: atRiskTasks.length,
+      });
       return [];
     }
 
@@ -2425,6 +2572,12 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         continue;
       }
       if (seenTaskIds.has(task.id)) {
+        console.log('[fetchDailyTasks] Skipping duplicate task during dedup:', {
+          id: task.id,
+          action: task.action,
+          crop: task.crop,
+          taskSource: task.taskSource
+        });
         continue;
       }
       seenTaskIds.add(task.id);
@@ -2452,6 +2605,12 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         atRisk: finalTasks.filter(t => t.action.toLowerCase().includes('at risk')).length,
       harvest: finalTasks.filter(t => t.action.toLowerCase().startsWith('harvest')).length
       }
+    });
+    const harvestActions = dedupedTasks.filter(t => t.action?.toLowerCase().startsWith('harvest'));
+    console.log('[fetchDailyTasks] Deduped task summary before return:', {
+      total: dedupedTasks.length,
+      harvest: harvestActions.length,
+      harvestIds: harvestActions.slice(0, 10).map((t) => ({ id: t.id, notes: t.notes }))
     });
     
     return dedupedTasks;
@@ -2854,6 +3013,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
               scheduled_date: taskDateStr,
               completed: true,
               completed_at: now,
+              status: 'Completed',
             });
 
           if (insertError) {
@@ -2868,6 +3028,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
             .update({
               completed: true,
               completed_at: now,
+              status: 'Completed',
             })
             .eq('tray_id', trayId)
             .eq('step_id', task.stepId)
@@ -2934,6 +3095,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
                       step_id: matchingStep.step_id,
                       completed: true,
                       completed_at: now,
+                      status: 'Completed',
                     });
 
                   if (insertError) {
@@ -2947,6 +3109,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
                     .update({
                       completed: true,
                       completed_at: now,
+                      status: 'Completed',
                     })
                     .eq('tray_id', trayId)
                     .eq('step_id', matchingStep.step_id);
@@ -2990,75 +3153,234 @@ const markSeedingTrayStepsCompleted = async ({
   trayIds,
   completedAt,
 }: MarkSeedingTrayStepsOptions): Promise<void> => {
-  if (!farmUuid || !recipeId) return;
+  console.log('🔍 [markSeedingTrayStepsCompleted] CALLED with params:', {
+    farmUuid,
+    recipeId,
+    taskDateStr,
+    trayIds,
+    completedAt,
+  });
+
+  if (!farmUuid || !recipeId) {
+    console.warn('⚠️ [markSeedingTrayStepsCompleted] Missing required params - farmUuid or recipeId');
+    return;
+  }
 
   const client = getSupabaseClient();
-  if (!client) return;
+  if (!client) {
+    console.error('❌ [markSeedingTrayStepsCompleted] No Supabase client');
+    return;
+  }
 
   const targetDate = taskDateStr || formatDateString(new Date());
   const now = completedAt || new Date().toISOString();
+  console.log('📅 [markSeedingTrayStepsCompleted] Using dates:', { targetDate, now });
 
-  const { data: seedSteps, error: seedStepError } = await client
+  // ✅ FIX: Fetch BOTH seeding AND soaking steps
+  const { data: allSteps, error: stepsError } = await client
     .from('steps')
-    .select('step_id')
+    .select('step_id, step_name')
     .eq('recipe_id', recipeId)
-    .ilike('step_name', '%seed%');
+    .or('step_name.ilike.%seed%,step_name.ilike.%soak%');
 
-  if (seedStepError) {
-    console.error('[DailyFlow] Error fetching seeding steps:', seedStepError);
+  if (stepsError) {
+    console.error('❌ [markSeedingTrayStepsCompleted] Error fetching seeding/soaking steps:', stepsError);
     return;
   }
 
-  const stepIds = (seedSteps || [])
-    .map((step: any) => step.step_id)
-    .filter((id: number | null | undefined) => !!id);
+  console.log('📋 [markSeedingTrayStepsCompleted] Found steps from database:', allSteps);
 
-  if (stepIds.length === 0) {
-    console.log('[DailyFlow] No seeding steps found for recipe:', recipeId);
+  // Separate seeding and soaking steps
+  const seedSteps: number[] = [];
+  const soakSteps: number[] = [];
+  
+  (allSteps || []).forEach((step: any) => {
+    const stepNameLower = (step.step_name || '').toLowerCase();
+    if (stepNameLower.includes('soak')) {
+      soakSteps.push(step.step_id);
+    } else if (stepNameLower.includes('seed')) {
+      seedSteps.push(step.step_id);
+    }
+  });
+
+  console.log('🎯 [markSeedingTrayStepsCompleted] Categorized steps:', {
+    seedSteps,
+    soakSteps,
+    seedStepCount: seedSteps.length,
+    soakStepCount: soakSteps.length,
+  });
+
+  if (seedSteps.length === 0 && soakSteps.length === 0) {
+    console.warn('⚠️ [markSeedingTrayStepsCompleted] No seeding or soaking steps found for recipe:', recipeId);
     return;
   }
 
+  const allStepIds = [...seedSteps, ...soakSteps];
+
+  // ✅ FIX: ALWAYS fetch tray_ids from trays table first to ensure farm_uuid filtering
+  const { data: farmTrays, error: traysError } = await client
+    .from('trays')
+    .select('tray_id')
+    .eq('farm_uuid', farmUuid)
+    .eq('recipe_id', recipeId)
+    .is('harvest_date', null); // Only active trays
+
+  if (traysError) {
+    console.error('❌ [markSeedingTrayStepsCompleted] Error fetching trays for farm:', traysError);
+    return;
+  }
+
+  const farmTrayIds = (farmTrays || []).map((t: any) => t.tray_id);
+  console.log('🔢 [markSeedingTrayStepsCompleted] Farm trays for this recipe:', {
+    farmTrayIds,
+    count: farmTrayIds.length,
+  });
+  
+  if (farmTrayIds.length === 0) {
+    console.warn('⚠️ [markSeedingTrayStepsCompleted] No active trays found for farm/recipe:', { farmUuid, recipeId });
+    return;
+  }
+
+  // If trayIds provided, intersect with farm tray IDs (security: only update trays that belong to farm)
+  const effectiveTrayIds = trayIds && trayIds.length > 0
+    ? farmTrayIds.filter(id => trayIds.includes(id))
+    : farmTrayIds;
+
+  console.log('✅ [markSeedingTrayStepsCompleted] Effective tray IDs after filtering:', {
+    providedTrayIds: trayIds,
+    farmTrayIds,
+    effectiveTrayIds,
+    count: effectiveTrayIds.length,
+  });
+
+  if (effectiveTrayIds.length === 0) {
+    console.warn('⚠️ [markSeedingTrayStepsCompleted] No matching trays after filtering:', { farmUuid, recipeId, providedTrayIds: trayIds });
+    return;
+  }
+
+  // ✅ Query tray_steps with the verified tray IDs
   let trayStepsQuery = client
     .from('tray_steps')
-    .select('id')
-    .in('step_id', stepIds)
-    .eq('scheduled_date', targetDate)
+    .select('tray_step_id, step_id, tray_id')
+    .in('step_id', allStepIds)
     .eq('completed', false)
-    .eq('trays.farm_uuid', farmUuid);
+    .in('tray_id', effectiveTrayIds);
 
-  if (trayIds && trayIds.length > 0) {
-    trayStepsQuery = trayStepsQuery.in('tray_id', trayIds);
+  const dateConditions = [];
+  if (targetDate) {
+    dateConditions.push(`scheduled_date.eq.${targetDate}`);
   }
+  dateConditions.push('scheduled_date.is.null');
+
+  if (dateConditions.length > 0) {
+    trayStepsQuery = trayStepsQuery.or(dateConditions.join(','));
+  }
+
+  console.log('🔎 [markSeedingTrayStepsCompleted] Querying tray_steps with:', {
+    stepIds: allStepIds,
+    trayIds: effectiveTrayIds,
+    completed: false,
+    dateConditions: dateConditions.join(','),
+  });
 
   const { data: trayStepsToUpdate, error: trayStepsError } = await trayStepsQuery;
 
   if (trayStepsError) {
-    console.error('[DailyFlow] Error querying tray_steps for seeding completion:', trayStepsError);
+    console.error('❌ [markSeedingTrayStepsCompleted] Error querying tray_steps:', trayStepsError);
     return;
   }
 
-  const trayStepIds = (trayStepsToUpdate || [])
-    .map((row: any) => row.id)
-    .filter((id: number | null | undefined) => !!id);
+  console.log('📊 [markSeedingTrayStepsCompleted] Found tray_steps to update:', {
+    traySteps: trayStepsToUpdate,
+    count: trayStepsToUpdate?.length || 0,
+  });
 
-  if (!trayStepIds.length) {
+  if (!trayStepsToUpdate || trayStepsToUpdate.length === 0) {
+    console.warn('⚠️ [markSeedingTrayStepsCompleted] No tray_steps found to update! This means:');
+    console.warn('  - Either tray_steps records don\'t exist for these trays');
+    console.warn('  - Or they are already marked as completed');
+    console.warn('  - Or the date filter is excluding them');
     return;
   }
 
-  const { error: updateError } = await client
-    .from('tray_steps')
-    .update({
-      completed: true,
-      completed_at: now,
-    })
-    .in('id', trayStepIds);
+  // ✅ FIX: Mark seeding and soaking steps separately with different completed_at times
+  // Seeding steps: completed at sow_date (today)
+  // Soaking steps: completed at sow_date - 1 day (because soaking happens the day before)
+  
+  const seedingTrayStepIds = trayStepsToUpdate
+    .filter((ts: any) => seedSteps.includes(ts.step_id))
+    .map((ts: any) => ts.tray_step_id);
 
-  if (updateError) {
-    console.error('[DailyFlow] Error marking seeding tray_steps completed:', updateError);
-    return;
+  const soakingTrayStepIds = trayStepsToUpdate
+    .filter((ts: any) => soakSteps.includes(ts.step_id))
+    .map((ts: any) => ts.tray_step_id);
+
+  console.log('🎯 [markSeedingTrayStepsCompleted] Separated tray_steps by type:', {
+    seedingTrayStepIds,
+    soakingTrayStepIds,
+    seedingCount: seedingTrayStepIds.length,
+    soakingCount: soakingTrayStepIds.length,
+  });
+
+  // Mark seeding steps as completed with sow_date
+  if (seedingTrayStepIds.length > 0) {
+    console.log('🌱 [markSeedingTrayStepsCompleted] Updating SEEDING tray_steps:', {
+      ids: seedingTrayStepIds,
+      completedAt: now,
+    });
+
+    const { error: seedUpdateError } = await client
+      .from('tray_steps')
+      .update({
+        completed: true,
+        completed_at: now,
+        status: 'Completed',
+      })
+      .in('tray_step_id', seedingTrayStepIds);
+
+    if (seedUpdateError) {
+      console.error('❌ [markSeedingTrayStepsCompleted] Error updating seeding tray_steps:', seedUpdateError);
+    } else {
+      console.log('✅ [markSeedingTrayStepsCompleted] Successfully marked seeding tray_steps as completed:', seedingTrayStepIds.length);
+    }
+  } else {
+    console.log('ℹ️ [markSeedingTrayStepsCompleted] No seeding tray_steps to update');
   }
 
-  console.log('[DailyFlow] Marked seeding tray_steps as completed:', trayStepIds, 'recipeId:', recipeId);
+  // ✅ FIX: Mark soaking steps as completed with sow_date - 1 day
+  if (soakingTrayStepIds.length > 0) {
+    // Calculate completed_at for soak steps (1 day before seeding)
+    const soakCompletedAt = new Date(now);
+    soakCompletedAt.setDate(soakCompletedAt.getDate() - 1);
+    const soakCompletedAtISO = soakCompletedAt.toISOString();
+
+    console.log('💧 [markSeedingTrayStepsCompleted] Updating SOAKING tray_steps:', {
+      ids: soakingTrayStepIds,
+      completedAt: soakCompletedAtISO,
+    });
+
+    const { error: soakUpdateError } = await client
+      .from('tray_steps')
+      .update({
+        completed: true,
+        completed_at: soakCompletedAtISO, // ✅ 1 day before seeding
+        status: 'Completed',
+      })
+      .in('tray_step_id', soakingTrayStepIds);
+
+    if (soakUpdateError) {
+      console.error('❌ [markSeedingTrayStepsCompleted] Error updating soaking tray_steps:', soakUpdateError);
+    } else {
+      console.log('✅ [markSeedingTrayStepsCompleted] Successfully marked soaking tray_steps as completed:', {
+        count: soakingTrayStepIds.length,
+        completedAt: soakCompletedAtISO
+      });
+    }
+  } else {
+    console.log('ℹ️ [markSeedingTrayStepsCompleted] No soaking tray_steps to update');
+  }
+
+  console.log('✅ [markSeedingTrayStepsCompleted] COMPLETED');
 };
 
 /**
@@ -3238,6 +3560,7 @@ export const completeMissedStep = async (missedStep: MissedStep): Promise<boolea
             step_id: missedStep.stepId,
             completed: true,
             completed_at: now,
+            status: 'Completed',
           });
 
         if (insertError) throw insertError;
@@ -3248,6 +3571,7 @@ export const completeMissedStep = async (missedStep: MissedStep): Promise<boolea
           .update({
             completed: true,
             completed_at: now,
+            status: 'Completed',
             skipped: false,
             skipped_at: null,
           })
@@ -3401,32 +3725,133 @@ export const markTraysAsLost = async (
 
 /**
  * Complete a soak task using the new seeding workflow
+ * Creates a soaked_seed record and marks task as completed
  */
 export const completeSoakTask = async (
   requestId: number,
   seedbatchId: number,
   quantityGrams: number,
+  taskDate: string, // ✅ The soak date (when the task appears, not seeding date)
   userId?: string
 ): Promise<number> => {
   try {
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) throw new Error('No session found');
 
-    const { userId: sessionUserId } = JSON.parse(sessionData);
+    const { userId: sessionUserId, farmUuid } = JSON.parse(sessionData);
     const userToUse = userId || sessionUserId;
 
-    const { data, error } = await getSupabaseClient().rpc('complete_soak_task', {
-      p_request_id: requestId,
-      p_seedbatch_id: seedbatchId,
-      p_quantity_grams: quantityGrams,
-      p_user_id: userToUse || null,
+    // Get request details to find recipe_id
+    const { data: requestData, error: requestError } = await getSupabaseClient()
+      .from('tray_creation_requests')
+      .select('recipe_id, farm_uuid')
+      .eq('request_id', requestId)
+      .single();
+
+    if (requestError || !requestData) {
+      throw new Error(`Request ${requestId} not found`);
+    }
+
+    // Get recipe details to find variety_id
+    const { data: recipeData, error: recipeError } = await getSupabaseClient()
+      .from('recipes')
+      .select('variety_id, seed_quantity, seed_quantity_unit')
+      .eq('recipe_id', requestData.recipe_id)
+      .single();
+
+    if (recipeError) {
+      console.warn('[completeSoakTask] Error fetching recipe:', recipeError);
+    }
+
+    const varietyId = recipeData?.variety_id || null;
+
+    // Calculate expiration (48 hours from soak date)
+    const soakDate = new Date(taskDate);
+    const expiresAt = new Date(soakDate);
+    expiresAt.setHours(expiresAt.getHours() + 48);
+
+    // Create soaked_seed record
+    const { data: soakedSeedData, error: soakedSeedError } = await getSupabaseClient()
+      .from('soaked_seed')
+      .insert({
+        farm_uuid: requestData.farm_uuid,
+        variety_id: varietyId,
+        seedbatch_id: seedbatchId,
+        request_id: requestId,
+        quantity_soaked: quantityGrams, // ✅ Fixed: quantity_soaked, not quantity_grams
+        quantity_remaining: quantityGrams, // Initially, all quantity is remaining
+        unit: 'g',
+        soak_date: taskDate,
+        expires_at: expiresAt.toISOString(),
+        status: 'available',
+        created_by: userToUse,
+      })
+      .select('soaked_id')
+      .single();
+
+    if (soakedSeedError) {
+      console.error('[completeSoakTask] Error creating soaked_seed:', soakedSeedError);
+      throw soakedSeedError;
+    }
+
+    const soakedId = soakedSeedData?.soaked_id;
+
+    // Record task completion
+    const { error: completionError } = await getSupabaseClient()
+      .from('task_completions')
+      .upsert({
+        farm_uuid: requestData.farm_uuid,
+        task_type: 'soaking',
+        task_date: taskDate, // ✅ Soak date, not seeding date
+        recipe_id: requestData.recipe_id,
+        request_id: requestId,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        completed_by: userToUse,
+        quantity: quantityGrams,
+        notes: `Soaked ${quantityGrams}g - Soaked seed ID: ${soakedId}`,
+      }, {
+        onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
+      });
+
+    if (completionError) {
+      console.warn('[completeSoakTask] Error recording task completion:', completionError);
+      // Don't throw - soaked_seed was created successfully
+    }
+
+    // Deduct seed inventory from seedbatch
+    // First get current quantity, then update
+    const { data: batchData, error: batchFetchError } = await getSupabaseClient()
+      .from('seedbatches')
+      .select('quantity')
+      .eq('batchid', seedbatchId)
+      .single();
+
+    if (!batchFetchError && batchData) {
+      const newQuantity = Math.max(0, (batchData.quantity || 0) - quantityGrams);
+      const { error: inventoryError } = await getSupabaseClient()
+        .from('seedbatches')
+        .update({ quantity: newQuantity })
+        .eq('batchid', seedbatchId);
+
+      if (inventoryError) {
+        console.warn('[completeSoakTask] Error updating seed inventory:', inventoryError);
+        // Don't throw - soaked_seed was created successfully
+      }
+    }
+
+    console.log('[completeSoakTask] Success:', {
+      soakedId,
+      requestId,
+      seedbatchId,
+      quantityGrams,
+      taskDate,
+      expiresAt: expiresAt.toISOString()
     });
 
-    if (error) throw error;
-
-    return data || 0; // Returns soaked_seed_id
+    return soakedId || 0;
   } catch (error) {
-    console.error('Error completing soak task:', error);
+    console.error('[completeSoakTask] Error:', error);
     throw error;
   }
 };
@@ -3864,9 +4289,22 @@ export const rescheduleSeedingRequest = async (
 export const fetchOverdueSeedingTasks = async (
   daysBack: number = 7
 ): Promise<DailyTask[]> => {
-  const farmUuid = localStorage.getItem('selectedFarmUuid');
+  const sessionData = localStorage.getItem('sproutify_session');
+  if (!sessionData) {
+    console.warn('[fetchOverdueSeedingTasks] No session data available');
+    return [];
+  }
+
+  let farmUuid = '';
+  try {
+    const parsedSession = JSON.parse(sessionData);
+    farmUuid = parsedSession?.farmUuid;
+  } catch (err) {
+    console.warn('[fetchOverdueSeedingTasks] Failed to parse session payload', err);
+  }
+
   if (!farmUuid) {
-    console.warn('[fetchOverdueSeedingTasks] No farm UUID found');
+    console.warn('[fetchOverdueSeedingTasks] No farm UUID found in session');
     return [];
   }
 
@@ -4022,4 +4460,3 @@ export const fetchOverdueSeedingTasks = async (
     return [];
   }
 };
-

@@ -32,7 +32,8 @@
       "Bash(tree:*)",
       "Bash(npx tsc:*)",
       "Bash(git stash:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

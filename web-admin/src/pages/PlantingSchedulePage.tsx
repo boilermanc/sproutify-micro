@@ -426,7 +426,6 @@ const PlantingSchedulePage = () => {
 
       console.log(`[PlantingSchedule] Total schedules before filtering: ${allSchedules.length}`);
 
-      const DATE_TOLERANCE_DAYS = 1;
       const candidateOffsets = [0, -1, 1];
       let filteredCount = 0;
 
@@ -867,7 +866,7 @@ const PlantingSchedulePage = () => {
         }
         return {
           key: `seedbatch-${batch.batchid}`,
-          source: 'seedbatch',
+          source: 'seedbatch' as const,
           actualBatchId: batch.batchid,
           variety_name: varietyName,
           label: `${varietyName} - Batch #${batch.batchid}`,
@@ -1451,7 +1450,7 @@ const PlantingSchedulePage = () => {
               variant="outline"
               onClick={() => {
                 setSeedingSchedule(null);
-                setSelectedBatchId(null);
+                setSelectedBatchOption(null);
                 setAvailableBatches([]);
                 setSeedingDate('');
               }}

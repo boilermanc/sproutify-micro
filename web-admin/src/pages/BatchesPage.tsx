@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 
 const formatQuantityDisplay = (value: number | string | null | undefined) => {
   const numeric = typeof value === 'string' ? Number(value) : value;
-  if (!Number.isFinite(numeric ?? NaN)) {
+  if (numeric === null || numeric === undefined || !Number.isFinite(numeric)) {
     return '0';
   }
   const rounded = Math.round(numeric * 10) / 10;
@@ -193,7 +193,7 @@ const BatchesPage = () => {
 
       const minMap: Record<string, number> = {};
       (data || []).forEach((recipe) => {
-        const varietyId = recipe.variety_id ?? recipe.varietyid;
+        const varietyId = recipe.variety_id ?? (recipe as any).variety_id;
         if (varietyId === undefined || varietyId === null) return;
 
         const grams = parseNumericValue(recipe.seed_quantity_grams);

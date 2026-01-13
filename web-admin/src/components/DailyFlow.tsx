@@ -3360,8 +3360,10 @@ export default function DailyFlow() {
               const hasMismatchedVarieties = groupMismatchedTrays.length > 0;
               const trayDetailCandidates = group.tasks.flatMap((task) => task.trayDetails || []);
               const uniqueTrayDetails = Array.from(new Map(trayDetailCandidates.map((detail) => [detail.trayId, detail])).values());
-              const fallbackTrayDetails = Array.from(new Set(group.trayIds))
-                .map((trayId) => ({ trayId }));
+              // Get all tray IDs from the group's tasks
+              const groupTrayIds = Array.from(new Set(group.tasks.flatMap(task => task.trayIds || [])));
+              const fallbackTrayDetails: TraySelectionDetail[] = groupTrayIds
+                .map((trayId) => ({ trayId: Number(trayId) }));
               const trayDetailsForModal = uniqueTrayDetails.length > 0 ? uniqueTrayDetails : fallbackTrayDetails;
               const trayCountForModal = trayDetailsForModal.length;
                 return (

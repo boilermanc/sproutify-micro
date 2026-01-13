@@ -19,9 +19,8 @@ const AdminLogin = () => {
     setLoading(true);
 
     try {
-      const emailLower = email.trim().toLowerCase();
       const { data: { user, session }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password,
       });
 

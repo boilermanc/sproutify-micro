@@ -3788,7 +3788,7 @@ export const completeSoakTask = async (
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) throw new Error('No session found');
 
-    const { userId: sessionUserId, farmUuid } = JSON.parse(sessionData);
+    const { userId: sessionUserId } = JSON.parse(sessionData);
     const userToUse = userId || sessionUserId;
 
     // Get request details to find recipe_id

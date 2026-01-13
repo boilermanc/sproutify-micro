@@ -43,7 +43,7 @@ const VarietiesPage = () => {
 
   const formatQuantityDisplay = (value: number | string | null | undefined) => {
     const numeric = typeof value === 'string' ? Number(value) : value;
-    if (!Number.isFinite(numeric ?? NaN)) {
+    if (numeric === null || numeric === undefined || !Number.isFinite(numeric)) {
       return '0';
     }
     const rounded = Math.round(numeric * 10) / 10;

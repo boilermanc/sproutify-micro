@@ -203,12 +203,6 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
     setLoading(true);
 
     try {
-      // Check if email is team@sproutify.app - redirect to admin portal
-      if (email.toLowerCase() === 'team@sproutify.app') {
-        navigate('/admin-portal/login');
-        return;
-      }
-
       // Authenticate with getSupabaseClient()
       const { data: { user, session }, error: signInError } = await getSupabaseClient().auth.signInWithPassword({
         email,
@@ -232,6 +226,13 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
 
       if (profileError || !profile) {
         throw new Error('Profile not found. Please contact your administrator.');
+      }
+
+      // Check if user is an admin - redirect to admin portal
+      if (profile.is_admin) {
+        console.log('[LoginPage] Admin user detected, redirecting to admin portal');
+        navigate('/admin-portal/login');
+        return;
       }
 
       const sessionPayload = await buildSessionPayload(profile, {

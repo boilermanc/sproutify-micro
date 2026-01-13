@@ -95,6 +95,7 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { resolveVarietyNameFromRelation } from '@/lib/varietyUtils';
+import GrowingMicrogreens from './GrowingMicrogreens';
 import {
   fetchAssignableTrays,
   assignTrayToCustomer,
@@ -2918,8 +2919,8 @@ export default function DailyFlow() {
   if (loading) {
     return (
       <div className="min-h-screen bg-white p-4 md:p-8">
-        <div className="flex items-center justify-center h-64">
-          <p className="text-slate-500">Loading flow...</p>
+        <div className="flex flex-col items-center justify-center h-64">
+          <GrowingMicrogreens compact message="Loading your daily flow..." />
         </div>
       </div>
     );

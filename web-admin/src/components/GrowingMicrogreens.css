@@ -1,0 +1,159 @@
+.growth-container {
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  perspective: 1000px;
+  background: radial-gradient(circle, rgba(76, 175, 80, 0.8) 0%, rgba(76, 175, 80, 0.3) 50%, rgba(255, 255, 255, 0) 80%); /* Maximum prominence gradient */
+  border-radius: 50%;
+}
+
+.soil-block {
+  width: 300px;
+  height: 60px;
+  background: #3E2723;
+  border-radius: 8px;
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(10deg);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+}
+
+.soil-texture {
+  width: 100%;
+  height: 100%;
+  background-image: radial-gradient(#5D4037 15%, transparent 16%),
+                    radial-gradient(#4E342E 15%, transparent 16%);
+  background-size: 10px 10px;
+  opacity: 0.5;
+  border-radius: 8px;
+}
+
+.sprouts-layer {
+  position: absolute;
+  bottom: 50px; /* Start from top of soil block */
+  left: 0;
+  width: 100%;
+  height: 300px;
+  /* overflow: hidden; Remove overflow so they can grow tall */
+}
+
+.sprout-wrapper {
+  position: absolute;
+  bottom: 0;
+  width: 4px;
+  height: 0; /* Starts at 0 */
+  transform-origin: bottom center;
+  animation: growCycle 8s infinite ease-in-out;
+}
+
+.stem {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to top, #81C784, #4CAF50);
+  border-radius: 2px;
+  opacity: 0.9;
+}
+
+.leaf {
+  position: absolute;
+  background: #4CAF50;
+  border-radius: 50% 0 50% 0;
+  opacity: 0; /* Starts invisible */
+  animation: leafCycle 8s infinite ease-in-out;
+}
+
+.leaf.left {
+  top: 0;
+  left: -8px;
+  width: 12px;
+  height: 12px;
+  transform: rotate(45deg);
+}
+
+.leaf.right {
+  top: 2px;
+  right: -8px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(-15deg) scaleX(-1);
+}
+
+.leaf.center {
+  top: -5px;
+  left: -2px;
+  width: 8px;
+  height: 8px;
+  background: #A5D6A7;
+  border-radius: 50%;
+  animation: leafCenterCycle 8s infinite ease-in-out;
+}
+
+/* Keyframes */
+
+@keyframes growCycle {
+  0%, 10% {
+    height: 0;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+    height: 20px; /* Seedling */
+  }
+  50% {
+    height: 150px; /* Mature */
+  }
+  80% {
+    height: 150px; /* Stay mature */
+    opacity: 1;
+  }
+  90% {
+    opacity: 0; /* Fade out */
+  }
+  100% {
+    height: 0; /* Reset */
+    opacity: 0;
+  }
+}
+
+@keyframes leafCycle {
+  0%, 20% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+    transform: scale(0.5) rotate(45deg); /* Small leaves */
+  }
+  50% {
+    transform: scale(1.2) rotate(45deg); /* Full lush leaves */
+  }
+  80% {
+    transform: scale(1.2) rotate(45deg);
+    opacity: 1;
+  }
+  90% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+/* Adjust right leaf rotation */
+@keyframes leafRightCycle {
+   /* Similar structure but different rotation logic if needed, 
+      currently handled by shared animation class but specific transform in class */
+}
+
+@keyframes leafCenterCycle {
+  0%, 20% { scale: 0; opacity: 0; }
+  40% { scale: 1; opacity: 1; }
+  80% { scale: 1; opacity: 1; }
+  90% { opacity: 0; }
+  100% { scale: 0; opacity: 0; }
+}

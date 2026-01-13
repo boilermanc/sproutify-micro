@@ -43,17 +43,20 @@ const AdminLogin = () => {
         throw profileError;
       }
 
+      // Check if user has admin access via database
+      const isAdmin = profile?.is_admin ?? false;
+
+      // This portal is ONLY for internal Sproutify team admins
+      if (!isAdmin) {
+        throw new Error('This portal is restricted to Sproutify team members only. Beta users should use the main login page.');
+      }
+
       const normalizedProfileRole = profile?.role?.toLowerCase();
       const normalizedUserRole = user.app_metadata?.role?.toLowerCase();
       const baseRole =
         normalizedProfileRole ||
         normalizedUserRole ||
-        (emailLower === 'team@sproutify.app' ? 'admin' : '');
-
-      // This portal is ONLY for internal Sproutify team admins
-      if (baseRole !== 'admin') {
-        throw new Error('This portal is restricted to Sproutify team members only. Beta users should use the main login page.');
-      }
+        'admin';
 
       localStorage.setItem('sproutify_admin_session', JSON.stringify({
         email: user.email,

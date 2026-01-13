@@ -470,21 +470,53 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                       !isSeedingStep &&
                       !isSoakingStep &&
                       !isHarvestStep) { // ✅ FIX: Don't create harvest tasks - those are handled separately
-                    // Check if this task already exists in tasksData (by recipe_id + step_id + action)
-                    // Also check if any tray from this task is already in an existing task
+                    // Check if this task already exists in tasksData
+                    // The view aggregates tasks by recipe+step (no individual tray_ids), so we check if
+                    // ANY task exists for this recipe+step combination
                     const existsInView = tasksData?.some((t: any) => {
                       const tRecipeId = t.recipe_id || t.recipeId;
-                      const tStepId = t.step_id || t.stepId;
                       const tAction = t.task_name || t.action;
-                      const tTrayIds = Array.isArray(t.tray_ids) ? t.tray_ids : (t.tray_id ? [t.tray_id] : []);
-                      return tRecipeId === recipeId && 
-                             tStepId === currentStep.step_id && 
-                             tAction === stepName &&
-                             t.task_source === 'tray_step' &&
-                             (tTrayIds.includes(tray.tray_id) || tTrayIds.length > 0);
+                      const tVarietyName = t.variety_name;
+                      const tRecipeName = t.recipe_name;
+                      
+                      // Match based on task_name and variety/recipe (view doesn't have step_id or tray_ids)
+                      const sameAction = tAction === stepName;
+                      const sameSource = t.task_source === 'tray_step';
+                      
+                      // Match on variety_name if available (more specific than recipe_name)
+                      const recipe = tray.recipes as any;
+                      const varietyName = recipe?.variety_name;
+                      const recipeName = recipe?.recipe_name;
+                      
+                      const sameVariety = varietyName && tVarietyName === varietyName;
+                      const sameRecipeName = !sameVariety && recipeName && tRecipeName === recipeName;
+                      const sameRecipeId = !sameVariety && !sameRecipeName && tRecipeId === recipeId;
+                      
+                      const taskExists = sameAction && sameSource && (sameVariety || sameRecipeName || sameRecipeId);
+                      
+                      if (taskExists) {
+                        console.log('[fetchDailyTasks] Task already in view, skipping supplemental:', {
+                          tray_id: tray.tray_id,
+                          recipe_id: recipeId,
+                          variety_name: varietyName,
+                          step_name: stepName,
+                          view_variety: tVarietyName,
+                          view_recipe: tRecipeName,
+                          view_quantity: t.quantity
+                        });
+                      }
+                      
+                      return taskExists;
                     });
                     
                     if (!existsInView) {
+                      console.log('[fetchDailyTasks] Adding tray to supplemental tasks (not in view):', {
+                        tray_id: tray.tray_id,
+                        recipe_id: recipeId,
+                        step_id: currentStep.step_id,
+                        step_name: stepName
+                      });
+                      
                       // Aggregate by recipe+step - find existing or create new
                       const existingTask = supplementalTasks.find(t => 
                         t.recipeId === recipeId && 
@@ -496,10 +528,12 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                       const customerName = tray.customer_id ? trayCustomerMap[tray.customer_id] : undefined;
                       
                       if (existingTask) {
-                        // Add tray to existing task
-                        existingTask.trayIds.push(tray.tray_id);
-                        existingTask.trays += 1;
-                        existingTask.traysRemaining = (existingTask.traysRemaining || 0) + 1;
+                        // Add tray to existing task only if not already present
+                        if (!existingTask.trayIds.includes(tray.tray_id)) {
+                          existingTask.trayIds.push(tray.tray_id);
+                          existingTask.trays += 1;
+                          existingTask.traysRemaining = (existingTask.traysRemaining || 0) + 1;
+                        }
                         
                         // Preserve customerName if this tray has a customer
                         // Note: If multiple trays in same task have different customers, preserve the first one
@@ -2566,22 +2600,38 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     
     const dedupedTasks: DailyTask[] = [];
     const seenTaskIds = new Set<string>();
+    const duplicatesFound: any[] = [];
+    
     for (const task of finalTasks) {
       if (!task.id) {
         dedupedTasks.push(task);
         continue;
       }
       if (seenTaskIds.has(task.id)) {
-        console.log('[fetchDailyTasks] Skipping duplicate task during dedup:', {
+        console.log('[fetchDailyTasks] DUPLICATE DETECTED - Skipping duplicate task during dedup:', {
           id: task.id,
           action: task.action,
           crop: task.crop,
-          taskSource: task.taskSource
+          taskSource: task.taskSource,
+          trayIds: task.trayIds,
+          recipeId: task.recipeId,
+          stepId: task.stepId
+        });
+        duplicatesFound.push({
+          id: task.id,
+          action: task.action,
+          crop: task.crop,
+          taskSource: task.taskSource,
+          trayIds: task.trayIds
         });
         continue;
       }
       seenTaskIds.add(task.id);
       dedupedTasks.push(task);
+    }
+    
+    if (duplicatesFound.length > 0) {
+      console.error('[fetchDailyTasks] FOUND DUPLICATES:', duplicatesFound);
     }
 
     console.log('[fetchDailyTasks] Final task breakdown:', {

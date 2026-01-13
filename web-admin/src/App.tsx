@@ -3,7 +3,9 @@ import { useState, useEffect, useRef } from 'react';
 import { AuthError, AuthApiError } from '@supabase/supabase-js';
 import { getSupabaseClient } from './lib/supabaseClient';
 import { buildSessionPayload } from './utils/session';
+import type { SproutifySession } from './utils/session';
 import { clearSupabaseAuthStorage } from './utils/authStorage';
+import { refreshSessionPayload } from './utils/sessionRefresh';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
@@ -61,7 +63,14 @@ const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): bo
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Session state is maintained to trigger re-renders when session data changes
+  // Components access session data from localStorage, but this state ensures
+  // the React component tree re-renders when session is refreshed
+  const [session, setSession] = useState<SproutifySession | null>(null);
   const hasCheckedSession = useRef(false);
+
+  // Acknowledge session state exists for future component consumption
+  void session;
 
   useEffect(() => {
     let isMounted = true;
@@ -102,18 +111,7 @@ function App() {
         }
 
         if (session) {
-          if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
-            console.log('[App] Admin user detected, skipping profile check');
-            const adminSession = localStorage.getItem('sproutify_admin_session');
-            if (adminSession) {
-              setIsAuthenticated(false);
-            } else {
-              setIsAuthenticated(false);
-            }
-            return;
-          }
-
-          console.log('[App] Regular user, fetching profile...');
+          console.log('[App] User session found, fetching profile...');
           const { data: profile, error: profileError } = await getSupabaseClient()
             .from('profile')
             .select('*, farms(*)')
@@ -128,6 +126,7 @@ function App() {
               userId: session.user.id,
             });
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+            setSession(sessionPayload);
             console.log('[App] Session payload stored, setting authenticated=true');
             setIsAuthenticated(true);
             if (isMounted) {
@@ -176,13 +175,9 @@ function App() {
     const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('sproutify_session');
+        setSession(null);
         setIsAuthenticated(false);
       } else if (event === 'SIGNED_IN' && session) {
-        // Skip for admin users
-        if (session.user.email?.toLowerCase() === 'team@sproutify.app') {
-          return;
-        }
-
         // Build session payload BEFORE setting authenticated
         // This prevents the race condition where Dashboard loads before session is ready
         const { data: profile, error: profileError } = await getSupabaseClient()
@@ -197,6 +192,7 @@ function App() {
             userId: session.user.id,
           });
           localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
+          setSession(sessionPayload);
           setIsAuthenticated(true);
         }
       }
@@ -218,6 +214,51 @@ function App() {
     }
   }, [isAuthenticated]);
 
+  // Refresh session when tab becomes visible
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[App] Tab focused - refreshing session...');
+        const refreshedSession = await refreshSessionPayload();
+        if (refreshedSession) {
+          setSession(refreshedSession);
+          console.log('[App] Session refreshed on tab focus');
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isAuthenticated]);
+
+  // Periodic session refresh (every 15 minutes)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
+    
+    console.log('[App] Starting periodic session refresh (every 15 minutes)');
+    
+    const intervalId = setInterval(async () => {
+      console.log('[App] Periodic session refresh triggered');
+      const refreshedSession = await refreshSessionPayload();
+      if (refreshedSession) {
+        setSession(refreshedSession);
+        console.log('[App] Periodic session refresh completed');
+      }
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      console.log('[App] Clearing periodic session refresh');
+      clearInterval(intervalId);
+    };
+  }, [isAuthenticated]);
+
   if (isLoading) {
     return <div className="loading">Loading...</div>;
   }
@@ -236,6 +277,7 @@ function App() {
               clearSupabaseAuthStorage();
               if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
               localStorage.removeItem('sproutify_admin_session');
+              setSession(null);
             }} />
           </RequireAdmin>
         }>
@@ -260,6 +302,7 @@ function App() {
             clearSupabaseAuthStorage();
             if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
             localStorage.removeItem('sproutify_session');
+            setSession(null);
             setIsAuthenticated(false);
           }} /> : <Navigate to="/login" />
         }>

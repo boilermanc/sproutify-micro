@@ -5,6 +5,7 @@ type ProfileRecord = {
   email?: string;
   farm_uuid?: string;
   role?: string;
+  is_admin?: boolean;
   farms?: {
     farmname?: string | null;
     trial_end_date?: string | null;
@@ -19,6 +20,7 @@ export interface SproutifySession {
   userId: string | null;
   farmName: string;
   trialEndDate: string | null;
+  isAdmin: boolean;
 }
 
 const getFarmNameFromProfile = (profile: ProfileRecord) =>
@@ -58,6 +60,7 @@ export const buildSessionPayload = async (
     userId: overrides?.userId ?? profile.id ?? null,
     farmName: farmName?.trim() || 'My Farm',
     trialEndDate,
+    isAdmin: profile.is_admin ?? false,
   };
 };
 

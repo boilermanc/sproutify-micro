@@ -28,6 +28,7 @@ import TraysPage from './pages/TraysPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import DailyFlow from './components/DailyFlow';
+import GrowingMicrogreens from './components/GrowingMicrogreens';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
@@ -260,7 +261,11 @@ function App() {
   }, [isAuthenticated]);
 
   if (isLoading) {
-    return <div className="loading">Loading...</div>;
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <GrowingMicrogreens compact message="Loading..." />
+      </div>
+    );
   }
 
   return (

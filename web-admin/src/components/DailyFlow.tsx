@@ -85,6 +85,7 @@ import {
 } from '../services/dailyFlowService';
 import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
+import { fetchOrderFulfillmentDetails, type OrderFulfillmentStatus } from '../services/orderFulfillmentService';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -247,71 +248,141 @@ const parseMissingVarietyNames = (missing?: string | null): string[] => {
 // Variety status for order gap breakdown
 interface VarietyStatus {
   varietyName: string;
+  recipeId?: number;
   status: 'ready' | 'date_mismatch' | 'missing';
   tray?: MismatchedAssignedTray;
   readyDate?: string;
 }
 
 // Build variety breakdown for an order gap
+// Uses recipe_id for matching when recipeRequirements are provided
 const buildVarietyBreakdown = (
   gap: OrderGapStatus,
   mismatchedTrays: MismatchedAssignedTray[],
-  matchingTrays: AssignableTray[]
+  matchingTrays: AssignableTray[],
+  recipeRequirements?: OrderFulfillmentStatus[]
 ): VarietyStatus[] => {
   const breakdown: VarietyStatus[] = [];
-  const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
 
-  // Group mismatched trays by variety
-  const mismatchedByVariety = new Map<string, MismatchedAssignedTray>();
+  // Group mismatched trays by recipe_id
+  const mismatchedByRecipeId = new Map<number, MismatchedAssignedTray>();
   for (const tray of mismatchedTrays) {
-    const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
-    if (varietyKey && !mismatchedByVariety.has(varietyKey)) {
-      mismatchedByVariety.set(varietyKey, tray);
+    if (tray.recipe_id && !mismatchedByRecipeId.has(tray.recipe_id)) {
+      mismatchedByRecipeId.set(tray.recipe_id, tray);
     }
   }
 
-  // Group ready trays by variety
-  const readyByVariety = new Map<string, AssignableTray>();
+  // Group ready trays by recipe_id
+  const readyByRecipeId = new Map<number, AssignableTray>();
   for (const tray of matchingTrays) {
-    const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
-    if (varietyKey && !readyByVariety.has(varietyKey)) {
-      readyByVariety.set(varietyKey, tray);
+    if (tray.recipe_id && !readyByRecipeId.has(tray.recipe_id)) {
+      readyByRecipeId.set(tray.recipe_id, tray);
     }
   }
 
-  // Process each mismatched tray variety
-  for (const [varietyKey, tray] of mismatchedByVariety) {
-    const displayName = tray.variety_name || tray.recipe_name || varietyKey;
-    breakdown.push({
-      varietyName: displayName,
-      status: 'date_mismatch',
-      tray,
-      readyDate: tray.harvest_date,
-    });
-  }
+  // If we have recipe requirements with recipe_ids, use those for matching
+  if (recipeRequirements && recipeRequirements.length > 0) {
+    for (const req of recipeRequirements) {
+      const recipeId = req.recipe_id;
+      const displayName = req.recipe_name;
 
-  // Process ready trays that aren't already mismatched
-  for (const [varietyKey, tray] of readyByVariety) {
-    if (!mismatchedByVariety.has(varietyKey)) {
-      const displayName = tray.variety_name || tray.recipe_name || varietyKey;
+      // Check if there's a mismatched tray for this recipe
+      const mismatchedTray = mismatchedByRecipeId.get(recipeId);
+      if (mismatchedTray) {
+        breakdown.push({
+          varietyName: mismatchedTray.variety_name || displayName,
+          recipeId,
+          status: 'date_mismatch',
+          tray: mismatchedTray,
+          readyDate: mismatchedTray.harvest_date,
+        });
+        continue;
+      }
+
+      // Check if there's a ready tray for this recipe
+      const readyTray = readyByRecipeId.get(recipeId);
+      if (readyTray) {
+        breakdown.push({
+          varietyName: readyTray.variety_name || displayName,
+          recipeId,
+          status: 'ready',
+        });
+        continue;
+      }
+
+      // No tray found - recipe is missing
       breakdown.push({
         varietyName: displayName,
-        status: 'ready',
-      });
-    }
-  }
-
-  // Process missing varieties that aren't mismatched or ready
-  for (const missingName of missingVarieties) {
-    const alreadyAdded = breakdown.some(
-      (v) => v.varietyName.toLowerCase().includes(missingName) ||
-             missingName.includes(v.varietyName.toLowerCase())
-    );
-    if (!alreadyAdded) {
-      breakdown.push({
-        varietyName: missingName,
+        recipeId,
         status: 'missing',
       });
+    }
+  } else {
+    // Fallback to name-based matching when recipe requirements aren't available
+    const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
+
+    // Group mismatched trays by variety name for fallback
+    const mismatchedByVariety = new Map<string, MismatchedAssignedTray>();
+    for (const tray of mismatchedTrays) {
+      const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
+      if (varietyKey && !mismatchedByVariety.has(varietyKey)) {
+        mismatchedByVariety.set(varietyKey, tray);
+      }
+    }
+
+    // Group ready trays by variety name for fallback
+    const readyByVariety = new Map<string, AssignableTray>();
+    for (const tray of matchingTrays) {
+      const varietyKey = (tray.variety_name || tray.recipe_name || '').toLowerCase();
+      if (varietyKey && !readyByVariety.has(varietyKey)) {
+        readyByVariety.set(varietyKey, tray);
+      }
+    }
+
+    // Process each mismatched tray variety
+    for (const [, tray] of mismatchedByVariety) {
+      const displayName = tray.variety_name || tray.recipe_name || '';
+      breakdown.push({
+        varietyName: displayName,
+        recipeId: tray.recipe_id,
+        status: 'date_mismatch',
+        tray,
+        readyDate: tray.harvest_date,
+      });
+    }
+
+    // Process ready trays that aren't already mismatched (by recipe_id)
+    for (const [, tray] of readyByVariety) {
+      if (!mismatchedByRecipeId.has(tray.recipe_id)) {
+        const displayName = tray.variety_name || tray.recipe_name || '';
+        breakdown.push({
+          varietyName: displayName,
+          recipeId: tray.recipe_id,
+          status: 'ready',
+        });
+      }
+    }
+
+    // Process missing varieties that aren't mismatched or ready (by recipe_id)
+    for (const missingName of missingVarieties) {
+      const alreadyAdded = breakdown.some(
+        (v) => v.recipeId && (
+          mismatchedByRecipeId.has(v.recipeId) || readyByRecipeId.has(v.recipeId)
+        )
+      );
+      // Only add if not already covered by recipe_id
+      if (!alreadyAdded || breakdown.length === 0) {
+        const alreadyAddedByName = breakdown.some(
+          (v) => v.varietyName.toLowerCase().includes(missingName) ||
+                 missingName.includes(v.varietyName.toLowerCase())
+        );
+        if (!alreadyAddedByName) {
+          breakdown.push({
+            varietyName: missingName,
+            status: 'missing',
+          });
+        }
+      }
     }
   }
 
@@ -449,6 +520,7 @@ export default function DailyFlow() {
   const [gapMissingVarietyTraysLoading, setGapMissingVarietyTraysLoading] = useState<Record<string, boolean>>({});
   const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
   const [gapMismatchedTraysLoading, setGapMismatchedTraysLoading] = useState<Record<string, boolean>>({});
+  const [gapRecipeRequirements, setGapRecipeRequirements] = useState<Record<string, OrderFulfillmentStatus[]>>({});
   const [gapReallocationConfirm, setGapReallocationConfirm] = useState<{
     gap: OrderGapStatus;
     tray: MismatchedAssignedTray;
@@ -456,6 +528,9 @@ export default function DailyFlow() {
     nextDeliveryDate?: string | null; // The next scheduled delivery after today
   } | null>(null);
   const [animatingOutGaps, setAnimatingOutGaps] = useState<Set<string>>(new Set());
+  // Track gaps that have been removed via user action - prevents them from reappearing
+  // due to race conditions with pending data fetches
+  const removedGapsRef = useRef<Set<string>>(new Set());
   const [assignModalGap, setAssignModalGap] = useState<OrderGapStatus | null>(null);
   const [assignableTrays, setAssignableTrays] = useState<AssignableTray[]>([]);
   const [isLoadingAssignableTrays, setIsLoadingAssignableTrays] = useState(false);
@@ -646,6 +721,47 @@ export default function DailyFlow() {
     }
   }, [getFarmUuidFromSession]);
 
+  const updateGapRecipeRequirements = useCallback(async (gaps: OrderGapStatus[]) => {
+    if (!gaps || gaps.length === 0) {
+      setGapRecipeRequirements({});
+      return;
+    }
+
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      setGapRecipeRequirements({});
+      return;
+    }
+
+    setGapRecipeRequirements({});
+
+    for (const gap of gaps) {
+      const gapKey = formatGapKey(gap);
+      const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+
+      if (!deliveryDate || !gap.customer_name) {
+        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: [] }));
+        continue;
+      }
+
+      try {
+        const requirements = await fetchOrderFulfillmentDetails(
+          farmUuid,
+          deliveryDate,
+          gap.customer_name
+        );
+        // Filter to only include recipes for this specific product if it's a mix
+        const filteredRequirements = gap.is_mix
+          ? requirements // Mix products: show all recipes for this order
+          : requirements.filter(r => r.recipe_name === gap.product_name);
+        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: filteredRequirements }));
+      } catch (error) {
+        console.error('[DailyFlow] Error fetching recipe requirements:', error);
+        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: [] }));
+      }
+    }
+  }, [getFarmUuidFromSession]);
+
   const openAssignModal = useCallback(async (gap: OrderGapStatus) => {
     const farmUuid = getFarmUuidFromSession();
     if (!farmUuid) {
@@ -764,42 +880,85 @@ export default function DailyFlow() {
   }, [seedingTask, isSoakVariety, availableBatches, selectedBatchId, seedQuantityPerTray, seedQuantityCompleted]);
 
   const isLoadingTasksRef = useRef(false);
+  const loadingStartTimeRef = useRef<number>(0);
 
   const loadTasks = useCallback(async (options: { suppressLoading?: boolean } = {}) => {
     const showLoading = !options.suppressLoading;
+    
+    // Check if already loading
     if (isLoadingTasksRef.current) {
-      console.warn('[loadTasks] Refresh already in progress, skipping');
-      return;
+      const elapsedTime = Date.now() - loadingStartTimeRef.current;
+      // If stuck for more than 30 seconds, force reset
+      if (elapsedTime > 30000) {
+        console.warn('[loadTasks] Refresh appears stuck (>30s), forcing reset');
+        isLoadingTasksRef.current = false;
+      } else {
+        console.warn('[loadTasks] Refresh already in progress, skipping');
+        return;
+      }
     }
+    
     isLoadingTasksRef.current = true;
+    loadingStartTimeRef.current = Date.now();
     console.log('[loadTasks] Starting task refresh...');
     if (showLoading) {
       setLoading(true);
     }
+    
     try {
-    const sessionData = localStorage.getItem('sproutify_session');
-    const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
+      const sessionData = localStorage.getItem('sproutify_session');
+      const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
 
-    const gapPromise = farmUuid
-      ? fetchOrderGapStatus(farmUuid).catch((error) => {
-          console.error('[loadTasks] Error fetching order gaps:', error);
-          return [];
-        })
-      : Promise.resolve<OrderGapStatus[]>([]);
+      const gapPromise = farmUuid
+        ? fetchOrderGapStatus(farmUuid).catch((error) => {
+            console.error('[loadTasks] Error fetching order gaps:', error);
+            return [];
+          })
+        : Promise.resolve<OrderGapStatus[]>([]);
 
-    // Force refresh to bypass any caching - pass Date and forceRefresh flag
-    const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
-      fetchDailyTasks(selectedDate, true), // Force refresh
-      getActiveTraysCount(),
-      fetchPassiveTrayStatus(), // Fetch passive tray status directly from DB
-      gapPromise,
-      fetchOverdueSeedingTasks(7), // Fetch overdue seedings from last 7 days
-    ]);
+      // Force refresh to bypass any caching - pass Date and forceRefresh flag
+      // Add timeout to each promise to prevent hanging
+      const timeoutPromise = <T,>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> => {
+        return Promise.race([
+          promise,
+          new Promise<T>((_, reject) => 
+            setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
+          )
+        ]).catch((error) => {
+          console.error('[loadTasks] Promise failed or timed out:', error);
+          return defaultValue;
+        });
+      };
+
+      const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
+        timeoutPromise(fetchDailyTasks(selectedDate, true), 15000, []),
+        timeoutPromise(getActiveTraysCount(), 10000, 0),
+        timeoutPromise(fetchPassiveTrayStatus(), 10000, []),
+        gapPromise,
+        timeoutPromise(fetchOverdueSeedingTasks(7), 10000, []),
+      ]);
       
       // Update passive tray status
       setPassiveTrayStatus(passiveStatus);
-      setOrderGapStatus(orderGaps);
-      
+
+      // Filter out gaps that have been removed by user action (prevents race condition)
+      const filteredGaps = orderGaps.filter((g: OrderGapStatus) => !removedGapsRef.current.has(formatGapKey(g)));
+      setOrderGapStatus(filteredGaps);
+
+      // Log order gaps data for debugging
+      const activeGaps = filteredGaps.filter((g: OrderGapStatus) => g.gap > 0);
+      console.log('[DailyFlow Component] Order gaps status:', {
+        totalGaps: orderGaps.length,
+        activeGaps: activeGaps.length,
+        gaps: activeGaps.map((g: OrderGapStatus) => ({
+          customer: g.customer_name,
+          product: g.product_name,
+          gap: g.gap,
+          deliveryDate: g.scheduled_delivery_date || g.delivery_date,
+          missingVarieties: g.missing_varieties,
+        })),
+      });
+
       const atRiskTasks = tasksData.filter(t => t.action.toLowerCase().includes('at risk'));
       const atRiskCount = atRiskTasks.length;
       
@@ -873,11 +1032,21 @@ export default function DailyFlow() {
       // Note: available_soaked_seed view already filters by status='available', so we don't need to filter again
       if (farmUuid) {
         try {
-          const { data: soakedSeedData, error } = await getSupabaseClient()
+          const soakedSeedPromise = getSupabaseClient()
             .from('available_soaked_seed')
             .select('*')
             .eq('farm_uuid', farmUuid)
             .order('expires_at', { ascending: true });
+
+          // Add timeout to prevent hanging
+          const result = await Promise.race([
+            soakedSeedPromise,
+            new Promise<{ data: null; error: any }>((resolve) =>
+              setTimeout(() => resolve({ data: null, error: { message: 'Query timeout' } }), 5000)
+            )
+          ]);
+
+          const { data: soakedSeedData, error } = result;
 
           if (error) {
             console.error('[DailyFlow] Error fetching available soaked seed:', error);
@@ -894,14 +1063,46 @@ export default function DailyFlow() {
         setAllAvailableSoakedSeed([]);
       }
     } catch (error) {
-      console.error('Error loading tasks:', error);
+      console.error('[loadTasks] Error loading tasks:', error);
     } finally {
       if (showLoading) {
         setLoading(false);
       }
       isLoadingTasksRef.current = false;
+      console.log('[loadTasks] Refresh completed, flag cleared');
     }
   }, [selectedDate, fetchActionHistory]);
+
+  // Cleanup effect to ensure ref is reset if component unmounts during loading
+  useEffect(() => {
+    return () => {
+      if (isLoadingTasksRef.current) {
+        console.warn('[loadTasks] Component unmounting with refresh in progress, clearing flag');
+        isLoadingTasksRef.current = false;
+      }
+    };
+  }, []);
+
+  // Auto-recovery: Check periodically if we're stuck and force reset
+  useEffect(() => {
+    const recoveryInterval = setInterval(() => {
+      if (isLoadingTasksRef.current) {
+        const elapsedTime = Date.now() - loadingStartTimeRef.current;
+        if (elapsedTime > 45000) {
+          console.error('[loadTasks] STUCK STATE DETECTED - Auto-recovering after', elapsedTime, 'ms');
+          isLoadingTasksRef.current = false;
+          loadingStartTimeRef.current = 0;
+          // Trigger a fresh load after reset
+          setTimeout(() => {
+            console.log('[loadTasks] Attempting recovery load');
+            loadTasks({ suppressLoading: true });
+          }, 1000);
+        }
+      }
+    }, 10000); // Check every 10 seconds
+    
+    return () => clearInterval(recoveryInterval);
+  }, [loadTasks]);
 
   useEffect(() => {
     loadTasks();
@@ -915,7 +1116,8 @@ export default function DailyFlow() {
   useEffect(() => {
     updateGapMissingVarietyTrays(orderGapStatus);
     updateGapMismatchedTrays(orderGapStatus);
-  }, [orderGapStatus, updateGapMissingVarietyTrays, updateGapMismatchedTrays]);
+    updateGapRecipeRequirements(orderGapStatus);
+  }, [orderGapStatus, updateGapMissingVarietyTrays, updateGapMismatchedTrays, updateGapRecipeRequirements]);
 
   const handleAssignTray = useCallback(async () => {
     if (!assignModalGap || !selectedAssignTrayId) return;
@@ -1004,6 +1206,18 @@ export default function DailyFlow() {
     tray: MismatchedAssignedTray,
     action: 'harvestEarly' | 'keepForFuture' | 'cancel'
   ) => {
+    console.log('[DailyFlow] openReallocationConfirm called:', {
+      action,
+      gap: { customer_name: gap.customer_name, product_name: gap.product_name, standing_order_id: gap.standing_order_id },
+      tray: tray ? { tray_id: tray.tray_id, recipe_id: tray.recipe_id, variety_name: tray.variety_name, tray_step_id: tray.tray_step_id } : null,
+    });
+
+    if (!tray) {
+      console.error('[DailyFlow] openReallocationConfirm called with null/undefined tray');
+      showNotification('error', 'No tray data available for this action');
+      return;
+    }
+
     let nextDeliveryDate: string | null = null;
 
     // For harvest early, fetch the next delivery date that will lose coverage
@@ -1030,7 +1244,7 @@ export default function DailyFlow() {
     }
 
     setGapReallocationConfirm({ gap, tray, action, nextDeliveryDate });
-  }, []);
+  }, [showNotification]);
 
   // Execute the confirmed reallocation action with animation
   const handleReallocationConfirm = useCallback(async () => {
@@ -1087,21 +1301,36 @@ export default function DailyFlow() {
       if (success) {
         showNotification('success', message);
 
+        // Track this gap as removed to prevent race conditions with pending fetches
+        removedGapsRef.current.add(gapKey);
+
+        // Clear from tracking after 10 seconds (database should be synced by then)
+        setTimeout(() => {
+          removedGapsRef.current.delete(gapKey);
+        }, 10000);
+
         // Only animate out for actions that truly resolve the gap
         // "harvestEarly" doesn't skip the delivery, so the gap may persist in a different form
         if (action === 'keepForFuture' || action === 'cancel') {
           setAnimatingOutGaps(prev => new Set(prev).add(gapKey));
-          // Wait for animation, then reload
+
+          // Optimistically remove the gap from state
+          setOrderGapStatus(prev => prev.filter(g => formatGapKey(g) !== gapKey));
+
+          // Wait for animation (300ms matches CSS duration-300), then reload
           setTimeout(async () => {
+            await loadTasks({ suppressLoading: true });
+            // Clear animation AFTER data is reloaded
             setAnimatingOutGaps(prev => {
               const next = new Set(prev);
               next.delete(gapKey);
               return next;
             });
-            await loadTasks({ suppressLoading: true });
-          }, 400);
+          }, 300);
         } else {
-          // For harvestEarly, just reload immediately - tray will appear in harvest section
+          // For harvestEarly, optimistically remove the gap and reload
+          // The tray will appear in harvest section
+          setOrderGapStatus(prev => prev.filter(g => formatGapKey(g) !== gapKey));
           await loadTasks({ suppressLoading: true });
         }
       } else {
@@ -3051,13 +3280,15 @@ export default function DailyFlow() {
                   const mismatchedTrays = gapMismatchedTrays[gapKey] || [];
                   const isMissingVarietyLoading = gapMissingVarietyTraysLoading[gapKey] || false;
                   const isMismatchedLoading = gapMismatchedTraysLoading[gapKey] || false;
+                  const recipeRequirements = gapRecipeRequirements[gapKey] || [];
                   const hasMismatchedTray = mismatchedTrays.length > 0;
                   const isFixable = needsUnassigned || hasNearReady || hasMismatchedTray;
                   const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
                   const isAnimatingOut = animatingOutGaps.has(gapKey);
 
                   // Build variety breakdown for mix products or any gap with variety info
-                  const varietyBreakdown = buildVarietyBreakdown(gap, mismatchedTrays, matchingTrays);
+                  // Pass recipe requirements to enable matching by recipe_id instead of names
+                  const varietyBreakdown = buildVarietyBreakdown(gap, mismatchedTrays, matchingTrays, recipeRequirements);
                   const showVarietyBreakdown = varietyBreakdown.length > 0;
 
                   // Determine the message based on gap status

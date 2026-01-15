@@ -51,39 +51,40 @@
 .flow-diagram-compact {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  margin: 0.75rem 0;
-  gap: 0.25rem;
+  justify-content: center;
+  margin: 0.5rem 0;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
 }
 
 .flow-item-compact {
-  flex: 1;
-  min-width: 80px;
+  flex: 0 0 auto;
+  width: 75px;
   text-align: center;
   position: relative;
 }
 
 .flow-icon-compact {
-  font-size: 2rem;
-  margin-bottom: 0.25rem;
+  font-size: 1.75rem;
+  margin-bottom: 0.125rem;
 }
 
 .flow-label-compact {
   font-weight: 600;
   color: #2A3744;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
 }
 
 .flow-description-compact {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   color: #5A6673;
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .flow-arrow-compact {
   position: absolute;
-  right: -0.75rem;
-  top: 1rem;
+  right: -0.5rem;
+  top: 0.875rem;
 }
 
 @keyframes pulse {

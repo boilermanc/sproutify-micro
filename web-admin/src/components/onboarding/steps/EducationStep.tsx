@@ -5,20 +5,13 @@ interface EducationStepProps {
   onNext: () => void;
 }
 
-const EducationStep = ({ onNext }: EducationStepProps) => {
+const EducationStep = (_props: EducationStepProps) => {
   const flowSteps = [
     { icon: '🌱', label: 'Varieties', description: 'Types of microgreens' },
     { icon: '📋', label: 'Recipes', description: 'Growing instructions' },
     { icon: '📦', label: 'Batches', description: 'Seed purchases' },
-    { icon: '🌿', label: 'Trays', description: 'Active growing containers' },
-    { icon: '✂️', label: 'Harvest', description: 'Track your yields' },
-  ];
-
-  const infoCards = [
-    { icon: '🌱', title: 'Varieties', desc: 'Types of microgreens you grow (e.g., Broccoli, Pea Shoots, Sunflower)' },
-    { icon: '📋', title: 'Recipes', desc: 'Growing instructions for each variety, including steps and timing' },
-    { icon: '📦', title: 'Batches', desc: 'Track your seed purchases to manage inventory' },
-    { icon: '🌿', title: 'Trays', desc: 'Physical containers you\'re growing - the core tracking unit' },
+    { icon: '🌿', label: 'Trays', description: 'Growing containers' },
+    { icon: '✂️', label: 'Harvest', description: 'Track yields' },
   ];
 
   return (
@@ -31,21 +24,16 @@ const EducationStep = ({ onNext }: EducationStepProps) => {
             <div className="flow-description-compact">{step.description}</div>
             {index < flowSteps.length - 1 && (
               <div className="flow-arrow-compact">
-                <ArrowRight size={18} color="#5B7C99" />
+                <ArrowRight size={16} color="#5B7C99" />
               </div>
             )}
           </div>
         ))}
       </div>
 
-      <div className="education-content-compact">
-        {infoCards.map((card, index) => (
-          <div key={index} className="info-card-compact">
-            <h3>{card.icon} {card.title}</h3>
-            <p>{card.desc}</p>
-          </div>
-        ))}
-      </div>
+      <p className="text-sm text-muted-foreground mt-4 text-center">
+        This wizard will guide you through setting up your first variety, recipe, and tray.
+      </p>
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Check, Sprout, ShoppingBasket, Package, ClipboardList } from 'lucide-react';
+import { Check, Sprout, Layers, Package, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '../../../hooks/useOnboarding';
 import { Button } from '@/components/ui/button';
@@ -37,7 +37,7 @@ const CompletionStep = ({ onComplete, onBack }: CompletionStepProps) => {
     {
       id: 'tray',
       label: 'Created your first tray',
-      icon: <ShoppingBasket size={20} />,
+      icon: <Layers size={20} />,
       completed: state.onboarding_steps_completed.includes('trayId'),
     },
   ];
@@ -55,7 +55,7 @@ const CompletionStep = ({ onComplete, onBack }: CompletionStepProps) => {
     {
       title: 'Create More Trays',
       description: 'Start tracking',
-      icon: <ShoppingBasket size={24} color="#5B7C99" />,
+      icon: <Layers size={24} color="#5B7C99" />,
       onClick: () => {
         onComplete();
         navigate('/trays');

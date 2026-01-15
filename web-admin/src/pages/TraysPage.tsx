@@ -4,7 +4,7 @@ import { getSupabaseClient } from '../lib/supabaseClient';
 import { useParams } from 'react-router-dom';
 import { checkHarvestReminders } from '../services/notificationService';
 import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
-import { Edit, ShoppingBasket, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Edit, Layers, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -1531,7 +1531,7 @@ const TraysPage = () => {
                        </>
                      ) : (
                         <EmptyState
-                          icon={<ShoppingBasket size={64} className="text-muted-foreground mb-4" />}
+                          icon={<Layers size={64} className="text-muted-foreground mb-4" />}
                           title="No Trays Yet"
                           description="Trays are your active growing containers. Create your first tray to get started!"
                           actionLabel="+ Create Your First Tray"

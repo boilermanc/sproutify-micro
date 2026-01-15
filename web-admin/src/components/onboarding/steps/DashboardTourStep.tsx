@@ -1,4 +1,4 @@
-import { ShoppingBasket, Sprout, ClipboardList, Scissors } from 'lucide-react';
+import { Layers, Sprout, ClipboardList, Scissors } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import './steps.css';
 
@@ -10,7 +10,7 @@ interface DashboardTourStepProps {
 const DashboardTourStep = ({ onNext, onBack }: DashboardTourStepProps) => {
   const features = [
     {
-      icon: <ShoppingBasket size={32} color="#5B7C99" />,
+      icon: <Layers size={32} color="#5B7C99" />,
       title: 'Active Trays',
       description: 'Track all your growing trays in one place',
     },

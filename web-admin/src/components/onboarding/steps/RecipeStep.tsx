@@ -272,13 +272,13 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                     placeholder="0"
                     min="0"
                     step="0.1"
-                    style={{ width: '100px' }}
+                    style={{ width: '80px' }}
                   />
                   <select
                     className="modern-input modern-select"
                     value={step.duration_unit}
                     onChange={(e) => updateStep(index, 'duration_unit', e.target.value as 'Days' | 'Hours')}
-                    style={{ width: '100px' }}
+                    style={{ width: '120px' }}
                   >
                     <option value="Days">Days</option>
                     <option value="Hours">Hours</option>

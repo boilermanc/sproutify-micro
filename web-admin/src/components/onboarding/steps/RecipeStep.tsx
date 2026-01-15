@@ -112,14 +112,6 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
     });
   };
 
-  const updateStepMultiple = (index: number, updates: Partial<RecipeStep>) => {
-    setSteps(prev => {
-      const newSteps = [...prev];
-      newSteps[index] = { ...newSteps[index], ...updates };
-      return newSteps;
-    });
-  };
-
   // Helper to check step type by name
   const getStepType = (name: string): string => {
     const lower = name.toLowerCase();

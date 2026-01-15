@@ -141,7 +141,7 @@ const BetaSignupPage = () => {
           <div className="mt-4 text-center">
             <button
               type="button"
-              onClick={() => navigate('/admin-portal/login')}
+              onClick={() => navigate('/login')}
               className="text-sm font-semibold text-purple-200 hover:text-white"
             >
               ← Back to admin login

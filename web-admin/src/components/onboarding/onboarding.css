@@ -309,11 +309,7 @@
 }
 
 .wizard-step {
-  animation: slideInRight 0.4s ease-out;
-}
-
-.wizard-step.exiting {
-  animation: slideOutLeft 0.4s ease-out;
+  /* Animation removed to prevent blank page issues with overflow:hidden */
 }
 
 @keyframes slideInRight {

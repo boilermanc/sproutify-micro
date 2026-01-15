@@ -22,9 +22,10 @@ interface OnboardingWizardProps {
 const TOTAL_STEPS = 7;
 
 const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
-  const { state, completeStep } = useOnboarding();
-  // Use local state only - no bidirectional sync to avoid race conditions
-  const [currentStepIndex, setCurrentStepIndex] = useState(state.current_step || 0);
+  const { completeStep } = useOnboarding();
+  // Always start at step 0 - createdData (varietyId, recipeId, etc.) isn't persisted
+  // so resuming mid-wizard would break step dependencies
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [createdData, setCreatedData] = useState<{
     varietyId?: number;
     recipeId?: number;

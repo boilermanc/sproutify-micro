@@ -289,9 +289,7 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
             onChange={(e) => setType(e.target.value)}
           >
             <option value="Standard">Standard</option>
-            <option value="Organic">Organic</option>
-            <option value="Hydroponic">Hydroponic</option>
-            <option value="Soil">Soil</option>
+            <option value="Custom">Custom</option>
           </select>
         </div>
 

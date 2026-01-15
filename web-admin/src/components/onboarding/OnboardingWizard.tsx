@@ -24,7 +24,6 @@ const TOTAL_STEPS = 7;
 const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
   const { state, setCurrentStep, completeStep } = useOnboarding();
   const [currentStepIndex, setCurrentStepIndex] = useState(state.current_step || 0);
-  const [isExiting, setIsExiting] = useState(false);
   const [createdData, setCreatedData] = useState<{
     varietyId?: number;
     recipeId?: number;
@@ -48,11 +47,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
 
   const handleNext = () => {
     if (currentStepIndex < TOTAL_STEPS - 1) {
-      setIsExiting(true);
-      setTimeout(() => {
-        setCurrentStepIndex(currentStepIndex + 1);
-        setIsExiting(false);
-      }, 200);
+      setCurrentStepIndex(currentStepIndex + 1);
     } else {
       handleComplete();
     }
@@ -60,11 +55,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
 
   const handleBack = () => {
     if (currentStepIndex > 0) {
-      setIsExiting(true);
-      setTimeout(() => {
-        setCurrentStepIndex(currentStepIndex - 1);
-        setIsExiting(false);
-      }, 200);
+      setCurrentStepIndex(currentStepIndex - 1);
     }
   };
 
@@ -178,7 +169,6 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             <OnboardingStep
               title={stepTitles[currentStepIndex]}
               description={stepDescriptions[currentStepIndex]}
-              isExiting={isExiting}
             >
               {renderStep()}
             </OnboardingStep>

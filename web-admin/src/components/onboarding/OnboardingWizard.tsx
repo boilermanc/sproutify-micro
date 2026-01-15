@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useOnboarding } from '../../hooks/useOnboarding';
 import OnboardingStep from './OnboardingStep';
@@ -22,7 +22,8 @@ interface OnboardingWizardProps {
 const TOTAL_STEPS = 7;
 
 const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
-  const { state, setCurrentStep, completeStep } = useOnboarding();
+  const { state, completeStep } = useOnboarding();
+  // Use local state only - no bidirectional sync to avoid race conditions
   const [currentStepIndex, setCurrentStepIndex] = useState(state.current_step || 0);
   const [createdData, setCreatedData] = useState<{
     varietyId?: number;
@@ -30,18 +31,6 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
     batchId?: number;
     trayId?: number;
   }>({});
-
-  useEffect(() => {
-    if (state.current_step !== currentStepIndex) {
-      setCurrentStep(currentStepIndex);
-    }
-  }, [currentStepIndex, state.current_step, setCurrentStep]);
-
-  useEffect(() => {
-    if (typeof state.current_step === 'number' && state.current_step !== currentStepIndex) {
-      setCurrentStepIndex(state.current_step);
-    }
-  }, [state.current_step, currentStepIndex]);
 
   const progress = ((currentStepIndex + 1) / TOTAL_STEPS) * 100;
 
@@ -151,6 +140,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
                 </DialogDescription>
               </div>
               <Button
+                type="button"
                 variant="ghost"
                 size="icon"
                 onClick={onClose}
@@ -165,7 +155,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-hidden p-6">
+          <CardContent className="flex-1 p-6">
             <OnboardingStep
               title={stepTitles[currentStepIndex]}
               description={stepDescriptions[currentStepIndex]}
@@ -176,7 +166,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
 
           <div className="border-t p-4 flex items-center justify-between gap-4 flex-shrink-0">
             {currentStepIndex > 0 ? (
-              <Button variant="outline" onClick={handleBack}>
+              <Button type="button" variant="outline" onClick={handleBack}>
                 <ChevronLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
@@ -185,12 +175,12 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             )}
             <div className="flex-1" />
             {currentStepIndex < TOTAL_STEPS - 1 ? (
-              <Button onClick={handleNext}>
+              <Button type="button" onClick={handleNext}>
                 Next
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
-              <Button onClick={handleComplete}>
+              <Button type="button" onClick={handleComplete}>
                 Complete Setup
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>

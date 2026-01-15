@@ -105,9 +105,19 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
   };
 
   const updateStep = (index: number, field: keyof RecipeStep, value: string | number) => {
-    const newSteps = [...steps];
-    newSteps[index] = { ...newSteps[index], [field]: value };
-    setSteps(newSteps);
+    setSteps(prev => {
+      const newSteps = [...prev];
+      newSteps[index] = { ...newSteps[index], [field]: value };
+      return newSteps;
+    });
+  };
+
+  const updateStepMultiple = (index: number, updates: Partial<RecipeStep>) => {
+    setSteps(prev => {
+      const newSteps = [...prev];
+      newSteps[index] = { ...newSteps[index], ...updates };
+      return newSteps;
+    });
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -241,8 +251,10 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                   onValueChange={(value) => {
                     const selectedDesc = stepDescriptions.find(sd => sd.description_id.toString() === value);
                     const descId = selectedDesc ? parseInt(value, 10) : null;
-                    updateStep(index, 'description_id', descId !== null && !isNaN(descId) ? descId : 0);
-                    updateStep(index, 'description_name', selectedDesc?.description_name || '');
+                    updateStepMultiple(index, {
+                      description_id: descId !== null && !isNaN(descId) ? descId : null,
+                      description_name: selectedDesc?.description_name || '',
+                    });
                   }}
                 >
                   <SelectTrigger className="modern-input modern-select" style={{ marginBottom: '0.5rem' }}>

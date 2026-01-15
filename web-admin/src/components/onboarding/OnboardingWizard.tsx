@@ -155,7 +155,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 p-6">
+          <CardContent className="flex-1 p-6 overflow-y-auto">
             <OnboardingStep
               title={stepTitles[currentStepIndex]}
               description={stepDescriptions[currentStepIndex]}

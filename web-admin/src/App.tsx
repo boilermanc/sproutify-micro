@@ -130,7 +130,7 @@ function App() {
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
             setSession(sessionPayload);
             console.log('[App] Session payload stored, setting authenticated=true');
-            console.log('[App] Session payload farm_uuid:', sessionPayload.farm_uuid);
+            console.log('[App] Session payload farmUuid:', sessionPayload.farmUuid);
             setIsAuthenticated(true);
             if (isMounted) {
               setIsLoading(false);

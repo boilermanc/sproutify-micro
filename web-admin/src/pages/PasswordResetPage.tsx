@@ -47,12 +47,12 @@ const PasswordResetPage = () => {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12">
       <div className="absolute inset-0">
-        <div className="h-full w-full bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.35),transparent_55%)] blur-3xl" />
+        <div className="h-full w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.35),transparent_55%)] blur-3xl" />
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950" />
       </div>
 
       <div className="relative z-10 w-full max-w-md space-y-6">
-        <div className="rounded-3xl border border-white/15 bg-white/95 p-8 shadow-2xl shadow-purple-500/20 backdrop-blur">
+        <div className="rounded-3xl border border-white/15 bg-white/95 p-8 shadow-2xl shadow-emerald-500/20 backdrop-blur">
           <div className="space-y-2 text-center">
             <p className="text-xs uppercase tracking-[0.3em] text-white/50">Sproutify Micro</p>
             <h1 className="text-3xl font-semibold text-slate-900">Reset Password</h1>
@@ -74,7 +74,7 @@ const PasswordResetPage = () => {
               />
             </div>
 
-            <Button type="submit" className="w-full bg-purple-600 hover:bg-purple-700" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Sending reset link...' : 'Send reset link'}
             </Button>
           </form>
@@ -89,9 +89,24 @@ const PasswordResetPage = () => {
             </p>
           )}
 
+          {status === 'success' && (
+            <div className="mt-4 text-center">
+              <Link
+                to={`/admin-portal/verify-reset?email=${encodeURIComponent(email.trim())}`}
+                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Enter reset code
+              </Link>
+            </div>
+          )}
+
           <div className="mt-6 text-center text-xs text-slate-500">
-            <Link to="/admin-portal/login" className="font-semibold text-purple-500 hover:text-purple-400">
-              ← Back to Beta Portal login
+            <Link to="/admin-portal/verify-reset" className="font-semibold text-emerald-600 hover:text-emerald-500">
+              Already have a code?
+            </Link>
+            <span className="mx-2">|</span>
+            <Link to="/login" className="font-semibold text-emerald-600 hover:text-emerald-500">
+              Back to login
             </Link>
           </div>
         </div>

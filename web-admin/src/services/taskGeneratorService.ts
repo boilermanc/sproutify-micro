@@ -306,22 +306,35 @@ export const fetchWeeklyTasks = async (
     tasks.push(...taskMap.values());
 
     // 5. Fetch maintenance tasks
-    const { data: maintenanceTasks } = await getSupabaseClient()
+    const { data: maintenanceTasks, error: mtError } = await getSupabaseClient()
       .from('maintenance_tasks')
       .select('*')
       .eq('farm_uuid', farmUuid)
       .eq('is_active', true);
 
+    // DEBUG: Log maintenance task fetching
+    console.log('=== MAINTENANCE TASK DEBUG ===');
+    console.log('Farm UUID:', farmUuid);
+    console.log('Week range:', weekStartStr, 'to', weekEndStr);
+    console.log('Maintenance tasks fetched:', maintenanceTasks?.length || 0);
+    console.log('Maintenance tasks error:', mtError);
+    console.log('Raw maintenance tasks:', JSON.stringify(maintenanceTasks, null, 2));
+
     for (const mt of (maintenanceTasks || [])) {
+      console.log(`Processing task: "${mt.task_name}" | day_of_week: ${mt.day_of_week} (type: ${typeof mt.day_of_week}) | frequency: ${mt.frequency}`);
+
       if (mt.day_of_week !== null) {
         const targetDay = mt.day_of_week;
         const weekStartDay = weekStartDate.getDay();
         const daysToAdd = (targetDay - weekStartDay + 7) % 7;
-        
+
         const taskDate = new Date(weekStartDate);
         taskDate.setDate(taskDate.getDate() + daysToAdd);
         const taskDateStr = formatDateString(taskDate);
-        
+
+        console.log(`  -> targetDay: ${targetDay}, weekStartDay: ${weekStartDay}, daysToAdd: ${daysToAdd}`);
+        console.log(`  -> taskDateStr: ${taskDateStr}, in range: ${taskDateStr >= weekStartStr && taskDateStr <= weekEndStr}`);
+
         if (taskDateStr >= weekStartStr && taskDateStr <= weekEndStr) {
           // Store task_name in product_name so completion check matches what's saved
           const taskName = mt.task_name;

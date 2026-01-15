@@ -217,6 +217,79 @@ export async function fetchOrderGapStatus(farmUuid: string): Promise<OrderGapSta
 }
 
 /**
+ * Fetch maintenance tasks for a specific date
+ * Handles daily, weekly, monthly, and one-time frequencies
+ * Filters out tasks that have already been completed today
+ */
+export const fetchMaintenanceTasks = async (
+  farmUuid: string,
+  targetDate: Date
+): Promise<DailyTask[]> => {
+  const dayOfWeek = targetDate.getDay(); // 0=Sunday, 4=Thursday, etc.
+  const dayOfMonth = targetDate.getDate(); // 1-31
+  const dateStr = formatDateString(targetDate);
+
+  const { data: maintenanceTasks, error } = await getSupabaseClient()
+    .from('maintenance_tasks')
+    .select('*')
+    .eq('farm_uuid', farmUuid)
+    .eq('is_active', true)
+    .or(`frequency.eq.daily,and(frequency.eq.weekly,day_of_week.eq.${dayOfWeek}),and(frequency.eq.one-time,task_date.eq.${dateStr}),and(frequency.eq.monthly,day_of_month.eq.${dayOfMonth})`);
+
+  if (error) {
+    console.error('[fetchMaintenanceTasks] Error fetching maintenance tasks:', error);
+    return [];
+  }
+
+  // Fetch completed maintenance tasks for today to filter them out
+  const { data: completedMaintenanceTasks, error: completedError } = await getSupabaseClient()
+    .from('task_completions')
+    .select('maintenance_task_id')
+    .eq('farm_uuid', farmUuid)
+    .eq('task_type', 'maintenance')
+    .eq('task_date', dateStr)
+    .eq('status', 'completed');
+
+  const completedMaintenanceIds = new Set<number>();
+  if (!completedError && completedMaintenanceTasks) {
+    completedMaintenanceTasks.forEach((ct: any) => {
+      if (ct.maintenance_task_id) {
+        completedMaintenanceIds.add(ct.maintenance_task_id);
+      }
+    });
+  }
+
+  console.log('[fetchMaintenanceTasks] Fetched maintenance tasks:', {
+    farmUuid,
+    targetDate: dateStr,
+    dayOfWeek,
+    totalCount: maintenanceTasks?.length || 0,
+    completedCount: completedMaintenanceIds.size,
+    completedIds: Array.from(completedMaintenanceIds),
+    tasks: maintenanceTasks?.map((t: any) => ({ name: t.task_name, frequency: t.frequency }))
+  });
+
+  // Convert to DailyTask format, filtering out completed tasks
+  return (maintenanceTasks || [])
+    .filter((mt: any) => !completedMaintenanceIds.has(mt.maintenance_task_id))
+    .map((mt: any) => ({
+      id: `maintenance-${mt.maintenance_task_id}-${dateStr}`,
+      action: mt.task_name,
+      crop: mt.task_type || 'Maintenance',
+      batchId: `maintenance-${mt.maintenance_task_id}`,
+      location: '',
+      dayCurrent: 0,
+      dayTotal: 0,
+      trays: mt.quantity || 1,
+      status: 'pending' as const,
+      trayIds: [],
+      recipeId: 0,
+      taskSource: 'maintenance' as any,
+      notes: mt.description || undefined,
+    }));
+};
+
+/**
  * Fetch daily tasks from daily_flow_aggregated view
  * This view includes tray_step tasks, soak_request tasks, seed_request tasks, and expiring_seed tasks
  */
@@ -606,7 +679,12 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
     
     // Fetch watering tasks for trays in grow phase
     const wateringTasks: DailyTask[] = [];
-    
+
+    // Fetch maintenance tasks (daily, weekly, monthly, one-time)
+    const maintenanceTasks: DailyTask[] = targetDate
+      ? await fetchMaintenanceTasks(farmUuid, targetDate)
+      : await fetchMaintenanceTasks(farmUuid, normalizedToday);
+
     if (targetDate) {
       try {
         // Fetch schedules for seeding (sow_date = today) and soaking (sow_date - soak_duration = today)
@@ -2597,7 +2675,15 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         allTaskIds.add(at.id);
       }
     }
-    
+
+    // Add maintenance tasks
+    for (const mt of maintenanceTasks) {
+      if (!allTaskIds.has(mt.id)) {
+        finalTasks.push(mt);
+        allTaskIds.add(mt.id);
+      }
+    }
+
     const dedupedTasks: DailyTask[] = [];
     const seenTaskIds = new Set<string>();
     const duplicatesFound: any[] = [];
@@ -2643,11 +2729,13 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
       harvest: harvestTasks.length,
       watering: wateringTasks.length,
       atRisk: atRiskTasks.length,
+      maintenance: maintenanceTasks.length,
       total: dedupedTasks.length,
       seedingTasks: seedingTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop, deliveryDate: t.deliveryDate })),
       soakingTasks: soakingTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop, deliveryDate: t.deliveryDate })),
       wateringTasks: wateringTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop, notes: t.notes })),
       atRiskTasks: atRiskTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop })),
+      maintenanceTasks: maintenanceTasks.map(t => ({ id: t.id, action: t.action, crop: t.crop })),
       finalTasksByType: {
         soak: finalTasks.filter(t => t.action === 'Soak').length,
         seed: finalTasks.filter(t => t.action === 'Seed').length,
@@ -3022,6 +3110,95 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
         console.error('Error updating harvest_date:', harvestError);
         throw harvestError;
       }
+    }
+
+    // Handle Maintenance tasks - record completion in task_completions
+    if ((task as any).taskSource === 'maintenance') {
+      if (!userId) {
+        throw new Error('User ID not found in session');
+      }
+
+      // Extract maintenance_task_id from batchId (format: "maintenance-{id}" or "maintenance-{id}-{date}")
+      let maintenanceTaskId: number | null = null;
+      if (task.batchId && typeof task.batchId === 'string' && task.batchId.startsWith('maintenance-')) {
+        const parts = task.batchId.split('-');
+        if (parts.length >= 2) {
+          const parsed = parseInt(parts[1], 10);
+          if (!isNaN(parsed)) {
+            maintenanceTaskId = parsed;
+          }
+        }
+      }
+
+      console.log('[DailyFlow] Completing maintenance task:', {
+        action: task.action,
+        batchId: task.batchId,
+        maintenanceTaskId,
+        taskDate: taskDateStr,
+        farmUuid
+      });
+
+      // Record completion in task_completions table
+      const completionData: any = {
+        farm_uuid: farmUuid,
+        task_type: 'maintenance',
+        task_date: taskDateStr,
+        maintenance_task_id: maintenanceTaskId,
+        recipe_id: null, // Maintenance tasks don't have recipes
+        status: 'completed',
+        completed_at: now,
+        completed_by: userId,
+        customer_name: null,
+        product_name: task.action || null, // Store task name in product_name
+      };
+
+      console.log('[DailyFlow] Inserting maintenance completion:', completionData);
+
+      // Use insert instead of upsert since maintenance tasks use maintenance_task_id for uniqueness
+      // First check if already completed today
+      const { data: existingCompletion, error: checkError } = await getSupabaseClient()
+        .from('task_completions')
+        .select('completion_id')
+        .eq('farm_uuid', farmUuid)
+        .eq('task_type', 'maintenance')
+        .eq('task_date', taskDateStr)
+        .eq('maintenance_task_id', maintenanceTaskId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('[DailyFlow] Error checking existing maintenance completion:', checkError);
+        throw checkError;
+      }
+
+      if (existingCompletion) {
+        console.log('[DailyFlow] Maintenance task already completed today, updating:', existingCompletion.completion_id);
+        const { error: updateError } = await getSupabaseClient()
+          .from('task_completions')
+          .update({
+            status: 'completed',
+            completed_at: now,
+            completed_by: userId,
+          })
+          .eq('completion_id', existingCompletion.completion_id);
+
+        if (updateError) {
+          console.error('[DailyFlow] Error updating maintenance completion:', updateError);
+          throw updateError;
+        }
+      } else {
+        const { error: insertError } = await getSupabaseClient()
+          .from('task_completions')
+          .insert(completionData);
+
+        if (insertError) {
+          console.error('[DailyFlow] Error recording maintenance completion:', insertError);
+          console.error('[DailyFlow] Completion data attempted:', completionData);
+          throw insertError;
+        }
+      }
+
+      console.log('[DailyFlow] Maintenance task completion recorded successfully');
+      return true;
     }
 
     // Update tray_steps for all tasks (including harvest)

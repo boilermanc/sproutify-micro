@@ -6,13 +6,36 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { 
+import {
   Send,
   TestTube,
   Users,
-  AlertCircle
+  AlertCircle,
+  History,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Eye
 } from 'lucide-react';
 // Using textarea for HTML email composition (react-quill not compatible with React 19)
+
+interface BroadcastRecord {
+  id: string;
+  campaign_id: string;
+  subject: string;
+  html_body: string;
+  target_table: string | null;
+  trial_status_filter: string | null;
+  recipient_count: number;
+  emails_sent: number;
+  is_test: boolean;
+  test_email: string | null;
+  status: 'sending' | 'sent' | 'failed' | 'partial_failure';
+  created_at: string;
+}
 
 const AdminEmailBroadcast = () => {
   const [mode, setMode] = useState<'test' | 'broadcast'>('test');
@@ -26,6 +49,12 @@ const AdminEmailBroadcast = () => {
   const [sendSuccess, setSendSuccess] = useState(false);
   const [sendError, setSendError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // Broadcast history state
+  const [recentBroadcasts, setRecentBroadcasts] = useState<BroadcastRecord[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [expandedBroadcast, setExpandedBroadcast] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(true);
 
   const fetchTargetCount = useCallback(async () => {
     if (mode === 'test') return;
@@ -57,9 +86,31 @@ const AdminEmailBroadcast = () => {
     }
   }, [mode, targetTable, trialStatusFilter]);
 
+  const fetchRecentBroadcasts = useCallback(async () => {
+    try {
+      setLoadingHistory(true);
+      const { data, error } = await getSupabaseClient()
+        .from('email_broadcasts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setRecentBroadcasts(data || []);
+    } catch (error) {
+      console.error('Error fetching broadcast history:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTargetCount();
   }, [fetchTargetCount]);
+
+  useEffect(() => {
+    fetchRecentBroadcasts();
+  }, [fetchRecentBroadcasts]);
 
   const loadTemplate = (templateName: 'update' | 'features') => {
     if (templateName === 'update') {
@@ -157,6 +208,7 @@ const AdminEmailBroadcast = () => {
       setHtmlBody('');
       setTestEmail('');
       setShowConfirm(false);
+      fetchRecentBroadcasts(); // Refresh history
       setTimeout(() => setSendSuccess(false), 3000);
     } catch (error) {
       console.error('Error sending email:', error);
@@ -390,7 +442,20 @@ const AdminEmailBroadcast = () => {
 
       {/* Send Button */}
       {!showConfirm && (
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-2">
+          {/* Show what's missing */}
+          {(!subject || htmlBody.length < 10 || (mode === 'test' && !testEmail)) && (
+            <p className="text-sm text-gray-500">
+              Required:{' '}
+              {[
+                mode === 'test' && !testEmail && 'test email',
+                !subject && 'subject',
+                htmlBody.length < 10 && 'body (min 10 chars)',
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </p>
+          )}
           <Button
             onClick={handleSend}
             disabled={sending || !subject || htmlBody.length < 10 || (mode === 'test' && !testEmail)}
@@ -401,6 +466,143 @@ const AdminEmailBroadcast = () => {
           </Button>
         </div>
       )}
+
+      {/* Broadcast History */}
+      <Card className="border-none shadow-md">
+        <CardHeader
+          className="cursor-pointer"
+          onClick={() => setShowHistory(!showHistory)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History className="h-5 w-5 text-gray-500" />
+              <CardTitle>Recent Broadcasts</CardTitle>
+            </div>
+            {showHistory ? (
+              <ChevronUp className="h-5 w-5 text-gray-400" />
+            ) : (
+              <ChevronDown className="h-5 w-5 text-gray-400" />
+            )}
+          </div>
+        </CardHeader>
+        {showHistory && (
+          <CardContent>
+            {loadingHistory ? (
+              <p className="text-gray-500 text-center py-4">Loading history...</p>
+            ) : recentBroadcasts.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">No broadcasts sent yet</p>
+            ) : (
+              <div className="space-y-3">
+                {recentBroadcasts.map((broadcast) => (
+                  <div
+                    key={broadcast.id}
+                    className="border rounded-lg overflow-hidden"
+                  >
+                    <div
+                      className="p-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => setExpandedBroadcast(
+                        expandedBroadcast === broadcast.id ? null : broadcast.id
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {/* Status Icon */}
+                          {broadcast.status === 'sent' && (
+                            <CheckCircle className="h-5 w-5 text-green-500" />
+                          )}
+                          {broadcast.status === 'failed' && (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )}
+                          {broadcast.status === 'partial_failure' && (
+                            <AlertTriangle className="h-5 w-5 text-amber-500" />
+                          )}
+                          {broadcast.status === 'sending' && (
+                            <Clock className="h-5 w-5 text-blue-500 animate-pulse" />
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-900 line-clamp-1">
+                              {broadcast.subject}
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {new Date(broadcast.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          {/* Badges */}
+                          <div className="flex items-center gap-2">
+                            {broadcast.is_test ? (
+                              <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                                Test
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded">
+                                Broadcast
+                              </span>
+                            )}
+                            <span className="text-sm text-gray-600">
+                              {broadcast.emails_sent}/{broadcast.recipient_count} sent
+                            </span>
+                          </div>
+                          {expandedBroadcast === broadcast.id ? (
+                            <ChevronUp className="h-4 w-4 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-gray-400" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Content */}
+                    {expandedBroadcast === broadcast.id && (
+                      <div className="p-4 border-t bg-white space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500">Status</p>
+                            <p className="font-medium capitalize">{broadcast.status.replace('_', ' ')}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Target</p>
+                            <p className="font-medium">
+                              {broadcast.is_test
+                                ? broadcast.test_email
+                                : broadcast.target_table || 'N/A'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Filter</p>
+                            <p className="font-medium">
+                              {broadcast.trial_status_filter || 'None'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Campaign ID</p>
+                            <p className="font-medium text-xs font-mono">
+                              {broadcast.campaign_id}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* HTML Preview */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <Eye className="h-4 w-4 text-gray-500" />
+                            <p className="text-sm font-medium text-gray-700">Email Content Preview</p>
+                          </div>
+                          <div
+                            className="border rounded p-4 bg-gray-50 max-h-64 overflow-y-auto prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: broadcast.html_body }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 };

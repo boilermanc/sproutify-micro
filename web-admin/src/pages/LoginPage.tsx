@@ -350,6 +350,11 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign in'}
             </Button>
+            <div className="text-right text-xs text-slate-500">
+              <Link to="/admin-portal/reset-password" className="font-semibold text-emerald-600 hover:text-emerald-500">
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </div>
 

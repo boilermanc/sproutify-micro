@@ -47,6 +47,7 @@ import AdminEmailBroadcast from './pages/AdminEmailBroadcast';
 import AdminEmailEvents from './pages/AdminEmailEvents';
 import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
+import VerifyResetCode from './pages/VerifyResetCode';
 import './App.css';
 
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
@@ -129,6 +130,7 @@ function App() {
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
             setSession(sessionPayload);
             console.log('[App] Session payload stored, setting authenticated=true');
+            console.log('[App] Session payload farm_uuid:', sessionPayload.farm_uuid);
             setIsAuthenticated(true);
             if (isMounted) {
               setIsLoading(false);
@@ -274,6 +276,7 @@ function App() {
         {/* Admin Portal Routes */}
           <Route path="/admin-portal/login" element={<AdminLogin />} />
         <Route path="/admin-portal/reset-password" element={<PasswordResetPage />} />
+        <Route path="/admin-portal/verify-reset" element={<VerifyResetCode />} />
         <Route path="/admin-portal/signup" element={<BetaSignupPage />} />
         
         <Route path="/admin-portal" element={

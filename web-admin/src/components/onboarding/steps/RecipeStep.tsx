@@ -120,6 +120,81 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
     });
   };
 
+  // Helper to check step type by name
+  const getStepType = (name: string): string => {
+    const lower = name.toLowerCase();
+    if (lower.includes('soak')) return 'soak';
+    if (lower.includes('seed')) return 'seed';
+    if (lower.includes('blackout')) return 'blackout';
+    if (lower.includes('harvest')) return 'harvest';
+    if (lower.includes('light') || lower.includes('growing')) return 'light';
+    if (lower.includes('weight')) return 'weight';
+    if (lower.includes('germination')) return 'germination';
+    return 'other';
+  };
+
+  // Get valid step options based on position and previous selections
+  const getValidStepOptions = (stepIndex: number) => {
+    // Get what steps have been selected before this one
+    const previousSteps = steps.slice(0, stepIndex);
+    const previousTypes = previousSteps
+      .filter(s => s.description_name)
+      .map(s => getStepType(s.description_name));
+
+    const hasSeeded = previousTypes.includes('seed');
+    const hasSoaked = previousTypes.includes('soak');
+    const hasHarvested = previousTypes.includes('harvest');
+    const isFirstStep = stepIndex === 0;
+
+    return stepDescriptions.filter(desc => {
+      const name = desc.description_name.toLowerCase();
+      const stepType = getStepType(name);
+
+      // Always exclude these
+      if (name.includes('nutrient application') ||
+          name.includes('cleaning') ||
+          name.includes('resting')) {
+        return false;
+      }
+
+      // First step: only allow soak or seed
+      if (isFirstStep) {
+        return stepType === 'soak' || stepType === 'seed';
+      }
+
+      // Can't soak after seeding (seeds are already planted)
+      if (hasSeeded && stepType === 'soak') {
+        return false;
+      }
+
+      // Can't do these before seeding
+      if (!hasSeeded) {
+        if (stepType === 'blackout' ||
+            stepType === 'harvest' ||
+            stepType === 'light' ||
+            stepType === 'weight' ||
+            stepType === 'germination') {
+          return false;
+        }
+      }
+
+      // After soaking, must seed next (can't skip to other steps)
+      if (hasSoaked && !hasSeeded) {
+        return stepType === 'seed';
+      }
+
+      // Can't harvest if already harvested
+      if (hasHarvested && stepType === 'harvest') {
+        return false;
+      }
+
+      // Harvest should typically be last - warn but allow
+      // (we'll just show it as an option if seeded)
+
+      return true;
+    });
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
@@ -251,9 +326,25 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                   onValueChange={(value) => {
                     const selectedDesc = stepDescriptions.find(sd => sd.description_id.toString() === value);
                     const descId = selectedDesc ? parseInt(value, 10) : null;
-                    updateStepMultiple(index, {
-                      description_id: descId !== null && !isNaN(descId) ? descId : null,
-                      description_name: selectedDesc?.description_name || '',
+
+                    // Update this step and clear subsequent steps (their selections may no longer be valid)
+                    setSteps(prev => {
+                      const newSteps = [...prev];
+                      // Update current step
+                      newSteps[index] = {
+                        ...newSteps[index],
+                        description_id: descId !== null && !isNaN(descId) ? descId : null,
+                        description_name: selectedDesc?.description_name || '',
+                      };
+                      // Clear subsequent steps since they may no longer be valid
+                      for (let i = index + 1; i < newSteps.length; i++) {
+                        newSteps[i] = {
+                          ...newSteps[i],
+                          description_id: null,
+                          description_name: '',
+                        };
+                      }
+                      return newSteps;
                     });
                   }}
                 >
@@ -261,18 +352,11 @@ const RecipeStep = ({ onNext, onBack, varietyId, onDataCreated }: RecipeStepProp
                     <SelectValue placeholder="Select step description" />
                   </SelectTrigger>
                   <SelectContent>
-                    {stepDescriptions
-                      .filter(desc => {
-                        const name = desc.description_name.toLowerCase();
-                        return !name.includes('nutrient application') && 
-                               !name.includes('cleaning') && 
-                               !name.includes('resting');
-                      })
-                      .map((desc) => (
-                        <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
-                          {desc.description_name}
-                        </SelectItem>
-                      ))}
+                    {getValidStepOptions(index).map((desc) => (
+                      <SelectItem key={desc.description_id} value={desc.description_id.toString()}>
+                        {desc.description_name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>

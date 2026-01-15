@@ -149,9 +149,9 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col p-0 [&>button]:hidden">
-        <Card className="border-0 shadow-none flex flex-col h-full">
-          <CardHeader className="border-b pb-4">
+      <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-hidden flex flex-col p-0 [&>button]:hidden">
+        <Card className="border-0 shadow-none flex flex-col h-full min-h-0 overflow-hidden">
+          <CardHeader className="border-b pb-4 flex-shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <DialogTitle className="text-2xl">Setup Wizard</DialogTitle>
@@ -174,7 +174,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto p-6">
+          <CardContent className="flex-1 overflow-y-auto p-6 min-h-0">
             <OnboardingStep
               title={stepTitles[currentStepIndex]}
               description={stepDescriptions[currentStepIndex]}
@@ -184,7 +184,7 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             </OnboardingStep>
           </CardContent>
 
-          <div className="border-t p-4 flex items-center justify-between gap-4">
+          <div className="border-t p-4 flex items-center justify-between gap-4 flex-shrink-0">
             {currentStepIndex > 0 ? (
               <Button variant="outline" onClick={handleBack}>
                 <ChevronLeft className="mr-2 h-4 w-4" />

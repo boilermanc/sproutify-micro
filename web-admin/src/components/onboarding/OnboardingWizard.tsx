@@ -174,7 +174,14 @@ const OnboardingWizard = ({ onComplete, onClose }: OnboardingWizardProps) => {
             ) : (
               <div />
             )}
-            <div className="flex-1" />
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-muted-foreground text-sm"
+              onClick={onComplete}
+            >
+              Skip and don't show again
+            </Button>
             {currentStepIndex < TOTAL_STEPS - 1 ? (
               <Button type="button" onClick={handleNext}>
                 Next

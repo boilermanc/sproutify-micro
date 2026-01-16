@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -37,7 +37,16 @@ interface LayoutProps {
 
 const Layout = ({ onLogout }: LayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [farmName, setFarmName] = useState('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const sessionData = localStorage.getItem('sproutify_session');
+    if (sessionData) {
+      const { farmName: name } = JSON.parse(sessionData);
+      setFarmName(name || '');
+    }
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('sproutify_session');
@@ -198,15 +207,20 @@ const Layout = ({ onLogout }: LayoutProps) => {
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 bg-white border-b border-slate-200">
-          <div className="flex items-center">
+          <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
               <Menu className="h-6 w-6 text-slate-700" />
             </Button>
-            <img 
-              src={logoImage} 
-              alt="Sproutify Micro" 
+            <img
+              src={logoImage}
+              alt="Sproutify Micro"
               className="ml-4 md:ml-0 h-8 object-contain"
             />
+            {farmName && (
+              <div className="hidden sm:flex items-center gap-2 pl-4 border-l border-slate-200">
+                <span className="text-lg font-semibold text-slate-800">{farmName}</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell />

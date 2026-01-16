@@ -34,6 +34,17 @@ interface User {
   farm_name?: string;
 }
 
+// Format date as "Jan 16, 2026"
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'Unknown';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
 const AdminFarmsUsers = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [farms, setFarms] = useState<Farm[]>([]);
@@ -116,6 +127,13 @@ const AdminFarmsUsers = () => {
           created_at: user.created_at as string,
           last_active: user.last_active as string
         } as User;
+      });
+
+      // Sort users by created_at descending (newest first)
+      usersWithFarmNames.sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateB - dateA;
       });
 
       setUsers(usersWithFarmNames);
@@ -242,7 +260,7 @@ const AdminFarmsUsers = () => {
                     <div className="flex justify-between">
                       <span className="text-gray-500">Created:</span>
                       <span className="font-medium">
-                        {new Date(farm.created_at).toLocaleDateString()}
+                        {formatDate(farm.created_at)}
                       </span>
                     </div>
                   )}
@@ -290,12 +308,12 @@ const AdminFarmsUsers = () => {
                         <span>{user.farm_name}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">Created:</span>
-                        <span>{new Date(user.created_at).toLocaleDateString()}</span>
+                        <span className="font-medium">Signed Up:</span>
+                        <span>{formatDate(user.created_at)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">Last Active:</span>
-                        <span>{new Date(user.last_active).toLocaleDateString()}</span>
+                        <span>{formatDate(user.last_active)}</span>
                       </div>
                     </div>
                   </div>

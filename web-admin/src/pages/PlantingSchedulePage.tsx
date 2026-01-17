@@ -35,6 +35,8 @@ interface StandingOrderItem {
   quantity: number;
   product_name?: string;
   variant_name?: string;
+  size_value?: number;
+  size_unit?: string;
 }
 
 interface Recipe {
@@ -44,6 +46,7 @@ interface Recipe {
   total_days: number;
   seed_quantity?: number;
   seed_quantity_unit?: string;
+  expected_yield_oz?: number;
 }
 
 interface ProductRecipeMapping {
@@ -71,6 +74,8 @@ interface PlantingSchedule {
   isSeeded?: boolean; // Flag to track if trays have already been created
   seed_quantity?: number; // Seed quantity per tray (in grams)
   seed_quantity_unit?: string; // Unit for seed quantity
+  oz_needed?: number; // Ounces needed for this schedule (used for tray calculation)
+  expected_yield_oz?: number; // Expected yield per tray in oz
 }
 
 interface SeedSelectionOption {
@@ -184,7 +189,7 @@ const PlantingSchedulePage = () => {
             .select(`
               *,
               products(product_id, product_name),
-              product_variants(variant_id, variant_name)
+              product_variants(variant_id, variant_name, size_value, size_unit)
             `)
             .eq('standing_order_id', order.standing_order_id);
 
@@ -204,6 +209,8 @@ const PlantingSchedulePage = () => {
               quantity: Number(item.quantity) || 0,
               product_name: item.products?.product_name || 'Unknown',
               variant_name: item.product_variants?.variant_name || null,
+              size_value: item.product_variants?.size_value || null,
+              size_unit: item.product_variants?.size_unit || 'oz',
             })),
           };
         })
@@ -212,7 +219,7 @@ const PlantingSchedulePage = () => {
       // 3. Fetch all recipes with their total days and seed quantities
       const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
-        .select('recipe_id, recipe_name, variety_name, seed_quantity, seed_quantity_unit')
+        .select('recipe_id, recipe_name, variety_name, seed_quantity, seed_quantity_unit, global_recipes(expected_yield_oz)')
         .eq('farm_uuid', farmUuid)
         .eq('is_active', true);
 
@@ -257,6 +264,7 @@ const PlantingSchedulePage = () => {
             total_days: totalDays || 10, // Default to 10 if no steps
             seed_quantity: seedQuantityGrams,
             seed_quantity_unit: 'grams', // Always store in grams for consistency
+            expected_yield_oz: recipe.global_recipes?.expected_yield_oz || 9, // Default to 9 oz if not set
           };
         })
       );
@@ -298,29 +306,38 @@ const PlantingSchedulePage = () => {
           });
         });
 
-        // Build recipe items for this standing order
-        const recipeItems: Array<{ recipe_id: number; quantity: number }> = [];
+        // Build recipe items for this standing order with oz_needed calculation
+        const recipeItems: Array<{ recipe_id: number; quantity: number; oz_needed: number }> = [];
 
         for (const item of order.items) {
           const productMappings = mappingsByProduct[item.product_id] || [];
-          
+
           if (productMappings.length === 0) continue;
 
           // Calculate total ratio for normalization
           const totalRatio = productMappings.reduce((sum, m) => sum + m.ratio, 0);
-          
-          // Distribute product quantity across recipes based on ratios
+
+          // Calculate oz for this item (convert from grams if needed)
+          let itemOz = item.quantity * (item.size_value || 1);
+          if (item.size_unit === 'g') {
+            itemOz = itemOz / 28.35; // Convert grams to oz
+          }
+
+          // Distribute product oz across recipes based on ratios
           for (const mapping of productMappings) {
+            const recipeOzNeeded = (itemOz * mapping.ratio) / totalRatio;
             const recipeQuantity = (item.quantity * mapping.ratio) / totalRatio;
-            
+
             // Check if recipe already exists in recipeItems
             const existingIndex = recipeItems.findIndex(r => r.recipe_id === mapping.recipe_id);
             if (existingIndex >= 0) {
               recipeItems[existingIndex].quantity += recipeQuantity;
+              recipeItems[existingIndex].oz_needed += recipeOzNeeded;
             } else {
               recipeItems.push({
                 recipe_id: mapping.recipe_id,
                 quantity: recipeQuantity,
+                oz_needed: recipeOzNeeded,
               });
             }
           }
@@ -349,15 +366,23 @@ const PlantingSchedulePage = () => {
             return mappings.some(m => m.recipe_id === schedule.recipe_id);
           });
 
-          // Find the recipe to get seed quantity info
+          // Find the recipe to get seed quantity and expected yield info
           const recipeInfo = recipes.find(r => r.recipe_id === schedule.recipe_id);
+          const expectedYieldOz = recipeInfo?.expected_yield_oz || 9; // Default 9 oz per tray
+
+          // Find the oz_needed from recipeItems (calculated earlier with proper unit conversion)
+          const recipeItem = recipeItems.find(r => r.recipe_id === schedule.recipe_id);
+          const ozNeeded = recipeItem?.oz_needed || 0;
+
+          // Calculate trays from oz: trays = ceil(oz_needed / expected_yield_oz)
+          const traysNeeded = ozNeeded > 0 ? Math.ceil(ozNeeded / expectedYieldOz) : Math.max(1, Math.ceil(schedule.quantity));
 
           allSchedules.push({
             sow_date: schedule.sow_date,
             delivery_date: schedule.delivery_date,
             recipe_id: schedule.recipe_id,
             recipe_name: schedule.recipe_name,
-            quantity: schedule.quantity,
+            quantity: traysNeeded,
             days_before_delivery: schedule.days_before_delivery,
             standing_order_id: order.standing_order_id,
             order_name: order.order_name,
@@ -366,27 +391,54 @@ const PlantingSchedulePage = () => {
             variant_name: productInfo?.variant_name || undefined,
             seed_quantity: recipeInfo?.seed_quantity,
             seed_quantity_unit: recipeInfo?.seed_quantity_unit,
+            oz_needed: ozNeeded,
+            expected_yield_oz: expectedYieldOz,
           });
         }
       }
 
       // Sort by sow date
       allSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
-      
+
+      // 6.5. Deduplicate schedules with same (standing_order_id, recipe_id, sow_date)
+      // This can happen when multiple delivery days align to the same seeding day
+      // When deduplicating, sum oz_needed and recalculate trays from the total
+      const dedupeMap = new Map<string, PlantingSchedule>();
+      for (const schedule of allSchedules) {
+        const sowDateKey = getLocalDateKey(schedule.sow_date);
+        const key = `${schedule.standing_order_id}-${schedule.recipe_id}-${sowDateKey}`;
+        const existing = dedupeMap.get(key);
+        if (existing) {
+          // Sum oz_needed, then recalculate trays from total oz
+          existing.oz_needed = (existing.oz_needed || 0) + (schedule.oz_needed || 0);
+          const expectedYield = existing.expected_yield_oz || 9;
+          existing.quantity = existing.oz_needed > 0
+            ? Math.ceil(existing.oz_needed / expectedYield)
+            : existing.quantity + schedule.quantity; // Fallback if no oz data
+        } else {
+          // Clone to avoid mutating original
+          dedupeMap.set(key, { ...schedule });
+        }
+      }
+      const deduplicatedSchedules = Array.from(dedupeMap.values());
+      deduplicatedSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
+
+      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules`);
+
       // 7. Filter out schedules where trays have already been created
       // Check for existing trays or task_completions for each schedule
       const filteredSchedules: PlantingSchedule[] = [];
-      
-      if (allSchedules.length === 0) {
+
+      if (deduplicatedSchedules.length === 0) {
         setSchedules([]);
         setLoading(false);
         return;
       }
-      
+
       // Batch check for all schedules at once for better performance
       // Fetch ALL trays and tasks for these recipes (not just within date range)
       // We'll match them to each schedule's specific recipe_id and sow_date
-      const recipeIds = [...new Set(allSchedules.map(s => s.recipe_id))];
+      const recipeIds = [...new Set(deduplicatedSchedules.map(s => s.recipe_id))];
       
       // Fetch all existing trays for these recipes (no date filter - we need all of them)
       const { data: existingTrays, error: traysError } = await getSupabaseClient()
@@ -415,21 +467,22 @@ const PlantingSchedulePage = () => {
       };
 
       if (existingTrays && existingTrays.length > 0) {
-        console.log(`[PlantingSchedule] Found ${existingTrays.length} existing trays for these recipes`);
         existingTrays.forEach((tray: any) => {
           if (tray.recipe_id && tray.sow_date) {
-            const trayDateKey = getLocalDateKey(new Date(tray.sow_date));
+            // Extract YYYY-MM-DD directly from the date string to avoid timezone shifts
+            const sowDateStr = String(tray.sow_date);
+            const trayDateKey = sowDateStr.includes('T')
+              ? sowDateStr.split('T')[0]
+              : sowDateStr.slice(0, 10);
             incrementSeededTrays(tray.recipe_id, trayDateKey, 1);
           }
         });
       }
 
-      console.log(`[PlantingSchedule] Total schedules before filtering: ${allSchedules.length}`);
-
       const candidateOffsets = [0, -1, 1];
       let filteredCount = 0;
 
-      for (const schedule of allSchedules) {
+      for (const schedule of deduplicatedSchedules) {
         const scheduleDate = new Date(schedule.sow_date);
         scheduleDate.setHours(0, 0, 0, 0);
         const scheduledTrays = Math.max(1, Math.ceil(schedule.quantity || 0));
@@ -445,6 +498,7 @@ const PlantingSchedulePage = () => {
             candidateDate.setDate(candidateDate.getDate() + offset);
             const candidateKey = getLocalDateKey(candidateDate);
             const available = recipeSeedMap.get(candidateKey) || 0;
+
             if (available <= 0) {
               continue;
             }

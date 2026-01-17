@@ -1036,7 +1036,7 @@ const BatchesPage = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">Quantity</Label>
-                  <div>{selectedBatch.quantity ? `${selectedBatch.quantity} ${selectedBatch.unit || 'units'}` : 'N/A'}</div>
+                  <div>{selectedBatch.quantity ? `${parseFloat(selectedBatch.quantity).toFixed(2)} ${selectedBatch.unit || 'lbs'}` : 'N/A'}</div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">Lot Number</Label>

@@ -6020,6 +6020,12 @@ const PassiveStepCard = ({ stepName, totalTrays, onViewDetails }: PassiveStepCar
         tooltip: "Trays actively growing under lights. Monitor watering schedule and check for any issues like yellowing or pests."
       };
     }
+    if (name.includes('ready to harvest') || name.includes('harvest')) {
+      return {
+        icon: <Scissors className="h-6 w-6 text-green-600" />,
+        tooltip: "Trays that have reached their full grow days and are ready to cut. These are a subset of Growing trays that can be harvested now."
+      };
+    }
     return {
       icon: <Clock className="h-6 w-6 text-slate-500" />,
       tooltip: `Trays in the ${stepName} phase. Click View Details to see individual trays and their status.`

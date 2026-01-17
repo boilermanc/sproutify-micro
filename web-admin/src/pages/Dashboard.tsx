@@ -951,12 +951,25 @@ const Dashboard = () => {
       if (harvestRaw) {
         const dailyYields: Record<string, number> = {};
         harvestRaw.forEach(t => {
-          const d = new Date(t.harvest_date).toLocaleDateString('en-US', { weekday: 'short' });
-          dailyYields[d] = (dailyYields[d] || 0) + Number(t.yield || 0);
+          // Use the date string directly from database (YYYY-MM-DD format)
+          // Don't parse through Date object to avoid timezone shifting
+          const dateKey = String(t.harvest_date).split('T')[0];
+          dailyYields[dateKey] = (dailyYields[dateKey] || 0) + Number(t.yield || 0);
         });
-        setHarvestData(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
-          name: day, yield: dailyYields[day] || 0
-        })));
+
+        // Generate last 7 days in chronological order using local dates
+        const last7Days = [];
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+          last7Days.push({
+            name: dayName,
+            yield: dailyYields[dateKey] || 0
+          });
+        }
+        setHarvestData(last7Days);
       }
 
       // Variety Distribution

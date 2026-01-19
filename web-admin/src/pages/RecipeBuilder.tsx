@@ -457,12 +457,13 @@ export const RecipeBuilderPage: React.FC = () => {
       />
 
       {/* 3. The Composer (Bottom Sticky) */}
-      <StepComposer 
-        descriptions={descriptions} 
+      <StepComposer
+        descriptions={descriptions}
         onCommit={handleCommitStep}
         editingStep={editingStep}
         onCancelEdit={() => setEditingStep(null)}
         existingSteps={steps}
+        stepIndex={editingStep ? steps.findIndex(s => s.ui_id === editingStep.ui_id) : steps.length}
       />
 
       {/* Error/Success Modal */}

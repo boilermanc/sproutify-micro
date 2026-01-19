@@ -138,15 +138,15 @@ export const RecipeStack: React.FC<RecipeStackProps> = ({
                     </div>
                   )}
                   
-                  {/* Water Medium - For seeding/soaking (not growing) */}
-                  {step.water_type && !step.water_method && (
+                  {/* Water Medium - For seeding only (not soaking or growing) */}
+                  {step.water_type && !step.water_method && !(step.description_name || '').toLowerCase().includes('soaking') && (
                     <div className="text-[10px] text-gray-700">
                       <span className="font-medium">{step.water_type === 'nutrients' ? '🧪' : '💧'} Soak Medium:</span> {step.water_type === 'nutrients' ? 'Nutrient Mix' : 'Plain Water'}
                     </div>
                   )}
-                  
-                  {/* Water Details - For growing steps and blackout with water */}
-                  {step.water_type && (
+
+                  {/* Water Details - For growing steps and blackout with water (not soaking) */}
+                  {step.water_type && !(step.description_name || '').toLowerCase().includes('soaking') && (
                     <div className="text-[10px] text-gray-700">
                       <span className="font-medium">{step.water_type === 'nutrients' ? '🧪' : '💧'} Water:</span> {
                         (step.water_method || 'top') === 'top' ? 'Top' : 'Bottom'
@@ -154,14 +154,19 @@ export const RecipeStack: React.FC<RecipeStackProps> = ({
                     </div>
                   )}
                   
-                  {/* No water for steps that could have it */}
+                  {/* No water for steps that could have it (not soaking - always uses water implicitly) */}
                   {!step.water_type && (() => {
                     const descName = (step.description_name || '').toLowerCase().trim();
                     // Check if it's a blackout step by name OR by having blackout-specific fields
                     const isBlackout = descName.includes('blackout') || step.requires_weight !== undefined;
+                    const isSoaking = descName.includes('soaking');
                     const isWateringStep = descName.includes('water') || descName.includes('nutrient') || descName.includes('irrigat');
-                    const canHaveWater = descName.includes('seeding') || descName.includes('soaking') || descName.includes('growing') || descName.includes('germination');
-                    
+                    // Soaking doesn't need water display - it's implicit
+                    const canHaveWater = descName.includes('seeding') || descName.includes('growing') || descName.includes('germination');
+
+                    // Don't show water info for soaking steps
+                    if (isSoaking) return null;
+
                     // For blackout steps: ALWAYS show strikethrough "No Water" if no water_type and no misting
                     // This prevents "Medium: No Water" from showing for blackout steps
                     if (isBlackout) {
@@ -175,9 +180,9 @@ export const RecipeStack: React.FC<RecipeStackProps> = ({
                       // If blackout has misting, don't show "No Water" - misting will be shown separately
                       return null;
                     }
-                    
-                    // Only show "no water" for other steps (seeding/soaking/growing) that could have water but don't
-                    // NEVER show this for blackout steps
+
+                    // Only show "no water" for other steps (seeding/growing) that could have water but don't
+                    // NEVER show this for blackout or soaking steps
                     return !isBlackout && !isWateringStep && canHaveWater ? (
                       <div className="text-[10px] text-gray-600">
                         <span className="font-medium">🚫 Medium:</span> No Water

@@ -8,7 +8,34 @@ interface StepComposerProps {
   onCancelEdit: () => void;
   editingStep: RecipeStep | null;
   existingSteps?: RecipeStep[]; // Current steps in the recipe to check for color conflicts
+  stepIndex: number; // Position in recipe for filtering valid step types
 }
+
+// Helper to check step type by name
+const getStepType = (name: string): string => {
+  const lower = name.toLowerCase();
+  if (lower.includes('soak')) return 'soak';
+  if (lower.includes('seed')) return 'seed';
+  if (lower.includes('blackout')) return 'blackout';
+  if (lower.includes('harvest')) return 'harvest';
+  if (lower.includes('light') || lower.includes('growing')) return 'light';
+  if (lower.includes('weight')) return 'weight';
+  if (lower.includes('germination')) return 'germination';
+  return 'other';
+};
+
+// Get step color matching Daily Flow TaskCard colors
+const getStepColorFromType = (descName: string): string => {
+  const name = descName.toLowerCase();
+  if (name.includes('seed')) return '#4f46e5';      // indigo (seed variant)
+  if (name.includes('soak')) return '#7c3aed';      // purple (prep variant)
+  if (name.includes('pre-sprout')) return '#7c3aed'; // purple (prep variant)
+  if (name.includes('blackout')) return '#475569';  // slate (default variant)
+  if (name.includes('germination')) return '#d97706'; // amber (warning variant)
+  if (name.includes('growing') || name.includes('light')) return '#0891b2'; // cyan (water variant)
+  if (name.includes('harvest')) return '#059669';   // emerald (harvest variant)
+  return '#475569'; // default slate
+};
 
 const INITIAL_STATE: Partial<RecipeStep> = {
   duration: 1,
@@ -25,15 +52,80 @@ const INITIAL_STATE: Partial<RecipeStep> = {
   // For growing steps, water_method is 'top' or 'bottom', water_frequency is times per day
 };
 
-export const StepComposer: React.FC<StepComposerProps> = ({ 
-  descriptions, 
-  onCommit, 
+export const StepComposer: React.FC<StepComposerProps> = ({
+  descriptions,
+  onCommit,
   editingStep,
   onCancelEdit,
-  existingSteps = []
+  existingSteps = [],
+  stepIndex
 }) => {
   const [formData, setFormData] = useState<Partial<RecipeStep>>(INITIAL_STATE);
   const [selectedDesc, setSelectedDesc] = useState<StepDescription | null>(null);
+
+  // Get valid step options based on position and previous selections
+  const getValidStepOptions = () => {
+    const previousSteps = existingSteps.slice(0, stepIndex);
+    const previousTypes = previousSteps
+      .filter(s => s.description_name)
+      .map(s => getStepType(s.description_name));
+
+    const hasSeeded = previousTypes.includes('seed');
+    const hasSoaked = previousTypes.includes('soak');
+    const hasHarvested = previousTypes.includes('harvest');
+    const hasGrown = previousTypes.includes('light'); // 'light' type includes Growing
+    const isFirstStep = stepIndex === 0;
+
+    return descriptions.filter(desc => {
+      const name = desc.description_name.toLowerCase();
+      const stepType = getStepType(name);
+
+      // Always exclude these
+      if (name.includes('nutrient application') ||
+          name.includes('cleaning') ||
+          name.includes('resting')) {
+        return false;
+      }
+
+      // First step: only allow soak or seed
+      if (isFirstStep) {
+        return stepType === 'soak' || stepType === 'seed';
+      }
+
+      // Can't soak after seeding (seeds are already planted)
+      if (hasSeeded && stepType === 'soak') {
+        return false;
+      }
+
+      // Can't do these before seeding
+      if (!hasSeeded) {
+        if (stepType === 'blackout' ||
+            stepType === 'harvest' ||
+            stepType === 'light' ||
+            stepType === 'weight' ||
+            stepType === 'germination') {
+          return false;
+        }
+      }
+
+      // After soaking, must seed next (can't skip to other steps)
+      if (hasSoaked && !hasSeeded) {
+        return stepType === 'seed';
+      }
+
+      // Can't harvest if already harvested
+      if (hasHarvested && stepType === 'harvest') {
+        return false;
+      }
+
+      // Can't harvest before growing
+      if (!hasGrown && stepType === 'harvest') {
+        return false;
+      }
+
+      return true;
+    });
+  };
 
   // Load data when entering Edit Mode
   // This effect intentionally populates form fields when editingStep changes
@@ -92,17 +184,8 @@ export const StepComposer: React.FC<StepComposerProps> = ({
     const isBlackout = descName.includes('blackout');
     const canHaveWaterType = isWatering || descName.includes('seeding') || descName.includes('soaking') || isGrowing || isGermination;
 
-    // For germination steps: use orange if no other step has orange, otherwise use default color
-    let stepColor = selectedDesc.step_color;
-    if (isGermination) {
-      const orangeColor = '#FFA500'; // Orange color
-      // Check if any other step (excluding the one being edited) already has orange
-      const otherSteps = existingSteps.filter(s => editingStep ? s.ui_id !== editingStep.ui_id : true);
-      const hasOrange = otherSteps.some(s => s.color?.toLowerCase() === orangeColor.toLowerCase());
-      if (!hasOrange) {
-        stepColor = orangeColor;
-      }
-    }
+    // Use Daily Flow consistent colors based on step type
+    const stepColor = getStepColorFromType(selectedDesc.description_name);
 
     const newStep: RecipeStep = {
       // If editing, keep original IDs, otherwise gen new UI ID
@@ -195,18 +278,11 @@ export const StepComposer: React.FC<StepComposerProps> = ({
               onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
             >
               <option value="">Select Action...</option>
-              {descriptions
-                .filter(d => {
-                  const name = d.description_name.toLowerCase();
-                  return !name.includes('nutrient application') && 
-                         !name.includes('cleaning') && 
-                         !name.includes('resting');
-                })
-                .map(d => (
-                  <option key={d.description_id} value={d.description_id}>
-                    {d.description_name}
-                  </option>
-                ))}
+              {getValidStepOptions().map(d => (
+                <option key={d.description_id} value={d.description_id}>
+                  {d.description_name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -399,8 +475,8 @@ export const StepComposer: React.FC<StepComposerProps> = ({
               </>
             )}
 
-            {/* MEDIUM TYPE - Show for seeding/soaking steps (FIRST for seeding) */}
-            {(isSeeding || descName.includes('soaking')) && (
+            {/* MEDIUM TYPE - Show for seeding steps only */}
+            {isSeeding && (
               <div className="w-full">
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">Growing Medium</label>
                 <select 
@@ -421,8 +497,8 @@ export const StepComposer: React.FC<StepComposerProps> = ({
               </div>
             )}
 
-            {/* WATER TYPE CONTROLS - Show for watering steps and steps that can have water (Seeding, Soaking, etc.) - NOT for growing or germination (SECOND for seeding) */}
-            {canHaveWaterType && !isGrowing && !isGermination && (
+            {/* WATER TYPE CONTROLS - Show for seeding steps only (soaking always uses plain water) */}
+            {canHaveWaterType && !isGrowing && !isGermination && !descName.includes('soaking') && (
                <div className="w-full">
                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
                    {isSeeding ? 'Water Medium' : 'Solution Type'}

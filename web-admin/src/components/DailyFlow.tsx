@@ -1474,34 +1474,55 @@ export default function DailyFlow() {
       // For planting_schedule tasks, we need to fetch batches using recipeId directly
       if (task.taskSource === 'planting_schedule' && task.recipeId) {
         console.log('[DailyFlow] Fetching batches for planting_schedule task with recipeId:', task.recipeId);
-        // Fetch available batches for this recipe
-        await fetchAvailableBatchesForRecipe(task);
-        
-        // Check if recipe has soak step
+
+        // Check if recipe has soak step FIRST, before fetching batches
         const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
           p_recipe_id: task.recipeId
         });
-        
+
         const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
         setIsSoakVariety(hasSoak || false);
-        
+
         if (hasSoak) {
-          // Soak variety - fetch available soaked seed for this recipe
-          const sessionData = localStorage.getItem('sproutify_session');
-          if (sessionData) {
-            const { farmUuid } = JSON.parse(sessionData);
-            const { data: soakedSeedData } = await getSupabaseClient()
-              .from('available_soaked_seed')
-              .select('*')
-              .eq('farm_uuid', farmUuid)
-              .eq('recipe_id', task.recipeId)
-              .order('soak_date', { ascending: true })
-              .limit(1);
-            
-            if (soakedSeedData && soakedSeedData.length > 0) {
-              setAvailableSoakedSeed(soakedSeedData[0]);
+          // Soak variety - check for available soaked seed by variety_id (not recipe_id)
+          // First get the variety_id from the recipe
+          const { data: recipeData } = await getSupabaseClient()
+            .from('recipes')
+            .select('variety_id, variety_name')
+            .eq('recipe_id', task.recipeId)
+            .single();
+
+          if (recipeData?.variety_id) {
+            const sessionData = localStorage.getItem('sproutify_session');
+            if (sessionData) {
+              const { farmUuid } = JSON.parse(sessionData);
+              const { data: soakedSeedData } = await getSupabaseClient()
+                .from('available_soaked_seed')
+                .select('*')
+                .eq('farm_uuid', farmUuid)
+                .eq('variety_id', recipeData.variety_id)
+                .gt('quantity_remaining', 0)
+                .order('soak_date', { ascending: true })
+                .limit(1);
+
+              if (soakedSeedData && soakedSeedData.length > 0) {
+                setAvailableSoakedSeed(soakedSeedData[0]);
+              } else {
+                // No soaked seed available - show alert
+                const varietyName = recipeData.variety_name || task.crop || 'this variety';
+                showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
+                setSeedingTask(null);
+                return;
+              }
             }
+          } else {
+            showNotification('error', 'Could not determine variety for this recipe.');
+            setSeedingTask(null);
+            return;
           }
+        } else {
+          // Non-soak variety - fetch available batches for this recipe
+          await fetchAvailableBatchesForRecipe(task);
         }
         return;
       }
@@ -1513,33 +1534,52 @@ export default function DailyFlow() {
           .select('recipe_id')
           .eq('request_id', task.requestId)
           .single();
-        
+
         if (requestData) {
           // Check if recipe has soak step
           const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
             p_recipe_id: requestData.recipe_id
           });
-          
+
           const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
           setIsSoakVariety(hasSoak || false);
-          
+
           if (hasSoak) {
-            // Soak variety - fetch available soaked seed
-            // Note: available_soaked_seed view already filters by status='available'
-            const sessionData = localStorage.getItem('sproutify_session');
-            if (sessionData) {
-              const { farmUuid } = JSON.parse(sessionData);
-              const { data: soakedSeedData } = await getSupabaseClient()
-                .from('available_soaked_seed')
-                .select('*')
-                .eq('farm_uuid', farmUuid)
-                .eq('request_id', task.requestId)
-                .order('soak_date', { ascending: true })
-                .limit(1);
-              
-              if (soakedSeedData && soakedSeedData.length > 0) {
-                setAvailableSoakedSeed(soakedSeedData[0]);
+            // Soak variety - check for available soaked seed by variety_id (NOT request_id)
+            // First get the variety_id from the recipe
+            const { data: recipeData } = await getSupabaseClient()
+              .from('recipes')
+              .select('variety_id, variety_name')
+              .eq('recipe_id', requestData.recipe_id)
+              .single();
+
+            if (recipeData?.variety_id) {
+              const sessionData = localStorage.getItem('sproutify_session');
+              if (sessionData) {
+                const { farmUuid } = JSON.parse(sessionData);
+                const { data: soakedSeedData } = await getSupabaseClient()
+                  .from('available_soaked_seed')
+                  .select('*')
+                  .eq('farm_uuid', farmUuid)
+                  .eq('variety_id', recipeData.variety_id)
+                  .gt('quantity_remaining', 0)
+                  .order('soak_date', { ascending: true })
+                  .limit(1);
+
+                if (soakedSeedData && soakedSeedData.length > 0) {
+                  setAvailableSoakedSeed(soakedSeedData[0]);
+                } else {
+                  // No soaked seed available - show alert
+                  const varietyName = recipeData.variety_name || task.crop || 'this variety';
+                  showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
+                  setSeedingTask(null);
+                  return;
+                }
               }
+            } else {
+              showNotification('error', 'Could not determine variety for this recipe.');
+              setSeedingTask(null);
+              return;
             }
           } else {
             // Non-soak variety - need batch selection
@@ -2662,10 +2702,16 @@ export default function DailyFlow() {
     const quantityToComplete = parseInt(seedQuantityCompleted);
     const batchIdForTask = batchIdToUse ?? undefined;
     
-    // Get today's date for the task date
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const taskDateStr = today.toISOString().split('T')[0];
+    // Get task date - use original sowDate for overdue tasks, otherwise today
+    // This ensures the completion matches what fetchOverdueSeedingTasks checks
+    let taskDateStr: string;
+    if (seedingTask.isOverdue && seedingTask.sowDate) {
+      taskDateStr = seedingTask.sowDate;
+    } else {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      taskDateStr = today.toISOString().split('T')[0];
+    }
     try {
       let traysCreated = 0;
       
@@ -2722,6 +2768,7 @@ export default function DailyFlow() {
         const completedRequestId = seedingTask.requestId;
         const completedRecipeId = seedingTask.recipeId;
         const completedTaskSource = seedingTask.taskSource;
+        const wasOverdue = seedingTask.isOverdue;
         
         // Start exit animation immediately - this must happen before any async operations
         // to ensure the animation starts right away
@@ -2732,6 +2779,11 @@ export default function DailyFlow() {
         setTimeout(async () => {
           // Remove task from array after animation
           setTasks(prev => prev.filter(t => t.id !== completedTaskId));
+
+          // Also remove from overdue seeding tasks if this was an overdue task
+          if (wasOverdue) {
+            setOverdueSeedingTasks(prev => prev.filter(t => t.id !== completedTaskId));
+          }
           
           // Remove from animating set and ref
           animatingOutRef.current.delete(completedTaskId);
@@ -2942,7 +2994,59 @@ export default function DailyFlow() {
     setLoadingBatches(true);
     setAvailableSoakedSeed(null);
 
-    // Fetch available batches for this recipe
+    // Check if recipe requires soaking FIRST, before fetching dry batches
+    if (task.recipeId) {
+      const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
+        p_recipe_id: task.recipeId
+      });
+
+      const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
+      setIsSoakVariety(hasSoak || false);
+
+      if (hasSoak) {
+        // Soak variety - check for available soaked seed by variety_id
+        const { data: recipeData } = await getSupabaseClient()
+          .from('recipes')
+          .select('variety_id, variety_name')
+          .eq('recipe_id', task.recipeId)
+          .single();
+
+        if (recipeData?.variety_id) {
+          const sessionData = localStorage.getItem('sproutify_session');
+          if (sessionData) {
+            const { farmUuid } = JSON.parse(sessionData);
+            const { data: soakedSeedData } = await getSupabaseClient()
+              .from('available_soaked_seed')
+              .select('*')
+              .eq('farm_uuid', farmUuid)
+              .eq('variety_id', recipeData.variety_id)
+              .gt('quantity_remaining', 0)
+              .order('soak_date', { ascending: true })
+              .limit(1);
+
+            if (soakedSeedData && soakedSeedData.length > 0) {
+              setAvailableSoakedSeed(soakedSeedData[0]);
+              setLoadingBatches(false);
+            } else {
+              // No soaked seed available - show alert
+              const varietyName = recipeData.variety_name || task.crop || 'this variety';
+              showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
+              setSeedingTask(null);
+              setLoadingBatches(false);
+              return;
+            }
+          }
+        } else {
+          showNotification('error', 'Could not determine variety for this recipe.');
+          setSeedingTask(null);
+          setLoadingBatches(false);
+          return;
+        }
+        return;
+      }
+    }
+
+    // Non-soak variety - fetch available batches for this recipe
     await fetchAvailableBatchesForRecipe(task);
   };
 
@@ -2992,26 +3096,60 @@ export default function DailyFlow() {
       setMissedStepForSeeding({ task, step: missedStep });
       setIsSoakVariety(false);
       setAvailableSoakedSeed(null);
-      // Check if soak variety and fetch data
-      if (seedingTask.requestId) {
-        const { data: requestData } = await getSupabaseClient()
-          .from('tray_creation_requests')
-          .select('recipe_id')
-          .eq('request_id', seedingTask.requestId)
-          .single();
-        
-        if (requestData) {
-          const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
-            p_recipe_id: requestData.recipe_id
-          });
-          
-          const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
-          setIsSoakVariety(hasSoak || false);
-          
-          if (!hasSoak) {
-            await fetchAvailableBatchesForRecipe(seedingTask);
+
+      // Check if soak variety and fetch data - use recipeId directly (more reliable than requestId)
+      const recipeIdToCheck = seedingTask.recipeId || task.recipeId;
+      if (recipeIdToCheck) {
+        const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
+          p_recipe_id: recipeIdToCheck
+        });
+
+        const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
+        setIsSoakVariety(hasSoak || false);
+
+        if (hasSoak) {
+          // Soak variety - check for available soaked seed by variety_id
+          const { data: recipeData } = await getSupabaseClient()
+            .from('recipes')
+            .select('variety_id, variety_name')
+            .eq('recipe_id', recipeIdToCheck)
+            .single();
+
+          if (recipeData?.variety_id) {
+            const sessionData = localStorage.getItem('sproutify_session');
+            if (sessionData) {
+              const { farmUuid } = JSON.parse(sessionData);
+              const { data: soakedSeedData } = await getSupabaseClient()
+                .from('available_soaked_seed')
+                .select('*')
+                .eq('farm_uuid', farmUuid)
+                .eq('variety_id', recipeData.variety_id)
+                .gt('quantity_remaining', 0)
+                .order('soak_date', { ascending: true })
+                .limit(1);
+
+              if (soakedSeedData && soakedSeedData.length > 0) {
+                setAvailableSoakedSeed(soakedSeedData[0]);
+              } else {
+                // No soaked seed available - show alert
+                const varietyName = recipeData.variety_name || task.crop || 'this variety';
+                showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
+                setSeedingTask(null);
+                return;
+              }
+            }
+          } else {
+            showNotification('error', 'Could not determine variety for this recipe.');
+            setSeedingTask(null);
+            return;
           }
+        } else {
+          // Non-soak variety - fetch available batches
+          await fetchAvailableBatchesForRecipe(seedingTask);
         }
+      } else {
+        // No recipe ID available - just fetch batches
+        await fetchAvailableBatchesForRecipe(seedingTask);
       }
     } else {
       // For other missed steps, just mark as completed normally

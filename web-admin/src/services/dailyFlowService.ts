@@ -2787,7 +2787,10 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
                 const traysFromSoaked = await useLeftoverSoakedSeed(
                   soakedSeedEntry.soaked_id,
                   numberOfTrays,
-                  task.requestId ?? null
+                  task.requestId ?? null,
+                  recipeIdForSoak,
+                  taskDateStr,
+                  userId
                 );
                 if (traysFromSoaked > 0) {
                   usedSoakedSeedEntry = soakedSeedEntry;
@@ -2835,9 +2838,11 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
             order_schedule_id: task.orderScheduleId ?? null,
             variety_name: varietyName,
             recipe_name: recipeData.recipe_name,
+            recipe_id: task.recipeId,
             farm_uuid: farmUuid,
             user_id: userId,
             requested_at: sowDateISO,
+            seed_date: taskDateStr, // The intended sow_date (YYYY-MM-DD)
             batch_id: batchId,
           }));
 
@@ -3979,6 +3984,8 @@ export async function useLeftoverSoakedSeed(
   soakedId: number,
   quantityTrays: number,
   requestId: number | null,
+  recipeId?: number,
+  scheduledSowDate?: string,
   userId?: string
 ): Promise<number> {
   try {
@@ -3992,6 +3999,8 @@ export async function useLeftoverSoakedSeed(
       p_soaked_id: soakedId,
       p_quantity_trays: quantityTrays,
       p_request_id: requestId,
+      p_recipe_id: recipeId || null,
+      p_scheduled_sow_date: scheduledSowDate || null,
       p_user_id: userToUse || null,
     });
 
@@ -4463,31 +4472,52 @@ export const fetchOverdueSeedingTasks = async (
     const completedTaskKeys = new Set<string>();
     if (completedTasks) {
       completedTasks.forEach((ct: any) => {
-        const key = `${ct.task_type}-${ct.recipe_id}-${ct.task_date}`;
+        // Normalize task_date to YYYY-MM-DD string format
+        const taskDateStr = typeof ct.task_date === 'string'
+          ? ct.task_date.split('T')[0]  // Handle ISO format
+          : formatDateString(new Date(ct.task_date));
+        const key = `${ct.task_type}-${ct.recipe_id}-${taskDateStr}`;
         completedTaskKeys.add(key);
       });
+      console.log('[fetchOverdueSeedingTasks] Completed task keys:', Array.from(completedTaskKeys));
     }
 
-    // Also check for existing trays created on those dates (seeding was done outside the task system)
+    // Count existing trays per recipe+scheduled_sow_date (not just existence, but actual count)
+    // Use scheduled_sow_date if available (new trays), fall back to sow_date for older trays
     const { data: existingTrays } = await getSupabaseClient()
       .from('trays')
-      .select('recipe_id, sow_date')
+      .select('recipe_id, sow_date, scheduled_sow_date')
       .eq('farm_uuid', farmUuid)
-      .gte('sow_date', pastDateStr)
-      .lt('sow_date', todayStr);
+      .or(`scheduled_sow_date.gte.${pastDateStr},sow_date.gte.${pastDateStr}`)
+      .or(`scheduled_sow_date.lt.${todayStr},sow_date.lt.${todayStr}`);
 
-    const existingTrayKeys = new Set<string>();
+    const existingTrayCount = new Map<string, number>();
     if (existingTrays) {
       existingTrays.forEach((tray: any) => {
-        if (tray.recipe_id && tray.sow_date) {
-          const sowDateStr = formatDateString(parseLocalDate(tray.sow_date) || new Date());
-          existingTrayKeys.add(`${tray.recipe_id}-${sowDateStr}`);
+        if (tray.recipe_id) {
+          // Prefer scheduled_sow_date for tracking which schedule was fulfilled
+          // Fall back to sow_date for older trays without scheduled_sow_date
+          const dateToUse = tray.scheduled_sow_date || tray.sow_date;
+          if (dateToUse) {
+            const sowDateStr = formatDateString(parseLocalDate(dateToUse) || new Date());
+            // Only count if the date is in our range (past but not today)
+            if (sowDateStr >= pastDateStr && sowDateStr < todayStr) {
+              const key = `${tray.recipe_id}-${sowDateStr}`;
+              existingTrayCount.set(key, (existingTrayCount.get(key) || 0) + 1);
+            }
+          }
         }
       });
     }
+    console.log('[fetchOverdueSeedingTasks] Existing tray counts (by scheduled_sow_date):', Object.fromEntries(existingTrayCount));
 
-    // Build overdue tasks
-    const overdueTasks: DailyTask[] = [];
+    // Group schedules by recipe+sow_date to calculate total trays needed
+    const scheduleGroups = new Map<string, {
+      totalNeeded: number;
+      schedules: typeof allSchedules;
+      sowDate: Date;
+      sowDateStr: string;
+    }>();
 
     for (const schedule of allSchedules) {
       if (!schedule.sow_date || !schedule.recipe_id) continue;
@@ -4496,47 +4526,79 @@ export const fetchOverdueSeedingTasks = async (
       if (!sowDate) continue;
 
       const sowDateStr = formatDateString(sowDate);
+      const key = `${schedule.recipe_id}-${sowDateStr}`;
 
-      // Check if seeding was completed via task system
-      const seedingKey = `sowing-${schedule.recipe_id}-${sowDateStr}`;
-      if (completedTaskKeys.has(seedingKey)) {
-        continue; // Task was completed
-      }
+      const group = scheduleGroups.get(key) || {
+        totalNeeded: 0,
+        schedules: [],
+        sowDate,
+        sowDateStr
+      };
+      group.totalNeeded += schedule.trays_needed || 1;
+      group.schedules.push(schedule);
+      scheduleGroups.set(key, group);
+    }
 
-      // Check if trays were created directly (outside task system)
-      const trayKey = `${schedule.recipe_id}-${sowDateStr}`;
-      if (existingTrayKeys.has(trayKey)) {
-        continue; // Trays exist for this date
+    // Build overdue tasks based on remaining trays needed
+    const overdueTasks: DailyTask[] = [];
+
+    for (const [key, group] of scheduleGroups) {
+      const existingCount = existingTrayCount.get(key) || 0;
+      const remaining = group.totalNeeded - existingCount;
+
+      console.log('[fetchOverdueSeedingTasks] Group check:', {
+        key,
+        totalNeeded: group.totalNeeded,
+        existingCount,
+        remaining,
+        scheduleCount: group.schedules.length
+      });
+
+      if (remaining <= 0) {
+        console.log('[fetchOverdueSeedingTasks] Skipping group - all trays exist:', key);
+        continue; // All needed trays exist
       }
 
       // Calculate days overdue
-      const daysOverdue = Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24));
+      const daysOverdue = Math.floor((today.getTime() - group.sowDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
+      // Distribute remaining across schedules (prefer keeping individual schedule context)
+      let remainingToAssign = remaining;
+      for (const schedule of group.schedules) {
+        if (remainingToAssign <= 0) break;
 
-      overdueTasks.push({
-        id: `overdue-seed-${schedule.recipe_id}-${sowDateStr}`,
-        action: 'Seed',
-        crop: varietyName,
-        batchId: 'N/A',
-        location: 'Not set',
-        dayCurrent: 0,
-        dayTotal: 0,
-        trays: schedule.trays_needed || 0,
-        status: 'urgent',
-        trayIds: [],
-        recipeId: schedule.recipe_id,
-        taskSource: 'planting_schedule',
-        quantity: schedule.trays_needed || 0,
-        customerName: schedule.customer_name || null,
-        customerId: schedule.customer_id ?? undefined,
-        standingOrderId: schedule.standing_order_id ?? undefined,
-        orderScheduleId: schedule.schedule_id ?? undefined,
-        deliveryDate: schedule.delivery_date || null,
-        isOverdue: true,
-        daysOverdue,
-        sowDate: sowDateStr,
-      });
+        const scheduleTrays = schedule.trays_needed || 1;
+        const traysForThisSchedule = Math.min(scheduleTrays, remainingToAssign);
+        remainingToAssign -= traysForThisSchedule;
+
+        const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
+
+        // Use schedule_id if available, otherwise create unique id using array length
+        const uniqueId = schedule.schedule_id || `${schedule.recipe_id}-${overdueTasks.length}`;
+        overdueTasks.push({
+          id: `overdue-seed-${uniqueId}-${group.sowDateStr}`,
+          action: 'Seed',
+          crop: varietyName,
+          batchId: 'N/A',
+          location: 'Not set',
+          dayCurrent: 0,
+          dayTotal: 0,
+          trays: traysForThisSchedule,
+          status: 'urgent',
+          trayIds: [],
+          recipeId: schedule.recipe_id,
+          taskSource: 'planting_schedule',
+          quantity: traysForThisSchedule,
+          customerName: schedule.customer_name || null,
+          customerId: schedule.customer_id ?? undefined,
+          standingOrderId: schedule.standing_order_id ?? undefined,
+          orderScheduleId: schedule.schedule_id ?? undefined,
+          deliveryDate: schedule.delivery_date || null,
+          isOverdue: true,
+          daysOverdue,
+          sowDate: group.sowDateStr,
+        });
+      }
     }
 
     // Sort by sow date (most recent first)

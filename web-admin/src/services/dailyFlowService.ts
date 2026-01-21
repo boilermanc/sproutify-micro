@@ -2938,7 +2938,7 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
       // Calculate yield per tray if provided
       const yieldPerTray = yieldValue && task.trays > 0 ? yieldValue / task.trays : undefined;
 
-      const updateData: Record<string, any> = { harvest_date: now };
+      const updateData: Record<string, any> = { harvest_date: now, status: 'harvested' };
       if (yieldPerTray !== undefined) {
         updateData.yield = yieldPerTray;
       }

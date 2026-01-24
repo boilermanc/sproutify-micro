@@ -892,10 +892,22 @@ export default function DailyFlow() {
 
   const isLoadingTasksRef = useRef(false);
   const loadingStartTimeRef = useRef<number>(0);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
 
   const loadTasks = useCallback(async (options: { suppressLoading?: boolean } = {}) => {
     const showLoading = !options.suppressLoading;
-    
+
+    // Abort any previous in-flight request to prevent stale connection issues
+    if (loadAbortControllerRef.current) {
+      console.log('[loadTasks] Aborting previous request');
+      loadAbortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    loadAbortControllerRef.current = abortController;
+    const signal = abortController.signal;
+
     // Check if already loading
     if (isLoadingTasksRef.current) {
       const elapsedTime = Date.now() - loadingStartTimeRef.current;
@@ -908,20 +920,30 @@ export default function DailyFlow() {
         return;
       }
     }
-    
+
     isLoadingTasksRef.current = true;
     loadingStartTimeRef.current = Date.now();
     console.log('[loadTasks] Starting task refresh...');
     if (showLoading) {
       setLoading(true);
     }
-    
+
     try {
+      // Check if aborted before starting
+      if (signal.aborted) {
+        console.log('[loadTasks] Request aborted before starting');
+        return;
+      }
+
       const sessionData = localStorage.getItem('sproutify_session');
       const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
 
       const gapPromise = farmUuid
-        ? fetchOrderGapStatus(farmUuid).catch((error) => {
+        ? fetchOrderGapStatus(farmUuid, signal).catch((error) => {
+            if (error.name === 'AbortError') {
+              console.log('[loadTasks] Order gaps fetch aborted');
+              return [];
+            }
             console.error('[loadTasks] Error fetching order gaps:', error);
             return [];
           })
@@ -932,22 +954,32 @@ export default function DailyFlow() {
       const timeoutPromise = <T,>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> => {
         return Promise.race([
           promise,
-          new Promise<T>((_, reject) => 
+          new Promise<T>((_, reject) =>
             setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
           )
         ]).catch((error) => {
+          if (error.name === 'AbortError') {
+            console.log('[loadTasks] Request aborted');
+            return defaultValue;
+          }
           console.error('[loadTasks] Promise failed or timed out:', error);
           return defaultValue;
         });
       };
 
       const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
-        timeoutPromise(fetchDailyTasks(selectedDate, true), 15000, []),
-        timeoutPromise(getActiveTraysCount(), 10000, 0),
-        timeoutPromise(fetchPassiveTrayStatus(), 10000, []),
+        timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 15000, []),
+        timeoutPromise(getActiveTraysCount(signal), 10000, 0),
+        timeoutPromise(fetchPassiveTrayStatus(signal), 10000, []),
         gapPromise,
-        timeoutPromise(fetchOverdueSeedingTasks(7), 10000, []),
+        timeoutPromise(fetchOverdueSeedingTasks(7, signal), 10000, []),
       ]);
+
+      // Check if aborted before updating state
+      if (signal.aborted) {
+        console.log('[loadTasks] Request aborted before state update');
+        return;
+      }
       
       // Update passive tray status
       setPassiveTrayStatus(passiveStatus);
@@ -1084,15 +1116,50 @@ export default function DailyFlow() {
     }
   }, [selectedDate, fetchActionHistory]);
 
-  // Cleanup effect to ensure ref is reset if component unmounts during loading
+  // Cleanup effect to ensure ref is reset and requests are aborted if component unmounts
   useEffect(() => {
     return () => {
+      if (loadAbortControllerRef.current) {
+        console.log('[loadTasks] Component unmounting, aborting in-flight requests');
+        loadAbortControllerRef.current.abort();
+      }
       if (isLoadingTasksRef.current) {
         console.warn('[loadTasks] Component unmounting with refresh in progress, clearing flag');
         isLoadingTasksRef.current = false;
       }
     };
   }, []);
+
+  // Abort stale requests when tab visibility changes to prevent zombie connections
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Tab is being hidden - abort any in-flight requests to prevent stale connections
+        if (loadAbortControllerRef.current) {
+          console.log('[loadTasks] Tab hidden, aborting in-flight requests to prevent stale connections');
+          loadAbortControllerRef.current.abort();
+          loadAbortControllerRef.current = null;
+        }
+        // Reset loading state since we aborted
+        if (isLoadingTasksRef.current) {
+          isLoadingTasksRef.current = false;
+          loadingStartTimeRef.current = 0;
+        }
+      } else if (document.visibilityState === 'visible') {
+        // Tab is now visible - trigger a fresh load after a short delay
+        // The delay allows the session refresh in App.tsx to complete first
+        console.log('[loadTasks] Tab visible, scheduling fresh load');
+        setTimeout(() => {
+          loadTasks({ suppressLoading: true });
+        }, 500);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadTasks]);
 
   // Auto-recovery: Check periodically if we're stuck and force reset
   useEffect(() => {

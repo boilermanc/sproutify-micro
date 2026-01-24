@@ -202,13 +202,18 @@ export interface OrderGapStatus {
   missing_varieties: string | null;
 }
 
-export async function fetchOrderGapStatus(farmUuid: string): Promise<OrderGapStatus[]> {
-  const { data, error } = await getSupabaseClient()
+export async function fetchOrderGapStatus(farmUuid: string, signal?: AbortSignal): Promise<OrderGapStatus[]> {
+  const query = getSupabaseClient()
     .from('order_gap_status')
     .select('*')
     .eq('farm_uuid', farmUuid);
 
+  const { data, error } = signal ? await query.abortSignal(signal) : await query;
+
   if (error) {
+    if (error.name === 'AbortError' || signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError');
+    }
     console.error('[fetchOrderGapStatus] unexpected error', error);
     throw error;
   }
@@ -293,8 +298,13 @@ export const fetchMaintenanceTasks = async (
  * Fetch daily tasks from daily_flow_aggregated view
  * This view includes tray_step tasks, soak_request tasks, seed_request tasks, and expiring_seed tasks
  */
-export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean = false): Promise<DailyTask[]> => {
+export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean = false, signal?: AbortSignal): Promise<DailyTask[]> => {
   try {
+    // Check if already aborted
+    if (signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError');
+    }
+
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return [];
 
@@ -311,13 +321,17 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
       selectedDate: normalizedToday.toISOString(),
     });
 
-    const taskQuery = getSupabaseClient()
+    let taskQuery = getSupabaseClient()
       .from('daily_flow_aggregated')
       .select('*')
       .eq('farm_uuid', farmUuid)
       .eq('task_date', taskDate)
       .order('task_source', { ascending: true })
       .order('recipe_name', { ascending: true });
+
+    if (signal) {
+      taskQuery = taskQuery.abortSignal(signal);
+    }
 
     const { data: tasksData, error: tasksError } = await taskQuery;
 
@@ -3677,8 +3691,13 @@ export const skipAllMissedSteps = async (missedSteps: MissedStep[]): Promise<boo
 /**
  * Get total active trays count
  */
-export const getActiveTraysCount = async (): Promise<number> => {
+export const getActiveTraysCount = async (signal?: AbortSignal): Promise<number> => {
   try {
+    // Check if already aborted
+    if (signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError');
+    }
+
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return 0;
 
@@ -3691,21 +3710,35 @@ export const getActiveTraysCount = async (): Promise<number> => {
       }
     });
 
-    const { count, error } = await getSupabaseClient()
+    let query = getSupabaseClient()
       .from('trays')
       .select('*', { count: 'exact', head: true })
       .eq('farm_uuid', farmUuid)
       .eq('status', 'active')
       .is('harvest_date', null);
 
+    if (signal) {
+      query = query.abortSignal(signal);
+    }
+
+    const { count, error } = await query;
+
     console.log('[getActiveTraysCount] Supabase result', {
       count,
       errorMessage: error?.message || null
     });
 
-    if (error) throw error;
+    if (error) {
+      if (error.name === 'AbortError' || signal?.aborted) {
+        throw new DOMException('Request aborted', 'AbortError');
+      }
+      throw error;
+    }
     return count || 0;
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw error;
+    }
     console.error('Error fetching active trays count:', error);
     return 0;
   }
@@ -4160,8 +4193,13 @@ export interface PassiveTrayStatusItem {
   varieties: Array<{ recipe: string; trays: number }>;
 }
 
-export const fetchPassiveTrayStatus = async (): Promise<PassiveTrayStatusItem[]> => {
+export const fetchPassiveTrayStatus = async (signal?: AbortSignal): Promise<PassiveTrayStatusItem[]> => {
   try {
+    // Check if already aborted
+    if (signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError');
+    }
+
     const sessionData = localStorage.getItem('sproutify_session');
     if (!sessionData) return [];
 
@@ -4170,7 +4208,7 @@ export const fetchPassiveTrayStatus = async (): Promise<PassiveTrayStatusItem[]>
     today.setHours(0, 0, 0, 0);
 
     // Step 1: Get active trays with sow_date and recipe info
-    const { data: activeTraysData, error: activeTraysError } = await getSupabaseClient()
+    let traysQuery = getSupabaseClient()
       .from('trays')
       .select(`
         tray_id,
@@ -4187,6 +4225,12 @@ export const fetchPassiveTrayStatus = async (): Promise<PassiveTrayStatusItem[]>
       .is('harvest_date', null)
       .not('sow_date', 'is', null)
       .or('status.is.null,status.eq.active');
+
+    if (signal) {
+      traysQuery = traysQuery.abortSignal(signal);
+    }
+
+    const { data: activeTraysData, error: activeTraysError } = await traysQuery;
 
     if (activeTraysError) {
       console.error('[fetchPassiveTrayStatus] Error fetching active trays:', activeTraysError);
@@ -4389,8 +4433,14 @@ export const rescheduleSeedingRequest = async (
  * Returns seeding tasks from the last 7 days that were not completed
  */
 export const fetchOverdueSeedingTasks = async (
-  daysBack: number = 7
+  daysBack: number = 7,
+  signal?: AbortSignal
 ): Promise<DailyTask[]> => {
+  // Check if already aborted
+  if (signal?.aborted) {
+    throw new DOMException('Request aborted', 'AbortError');
+  }
+
   const sessionData = localStorage.getItem('sproutify_session');
   if (!sessionData) {
     console.warn('[fetchOverdueSeedingTasks] No session data available');
@@ -4423,12 +4473,18 @@ export const fetchOverdueSeedingTasks = async (
     console.log('[fetchOverdueSeedingTasks] Fetching overdue tasks from', pastDateStr, 'to', todayStr);
 
     // Fetch all schedules in the date range
-    const { data: allSchedules, error: scheduleError } = await getSupabaseClient()
+    let schedulesQuery = getSupabaseClient()
       .from('planting_schedule_view')
       .select('sow_date, harvest_date, recipe_name, trays_needed, recipe_id, customer_name, customer_id, standing_order_id, schedule_id, delivery_date')
       .eq('farm_uuid', farmUuid)
       .gte('sow_date', pastDateStr)
       .lt('sow_date', todayStr); // Exclude today (those are shown in regular tasks)
+
+    if (signal) {
+      schedulesQuery = schedulesQuery.abortSignal(signal);
+    }
+
+    const { data: allSchedules, error: scheduleError } = await schedulesQuery;
 
     if (scheduleError) {
       console.error('[fetchOverdueSeedingTasks] Error fetching schedules:', scheduleError);

@@ -286,6 +286,17 @@ const buildVarietyBreakdown = (
       const recipeId = req.recipe_id;
       const displayName = req.recipe_name;
 
+      // First check if this variety is already fulfilled according to the database
+      // This takes precedence over tray matching since it reflects the actual fulfillment state
+      if (req.fulfillment_status === 'fulfilled') {
+        breakdown.push({
+          varietyName: displayName,
+          recipeId,
+          status: 'ready',
+        });
+        continue;
+      }
+
       // Check if there's a mismatched tray for this recipe
       const mismatchedTray = mismatchedByRecipeId.get(recipeId);
       if (mismatchedTray) {
@@ -3555,6 +3566,19 @@ export default function DailyFlow() {
                                 onClick={() => openReallocationConfirm(gap, mismatchedTrays[0], 'cancel')}
                               >
                                 Cancel Delivery
+                              </Button>
+                            </div>
+                          )}
+                          {/* Action buttons for gaps with missing varieties (no mismatched trays) */}
+                          {mismatchedTrays.length === 0 && varietyBreakdown.some(v => v.status === 'missing') && (
+                            <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-current/10">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => handleSkipDelivery(gap)}
+                              >
+                                Skip Delivery
                               </Button>
                             </div>
                           )}

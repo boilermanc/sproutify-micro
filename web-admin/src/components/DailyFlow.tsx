@@ -630,6 +630,333 @@ export default function DailyFlow() {
     }
   }, []);
 
+  // ✅ OPTIMIZED: Consolidated gap data fetcher - eliminates 25-50 queries
+  const updateAllGapData = useCallback(async (gaps: OrderGapStatus[]) => {
+    if (!gaps || gaps.length === 0) {
+      setGapMissingVarietyTrays({});
+      setGapMissingVarietyTraysLoading({});
+      setGapMismatchedTrays({});
+      setGapMismatchedTraysLoading({});
+      setGapRecipeRequirements({});
+      return;
+    }
+
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      setGapMissingVarietyTrays({});
+      setGapMissingVarietyTraysLoading({});
+      setGapMismatchedTrays({});
+      setGapMismatchedTraysLoading({});
+      setGapRecipeRequirements({});
+      return;
+    }
+
+    // Set initial loading states
+    const initialLoading: Record<string, boolean> = {};
+    gaps.forEach((gap) => {
+      initialLoading[formatGapKey(gap)] = true;
+    });
+    setGapMissingVarietyTraysLoading(initialLoading);
+    setGapMismatchedTraysLoading(initialLoading);
+
+    try {
+      // Collect all unique product IDs, customer IDs, and delivery dates from gaps
+      const productIds = [...new Set(gaps.map(g => g.product_id).filter(Boolean))];
+      const deliveryDates = [...new Set(gaps.map(g => g.scheduled_delivery_date || g.delivery_date).filter(Boolean))];
+
+      // Calculate ready date range for assignable trays
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const readyDateMin = new Date(today);
+      readyDateMin.setDate(readyDateMin.getDate() - 11);
+      const readyDateMax = new Date(today);
+      readyDateMax.setDate(readyDateMax.getDate() + 10);
+
+      // Fetch ALL required data in parallel (4 queries total, regardless of gap count)
+      const [
+        allActiveTrays,
+        productRecipeMappings,
+        harvestTraySteps,
+        orderFulfillmentData
+      ] = await Promise.all([
+        // Query 1: ALL active trays (both assigned and unassigned) with recipe details
+        getSupabaseClient()
+          .from('trays')
+          .select(`
+            tray_id,
+            sow_date,
+            recipe_id,
+            customer_id,
+            status,
+            recipes (
+              recipe_id,
+              recipe_name,
+              variety_name
+            )
+          `)
+          .eq('farm_uuid', farmUuid)
+          .eq('status', 'active')
+          .is('harvest_date', null)
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('[updateAllGapData] Error fetching trays:', error);
+              return [];
+            }
+            return data || [];
+          }),
+
+        // Query 2: Product → recipe mappings for ALL products in gaps
+        productIds.length > 0
+          ? getSupabaseClient()
+              .from('product_recipe_mapping')
+              .select('product_id, recipe_id')
+              .in('product_id', productIds)
+              .then(({ data, error }) => {
+                if (error) {
+                  console.error('[updateAllGapData] Error fetching product mappings:', error);
+                  return [];
+                }
+                return data || [];
+              })
+          : Promise.resolve([]),
+
+        // Query 3: Harvest step schedules for ALL active trays
+        getSupabaseClient()
+          .from('tray_steps')
+          .select(`
+            tray_step_id,
+            tray_id,
+            step_id,
+            scheduled_date,
+            status,
+            steps!inner (
+              step_name
+            )
+          `)
+          .eq('farm_uuid', farmUuid)
+          .ilike('steps.step_name', '%harvest%')
+          .eq('status', 'Pending')
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('[updateAllGapData] Error fetching harvest steps:', error);
+              return [];
+            }
+            return data || [];
+          }),
+
+        // Query 4: Order fulfillment details for ALL relevant delivery dates
+        deliveryDates.length > 0 && gaps.some(g => g.customer_name)
+          ? getSupabaseClient()
+              .from('order_fulfillment_status')
+              .select('*')
+              .eq('farm_uuid', farmUuid)
+              .in('delivery_date', deliveryDates)
+              .then(({ data, error }) => {
+                if (error) {
+                  console.error('[updateAllGapData] Error fetching fulfillment details:', error);
+                  return [];
+                }
+                return data || [];
+              })
+          : Promise.resolve([])
+      ]);
+
+      // Build lookup maps from fetched data
+      const productRecipeMap = new Map<number, number[]>();
+      productRecipeMappings.forEach((pr: any) => {
+        if (!productRecipeMap.has(pr.product_id)) {
+          productRecipeMap.set(pr.product_id, []);
+        }
+        productRecipeMap.get(pr.product_id)!.push(pr.recipe_id);
+      });
+
+      const harvestStepMap = new Map<number, { scheduled_date: string; tray_step_id: number }>();
+      harvestTraySteps.forEach((ts: any) => {
+        if (ts.scheduled_date) {
+          harvestStepMap.set(ts.tray_id, {
+            scheduled_date: ts.scheduled_date,
+            tray_step_id: ts.tray_step_id,
+          });
+        }
+      });
+
+      const orderFulfillmentMap = new Map<string, any[]>();
+      orderFulfillmentData.forEach((ofd: any) => {
+        const key = `${ofd.delivery_date}-${ofd.customer_name}`;
+        if (!orderFulfillmentMap.has(key)) {
+          orderFulfillmentMap.set(key, []);
+        }
+        orderFulfillmentMap.get(key)!.push(ofd);
+      });
+
+      // Process each gap using pre-fetched data (IN MEMORY - no more queries!)
+      const newMissingVarietyTrays: Record<string, AssignableTray[]> = {};
+      const newMismatchedTrays: Record<string, MismatchedAssignedTray[]> = {};
+      const newRecipeRequirements: Record<string, OrderFulfillmentStatus[]> = {};
+
+      gaps.forEach((gap) => {
+        const gapKey = formatGapKey(gap);
+
+        // === Process Missing Variety Trays ===
+        const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
+        if (gap.product_id == null || missingVarieties.length === 0) {
+          newMissingVarietyTrays[gapKey] = [];
+        } else {
+          // Get recipe IDs for this product
+          const recipeIdsForProduct = productRecipeMap.get(gap.product_id) || [];
+          
+          // Filter unassigned trays that match product and are in ready window
+          const assignableTrays = allActiveTrays
+            .filter((tray: any) => {
+              if (tray.customer_id != null) return false; // Must be unassigned
+              if (!recipeIdsForProduct.includes(tray.recipe_id)) return false; // Must match product
+              if (!tray.sow_date) return false;
+              
+              // Check if in ready window (-11 to +10 days)
+              const sowDate = new Date(tray.sow_date);
+              return sowDate >= readyDateMin && sowDate <= readyDateMax;
+            })
+            .map((tray: any) => {
+              const recipe = Array.isArray(tray.recipes) ? tray.recipes[0] : tray.recipes;
+              const sowDate = new Date(tray.sow_date);
+              const daysGrown = Math.max(0, Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24)));
+              
+              return {
+                tray_id: tray.tray_id,
+                recipe_id: tray.recipe_id,
+                recipe_name: recipe?.recipe_name || 'Unknown',
+                variety_name: recipe?.variety_name || null,
+                sow_date: tray.sow_date,
+                days_grown: daysGrown,
+                days_until_ready: Math.max(0, 12 - daysGrown),
+              };
+            });
+
+          // Filter to only matching varieties
+          const matches = assignableTrays.filter((tray) => {
+            const nameToCheck = (
+              (tray.variety_name && tray.variety_name.toLowerCase()) ||
+              (tray.recipe_name && tray.recipe_name.toLowerCase()) ||
+              ''
+            );
+            return missingVarieties.some((name) => nameToCheck.includes(name));
+          });
+
+          newMissingVarietyTrays[gapKey] = matches;
+        }
+
+        // === Process Mismatched Trays ===
+        if (gap.product_id == null || gap.customer_id == null || !gap.scheduled_delivery_date && !gap.delivery_date) {
+          newMismatchedTrays[gapKey] = [];
+        } else {
+          const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+          const deliveryDateObj = new Date(deliveryDate!);
+          deliveryDateObj.setHours(0, 0, 0, 0);
+
+          // Get recipe IDs for this product
+          const recipeIdsForProduct = productRecipeMap.get(gap.product_id) || [];
+          
+          // Filter assigned trays for this customer and product
+          const customerTrays = allActiveTrays.filter((tray: any) => 
+            tray.customer_id === gap.customer_id && 
+            recipeIdsForProduct.includes(tray.recipe_id)
+          );
+
+          // Identify recipes with at least one ready tray
+          const recipesWithReadyTrays = new Set<number>();
+          customerTrays.forEach((tray: any) => {
+            const harvestInfo = harvestStepMap.get(tray.tray_id);
+            if (!harvestInfo) return;
+            
+            const harvestDateObj = new Date(harvestInfo.scheduled_date);
+            harvestDateObj.setHours(0, 0, 0, 0);
+            
+            if (harvestDateObj <= today) {
+              recipesWithReadyTrays.add(tray.recipe_id);
+            }
+          });
+
+          // Collect mismatched trays (assigned but not ready in time)
+          const mismatchedTrays: MismatchedAssignedTray[] = [];
+          customerTrays.forEach((tray: any) => {
+            // Skip if this variety already has a ready tray
+            if (recipesWithReadyTrays.has(tray.recipe_id)) return;
+
+            const harvestInfo = harvestStepMap.get(tray.tray_id);
+            if (!harvestInfo) return;
+
+            const harvestDateObj = new Date(harvestInfo.scheduled_date);
+            harvestDateObj.setHours(0, 0, 0, 0);
+
+            // Only include if harvest date is after today (truly mismatched)
+            if (harvestDateObj > today) {
+              const recipe = Array.isArray(tray.recipes) ? tray.recipes[0] : tray.recipes;
+              mismatchedTrays.push({
+                tray_id: tray.tray_id,
+                recipe_id: tray.recipe_id,
+                recipe_name: recipe?.recipe_name || 'Unknown',
+                variety_name: recipe?.variety_name || null,
+                sow_date: tray.sow_date,
+                customer_id: tray.customer_id,
+                harvest_date: harvestInfo.scheduled_date,
+                tray_step_id: harvestInfo.tray_step_id,
+              });
+            }
+          });
+
+          newMismatchedTrays[gapKey] = mismatchedTrays;
+        }
+
+        // === Process Recipe Requirements ===
+        const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
+        if (!deliveryDate || !gap.customer_name) {
+          newRecipeRequirements[gapKey] = [];
+        } else {
+          const fulfillmentKey = `${deliveryDate}-${gap.customer_name}`;
+          const fulfillmentDetails = orderFulfillmentMap.get(fulfillmentKey) || [];
+          
+          // Filter to only include recipes for this specific product if it's a mix
+          const filteredRequirements = gap.is_mix
+            ? fulfillmentDetails // Mix products: show all recipes for this order
+            : fulfillmentDetails.filter((r: any) => r.recipe_name === gap.product_name);
+          
+          newRecipeRequirements[gapKey] = filteredRequirements;
+        }
+      });
+
+      // Update all state at once
+      setGapMissingVarietyTrays(newMissingVarietyTrays);
+      setGapMismatchedTrays(newMismatchedTrays);
+      setGapRecipeRequirements(newRecipeRequirements);
+      
+      // Clear all loading states
+      const noLoading: Record<string, boolean> = {};
+      gaps.forEach((gap) => {
+        noLoading[formatGapKey(gap)] = false;
+      });
+      setGapMissingVarietyTraysLoading(noLoading);
+      setGapMismatchedTraysLoading(noLoading);
+
+    } catch (error) {
+      console.error('[updateAllGapData] Error updating gap data:', error);
+      
+      // Set empty data and clear loading on error
+      const emptyData: Record<string, any> = {};
+      const noLoading: Record<string, boolean> = {};
+      gaps.forEach((gap) => {
+        const gapKey = formatGapKey(gap);
+        emptyData[gapKey] = [];
+        noLoading[gapKey] = false;
+      });
+      
+      setGapMissingVarietyTrays(emptyData);
+      setGapMismatchedTrays(emptyData);
+      setGapRecipeRequirements(emptyData);
+      setGapMissingVarietyTraysLoading(noLoading);
+      setGapMismatchedTraysLoading(noLoading);
+    }
+  }, [getFarmUuidFromSession]);
+
   const updateGapMissingVarietyTrays = useCallback(async (gaps: OrderGapStatus[]) => {
     if (!gaps || gaps.length === 0) {
       setGapMissingVarietyTrays({});
@@ -683,54 +1010,11 @@ export default function DailyFlow() {
     }
   }, [getFarmUuidFromSession]);
 
+  // DEPRECATED: Keeping for backwards compatibility but no longer used
   const updateGapMismatchedTrays = useCallback(async (gaps: OrderGapStatus[]) => {
-    if (!gaps || gaps.length === 0) {
-      setGapMismatchedTrays({});
-      setGapMismatchedTraysLoading({});
-      return;
-    }
-
-    const farmUuid = getFarmUuidFromSession();
-    if (!farmUuid) {
-      setGapMismatchedTrays({});
-      setGapMismatchedTraysLoading({});
-      return;
-    }
-
-    const initialLoading: Record<string, boolean> = {};
-    gaps.forEach((gap) => {
-      initialLoading[formatGapKey(gap)] = true;
-    });
-
-    setGapMismatchedTrays({});
-    setGapMismatchedTraysLoading(initialLoading);
-
-    for (const gap of gaps) {
-      const gapKey = formatGapKey(gap);
-      const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
-
-      if (gap.product_id == null || gap.customer_id == null || !deliveryDate) {
-        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: [] }));
-        setGapMismatchedTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
-        continue;
-      }
-
-      try {
-        const mismatchedTrays = await fetchAssignedMismatchedTrays(
-          farmUuid,
-          gap.customer_id,
-          gap.product_id,
-          deliveryDate
-        );
-        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: mismatchedTrays }));
-      } catch (error) {
-        console.error('[DailyFlow] Error fetching mismatched trays:', error);
-        setGapMismatchedTrays((prev) => ({ ...prev, [gapKey]: [] }));
-      } finally {
-        setGapMismatchedTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
-      }
-    }
-  }, [getFarmUuidFromSession]);
+    console.warn('[updateGapMismatchedTrays] This function is deprecated. Use updateAllGapData instead.');
+    // Function body removed - now handled by updateAllGapData
+  }, []);
 
   const updateGapRecipeRequirements = useCallback(async (gaps: OrderGapStatus[]) => {
     if (!gaps || gaps.length === 0) {
@@ -967,12 +1251,13 @@ export default function DailyFlow() {
         });
       };
 
+      // Increased timeouts to allow slow queries to complete
       const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
-        timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 15000, []),
-        timeoutPromise(getActiveTraysCount(signal), 10000, 0),
-        timeoutPromise(fetchPassiveTrayStatus(signal), 10000, []),
+        timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 30000, []), // Increased to 30s
+        timeoutPromise(getActiveTraysCount(signal), 20000, 0), // Increased to 20s
+        timeoutPromise(fetchPassiveTrayStatus(signal), 20000, []), // Increased to 20s
         gapPromise,
-        timeoutPromise(fetchOverdueSeedingTasks(7, signal), 10000, []),
+        timeoutPromise(fetchOverdueSeedingTasks(7, signal), 20000, []), // Increased to 20s
       ]);
 
       // Check if aborted before updating state
@@ -1132,7 +1417,15 @@ export default function DailyFlow() {
 
   // Abort stale requests when tab visibility changes to prevent zombie connections
   useEffect(() => {
+    let visibilityTimeout: ReturnType<typeof setTimeout> | null = null;
+    
     const handleVisibilityChange = () => {
+      // Clear any pending visibility timeout
+      if (visibilityTimeout) {
+        clearTimeout(visibilityTimeout);
+        visibilityTimeout = null;
+      }
+      
       if (document.visibilityState === 'hidden') {
         // Tab is being hidden - abort any in-flight requests to prevent stale connections
         if (loadAbortControllerRef.current) {
@@ -1146,56 +1439,95 @@ export default function DailyFlow() {
           loadingStartTimeRef.current = 0;
         }
       } else if (document.visibilityState === 'visible') {
-        // Tab is now visible - trigger a fresh load after a short delay
-        // The delay allows the session refresh in App.tsx to complete first
-        console.log('[loadTasks] Tab visible, scheduling fresh load');
-        setTimeout(() => {
-          loadTasks({ suppressLoading: true });
-        }, 500);
+        // Tab is now visible - trigger a fresh load after a longer delay
+        // Only trigger if we're not already loading
+        console.log('[loadTasks] Tab visible, scheduling fresh load if not already loading');
+        visibilityTimeout = setTimeout(() => {
+          // Double-check we're not already loading before triggering
+          if (!isLoadingTasksRef.current) {
+            loadTasks({ suppressLoading: true });
+          } else {
+            console.log('[loadTasks] Skipping visibility load - already loading');
+          }
+        }, 2000); // Increased delay to 2 seconds to allow session refresh + any ongoing loads to complete
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (visibilityTimeout) {
+        clearTimeout(visibilityTimeout);
+      }
     };
   }, [loadTasks]);
 
   // Auto-recovery: Check periodically if we're stuck and force reset
   useEffect(() => {
+    let recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
+    
     const recoveryInterval = setInterval(() => {
       if (isLoadingTasksRef.current) {
         const elapsedTime = Date.now() - loadingStartTimeRef.current;
-        if (elapsedTime > 45000) {
+        // Increased threshold to 60 seconds to account for slow queries
+        if (elapsedTime > 60000) {
           console.error('[loadTasks] STUCK STATE DETECTED - Auto-recovering after', elapsedTime, 'ms');
+          
+          // Abort any in-flight requests first
+          if (loadAbortControllerRef.current) {
+            console.log('[loadTasks] Aborting stuck request');
+            loadAbortControllerRef.current.abort();
+            loadAbortControllerRef.current = null;
+          }
+          
           isLoadingTasksRef.current = false;
           loadingStartTimeRef.current = 0;
-          // Trigger a fresh load after reset
-          setTimeout(() => {
-            console.log('[loadTasks] Attempting recovery load');
-            loadTasks({ suppressLoading: true });
-          }, 1000);
+          
+          // Clear any existing recovery timeout
+          if (recoveryTimeout) {
+            clearTimeout(recoveryTimeout);
+          }
+          
+          // Trigger a fresh load after a delay, but only once
+          recoveryTimeout = setTimeout(() => {
+            // Only attempt recovery if we're still not loading
+            if (!isLoadingTasksRef.current) {
+              console.log('[loadTasks] Attempting recovery load');
+              loadTasks({ suppressLoading: true });
+            } else {
+              console.log('[loadTasks] Skipping recovery load - already loading');
+            }
+            recoveryTimeout = null;
+          }, 2000);
         }
       }
-    }, 10000); // Check every 10 seconds
+    }, 15000); // Check every 15 seconds (less frequent)
     
-    return () => clearInterval(recoveryInterval);
+    return () => {
+      clearInterval(recoveryInterval);
+      if (recoveryTimeout) {
+        clearTimeout(recoveryTimeout);
+      }
+    };
   }, [loadTasks]);
 
   useEffect(() => {
     loadTasks();
-    // Refresh every 5 minutes
+    // Refresh every 5 minutes, but only if not currently loading
     const interval = setInterval(() => {
-      loadTasks({ suppressLoading: true });
+      if (!isLoadingTasksRef.current) {
+        loadTasks({ suppressLoading: true });
+      } else {
+        console.log('[loadTasks] Skipping interval refresh - already loading');
+      }
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadTasks]);
 
+  // ✅ OPTIMIZED: Single function that fetches all gap data once (no loops!)
   useEffect(() => {
-    updateGapMissingVarietyTrays(orderGapStatus);
-    updateGapMismatchedTrays(orderGapStatus);
-    updateGapRecipeRequirements(orderGapStatus);
-  }, [orderGapStatus, updateGapMissingVarietyTrays, updateGapMismatchedTrays, updateGapRecipeRequirements]);
+    updateAllGapData(orderGapStatus);
+  }, [orderGapStatus, updateAllGapData]);
 
   const handleAssignTray = useCallback(async () => {
     if (!assignModalGap || !selectedAssignTrayId) return;

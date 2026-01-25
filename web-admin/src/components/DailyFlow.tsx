@@ -85,7 +85,7 @@ import {
 } from '../services/dailyFlowService';
 import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
-import { fetchOrderFulfillmentDetails, type OrderFulfillmentStatus } from '../services/orderFulfillmentService';
+import type { OrderFulfillmentStatus } from '../services/orderFulfillmentService';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -101,7 +101,6 @@ import {
   fetchAssignableTrays,
   assignTrayToCustomer,
   harvestTrayNow,
-  fetchAssignedMismatchedTrays,
   updateHarvestStepToToday,
   updateHarvestStepDate,
 } from '../services/trayService';
@@ -954,106 +953,6 @@ export default function DailyFlow() {
       setGapRecipeRequirements(emptyData);
       setGapMissingVarietyTraysLoading(noLoading);
       setGapMismatchedTraysLoading(noLoading);
-    }
-  }, [getFarmUuidFromSession]);
-
-  const updateGapMissingVarietyTrays = useCallback(async (gaps: OrderGapStatus[]) => {
-    if (!gaps || gaps.length === 0) {
-      setGapMissingVarietyTrays({});
-      setGapMissingVarietyTraysLoading({});
-      return;
-    }
-
-    const farmUuid = getFarmUuidFromSession();
-    if (!farmUuid) {
-      setGapMissingVarietyTrays({});
-      setGapMissingVarietyTraysLoading({});
-      return;
-    }
-
-    const initialLoading: Record<string, boolean> = {};
-    gaps.forEach((gap) => {
-      initialLoading[formatGapKey(gap)] = true;
-    });
-
-    setGapMissingVarietyTrays({});
-    setGapMissingVarietyTraysLoading(initialLoading);
-
-    for (const gap of gaps) {
-      const gapKey = formatGapKey(gap);
-      const missingVarieties = parseMissingVarietyNames(gap.missing_varieties);
-
-      if (gap.product_id == null || missingVarieties.length === 0) {
-        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: [] }));
-        setGapMissingVarietyTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
-        continue;
-      }
-
-      try {
-        const trays = await fetchAssignableTrays(farmUuid, gap.product_id);
-        const matches = trays.filter((tray) => {
-          const nameToCheck = (
-            (tray.variety_name && tray.variety_name.toLowerCase()) ||
-            (tray.recipe_name && tray.recipe_name.toLowerCase()) ||
-            ''
-          );
-          return missingVarieties.some((name) => nameToCheck.includes(name));
-        });
-
-        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: matches }));
-      } catch (error) {
-        console.error('[DailyFlow] Error fetching missing variety trays:', error);
-        setGapMissingVarietyTrays((prev) => ({ ...prev, [gapKey]: [] }));
-      } finally {
-        setGapMissingVarietyTraysLoading((prev) => ({ ...prev, [gapKey]: false }));
-      }
-    }
-  }, [getFarmUuidFromSession]);
-
-  // DEPRECATED: Keeping for backwards compatibility but no longer used
-  const updateGapMismatchedTrays = useCallback(async (gaps: OrderGapStatus[]) => {
-    console.warn('[updateGapMismatchedTrays] This function is deprecated. Use updateAllGapData instead.');
-    // Function body removed - now handled by updateAllGapData
-  }, []);
-
-  const updateGapRecipeRequirements = useCallback(async (gaps: OrderGapStatus[]) => {
-    if (!gaps || gaps.length === 0) {
-      setGapRecipeRequirements({});
-      return;
-    }
-
-    const farmUuid = getFarmUuidFromSession();
-    if (!farmUuid) {
-      setGapRecipeRequirements({});
-      return;
-    }
-
-    setGapRecipeRequirements({});
-
-    for (const gap of gaps) {
-      const gapKey = formatGapKey(gap);
-      const deliveryDate = gap.scheduled_delivery_date || gap.delivery_date;
-
-      if (!deliveryDate || !gap.customer_name) {
-        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: [] }));
-        continue;
-      }
-
-      try {
-        const requirements = await fetchOrderFulfillmentDetails(
-          farmUuid,
-          deliveryDate,
-          gap.customer_name
-        );
-        // Filter to only include recipes for this specific product if it's a mix
-        const filteredRequirements = gap.is_mix
-          ? requirements // Mix products: show all recipes for this order
-          : requirements.filter(r => r.recipe_name === gap.product_name);
-        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: filteredRequirements }));
-      } catch (error) {
-        console.error('[DailyFlow] Error fetching recipe requirements:', error);
-        setGapRecipeRequirements((prev) => ({ ...prev, [gapKey]: [] }));
-      }
     }
   }, [getFarmUuidFromSession]);
 

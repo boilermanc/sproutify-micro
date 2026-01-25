@@ -1,14 +1,19 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Building2, User, Bell, Shield, Download, Save, CheckCircle2, AlertCircle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { Building2, User, Bell, Shield, Download, Save, CreditCard, ArrowUpRight, Loader2, AlertCircle } from 'lucide-react';
+import { useToast } from '@/components/ui/toast';
+import { useSubscription, TIER_INFO } from '@/hooks/useSubscription';
+import TestAccountsManager from '@/components/TestAccountsManager';
 
 interface FarmData {
   farm_uuid: string;
@@ -26,24 +31,52 @@ interface FarmData {
 interface ProfileData {
   id: string;
   email: string;
-  name: string;
+  firstname?: string;
+  lastname?: string;
+  phone?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  postalcode?: string;
+  country?: string;
+  bio?: string;
   role: string;
   farm_uuid: string;
 }
 
 const SettingsPage = () => {
+  const { addToast } = useToast();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [farmData, setFarmData] = useState<FarmData | null>(null);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  // Subscription hook
+  const {
+    subscription,
+    isLoading: subscriptionLoading,
+    openPortal,
+    getUsagePercentage,
+    refresh: refreshSubscription,
+  } = useSubscription();
 
   // Farm settings
   const [farmName, setFarmName] = useState('');
   const [seedingDays, setSeedingDays] = useState<string[]>(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
   
   // User profile
-  const [userName, setUserName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [country, setCountry] = useState('');
+  const [bio, setBio] = useState('');
   
   // Preferences
   const [defaultUnit, setDefaultUnit] = useState('pcs');
@@ -59,6 +92,40 @@ const SettingsPage = () => {
   useEffect(() => {
     fetchSettings();
   }, []);
+
+  // Handle checkout success from URL params
+  useEffect(() => {
+    const checkoutStatus = searchParams.get('checkout');
+    const tier = searchParams.get('tier');
+    if (checkoutStatus === 'success') {
+      addToast({
+        type: 'success',
+        title: 'Subscription Activated!',
+        description: tier
+          ? `You're now subscribed to the ${TIER_INFO[tier]?.displayName || tier} plan.`
+          : 'Your subscription has been activated successfully.',
+      });
+      refreshSubscription();
+      // Clear URL params
+      navigate('/settings', { replace: true });
+    }
+  }, [searchParams, addToast, navigate, refreshSubscription]);
+
+  // Handle portal open
+  const handleManageSubscription = async () => {
+    setPortalLoading(true);
+    try {
+      await openPortal();
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to open billing portal. Please try again.',
+      });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -91,7 +158,15 @@ const SettingsPage = () => {
       if (profileError) throw profileError;
       if (profile) {
         setProfileData(profile);
-        setUserName(profile.name || '');
+        setFirstName(profile.firstname || '');
+        setLastName(profile.lastname || '');
+        setPhone(profile.phone || '');
+        setStreet(profile.street || '');
+        setCity(profile.city || '');
+        setState(profile.state || '');
+        setPostalCode(profile.postalcode || '');
+        setCountry(profile.country || '');
+        setBio(profile.bio || '');
       }
 
       // Load preferences from localStorage
@@ -108,7 +183,11 @@ const SettingsPage = () => {
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
-      setMessage({ type: 'error', text: 'Failed to load settings' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to load settings'
+      });
     } finally {
       setLoading(false);
     }
@@ -118,7 +197,6 @@ const SettingsPage = () => {
     if (!farmData) return;
 
     setSaving(true);
-    setMessage(null);
 
     try {
       const { error } = await getSupabaseClient()
@@ -139,11 +217,18 @@ const SettingsPage = () => {
         localStorage.setItem('sproutify_session', JSON.stringify(session));
       }
 
-      setMessage({ type: 'success', text: 'Farm information updated successfully' });
-      setTimeout(() => setMessage(null), 3000);
+      addToast({
+        type: 'success',
+        title: 'Success',
+        description: 'Farm information updated successfully'
+      });
     } catch (error) {
       console.error('Error updating farm:', error);
-      setMessage({ type: 'error', text: 'Failed to update farm information' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to update farm information'
+      });
     } finally {
       setSaving(false);
     }
@@ -153,21 +238,37 @@ const SettingsPage = () => {
     if (!profileData) return;
 
     setSaving(true);
-    setMessage(null);
 
     try {
       const { error } = await getSupabaseClient()
         .from('profile')
-        .update({ name: userName })
+        .update({ 
+          firstname: firstName,
+          lastname: lastName,
+          phone: phone,
+          street: street,
+          city: city,
+          state: state,
+          postalcode: postalCode,
+          country: country,
+          bio: bio
+        })
         .eq('id', profileData.id);
 
       if (error) throw error;
 
-      setMessage({ type: 'success', text: 'Profile updated successfully' });
-      setTimeout(() => setMessage(null), 3000);
+      addToast({
+        type: 'success',
+        title: 'Success',
+        description: 'Profile updated successfully'
+      });
     } catch (error) {
       console.error('Error updating profile:', error);
-      setMessage({ type: 'error', text: 'Failed to update profile' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to update profile'
+      });
     } finally {
       setSaving(false);
     }
@@ -180,18 +281,24 @@ const SettingsPage = () => {
       notifications,
     };
     localStorage.setItem('sproutify_preferences', JSON.stringify(preferences));
-    setMessage({ type: 'success', text: 'Preferences saved successfully' });
-    setTimeout(() => setMessage(null), 3000);
+    addToast({
+      type: 'success',
+      title: 'Success',
+      description: 'Preferences saved successfully'
+    });
   };
 
   const handleResetPassword = async () => {
     if (!profileData?.email) {
-      setMessage({ type: 'error', text: 'Email address not found' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Email address not found'
+      });
       return;
     }
 
     setSaving(true);
-    setMessage(null);
 
     try {
       // Send password reset email via getSupabaseClient() Auth
@@ -202,15 +309,20 @@ const SettingsPage = () => {
 
       if (error) throw error;
 
-      setMessage({ 
-        type: 'success', 
-        text: `Password reset email sent to ${profileData.email}. Please check your inbox and follow the instructions to reset your password.` 
+      addToast({
+        type: 'success',
+        title: 'Password Reset Email Sent',
+        description: `Please check your inbox at ${profileData.email} and follow the instructions to reset your password.`,
+        duration: 8000
       });
-      setTimeout(() => setMessage(null), 8000);
     } catch (error: unknown) {
       console.error('Error sending password reset email:', error);
       const err = error as { message?: string };
-      setMessage({ type: 'error', text: err.message || 'Failed to send password reset email' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: err.message || 'Failed to send password reset email'
+      });
     } finally {
       setSaving(false);
     }
@@ -257,11 +369,18 @@ const SettingsPage = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      setMessage({ type: 'success', text: 'Data exported successfully' });
-      setTimeout(() => setMessage(null), 3000);
+      addToast({
+        type: 'success',
+        title: 'Success',
+        description: 'Data exported successfully'
+      });
     } catch (error) {
       console.error('Error exporting data:', error);
-      setMessage({ type: 'error', text: 'Failed to export data' });
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to export data'
+      });
     }
   };
 
@@ -274,7 +393,7 @@ const SettingsPage = () => {
     });
   };
 
-  const getSubscriptionBadge = (status?: string) => {
+  const getSubscriptionBadge = (status?: string | null) => {
     switch (status) {
       case 'trial':
         return <Badge variant="secondary">Trial</Badge>;
@@ -307,17 +426,6 @@ const SettingsPage = () => {
           <p className="text-muted-foreground">Manage your farm settings and preferences</p>
         </div>
       </div>
-
-      {message && (
-        <Alert variant={message.type === 'error' ? 'destructive' : 'default'}>
-          {message.type === 'success' ? (
-            <CheckCircle2 className="h-4 w-4" />
-          ) : (
-            <AlertCircle className="h-4 w-4" />
-          )}
-          <AlertDescription>{message.text}</AlertDescription>
-        </Alert>
-      )}
 
       {/* Farm Information */}
       <Card>
@@ -374,44 +482,138 @@ const SettingsPage = () => {
       </Card>
 
       {/* Account & Subscription */}
-      {farmData && (farmData.subscription_status || farmData.subscription_plan) && (
-        <Card>
-          <CardHeader>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
             <CardTitle>Account & Subscription</CardTitle>
-            <CardDescription>View your subscription status and plan details</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Subscription Status</Label>
-                <div className="mt-1">{getSubscriptionBadge(farmData.subscription_status)}</div>
-              </div>
-              <div>
-                <Label>Subscription Plan</Label>
-                <div className="mt-1">
-                  {farmData.subscription_plan ? (
-                    <Badge variant="outline">{farmData.subscription_plan}</Badge>
-                  ) : (
-                    <span className="text-muted-foreground">N/A</span>
-                  )}
+          </div>
+          <CardDescription>Manage your subscription and billing</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {subscriptionLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* Status and Plan */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Subscription Status</Label>
+                  <div className="mt-1">{getSubscriptionBadge(subscription.status)}</div>
+                </div>
+                <div>
+                  <Label>Current Plan</Label>
+                  <div className="mt-1 flex items-center gap-2">
+                    {subscription.tier ? (
+                      <>
+                        <Badge variant="outline" className="text-sm">
+                          {TIER_INFO[subscription.tier]?.displayName || subscription.tier}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          ${TIER_INFO[subscription.tier]?.price}/mo
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">No plan</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            {farmData.trial_end_date && (
-              <div>
-                <Label>Trial End Date</Label>
-                <div className="mt-1 text-sm">{formatDate(farmData.trial_end_date)}</div>
+
+              {/* Tray Usage */}
+              {subscription.tier && subscription.trayLimit < 999999 && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <Label>Tray Usage</Label>
+                    <span className="text-sm text-muted-foreground">
+                      {subscription.activeTrayCount} / {subscription.trayLimit} active trays
+                    </span>
+                  </div>
+                  <Progress value={getUsagePercentage()} className="h-2" />
+                  {getUsagePercentage() >= 80 && (
+                    <p className="text-sm text-amber-600 flex items-center gap-1">
+                      <AlertCircle className="h-4 w-4" />
+                      {getUsagePercentage() >= 100
+                        ? 'You\'ve reached your tray limit. Upgrade to create more.'
+                        : 'You\'re approaching your tray limit. Consider upgrading.'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Trial or Renewal Info */}
+              {subscription.status === 'trial' && subscription.trialEndDate && (
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    <strong>Trial ends:</strong> {formatDate(subscription.trialEndDate)}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Subscribe before your trial ends to keep using Sproutify.
+                  </p>
+                </div>
+              )}
+
+              {subscription.status === 'active' && subscription.currentPeriodEnd && (
+                <div>
+                  <Label>Next Billing Date</Label>
+                  <div className="mt-1 text-sm">
+                    {formatDate(subscription.currentPeriodEnd)}
+                    {subscription.cancelAtPeriodEnd && (
+                      <Badge variant="destructive" className="ml-2">
+                        Cancels at period end
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {subscription.status === 'past_due' && (
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
+                  <p className="text-sm text-amber-800 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    <strong>Payment failed.</strong> Please update your payment method.
+                  </p>
+                </div>
+              )}
+
+              {(subscription.status === 'expired' || subscription.status === 'cancelled') && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-lg">
+                  <p className="text-sm text-red-800">
+                    Your subscription has ended. Subscribe to continue using all features.
+                  </p>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <Separator />
+              <div className="flex flex-wrap gap-3">
+                {subscription.stripeCustomerId && subscription.status === 'active' && (
+                  <Button
+                    variant="outline"
+                    onClick={handleManageSubscription}
+                    disabled={portalLoading}
+                  >
+                    {portalLoading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-4 w-4 mr-2" />
+                    )}
+                    Manage Billing
+                  </Button>
+                )}
+                {(subscription.status !== 'active' || subscription.tier !== 'pro') && (
+                  <Button onClick={() => navigate('/pricing')}>
+                    <ArrowUpRight className="h-4 w-4 mr-2" />
+                    {subscription.status === 'active' ? 'Upgrade Plan' : 'View Plans'}
+                  </Button>
+                )}
               </div>
-            )}
-            {farmData.subscription_end_date && (
-              <div>
-                <Label>Subscription End Date</Label>
-                <div className="mt-1 text-sm">{formatDate(farmData.subscription_end_date)}</div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* User Profile */}
       <Card>
@@ -423,23 +625,123 @@ const SettingsPage = () => {
           <CardDescription>Manage your personal information</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="userName">Name</Label>
-            <Input
-              id="userName"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              placeholder="Enter your name"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="firstName">First Name</Label>
+              <Input
+                id="firstName"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Enter your first name"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Enter your last name"
+              />
+            </div>
           </div>
-          <div className="grid gap-2">
-            <Label>Email</Label>
-            <Input value={profileData?.email || ''} disabled />
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Email</Label>
+              <Input value={profileData?.email || ''} disabled />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="phone">Phone</Label>
+              <Input
+                id="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Enter your phone number"
+                type="tel"
+              />
+            </div>
           </div>
+
           <div className="grid gap-2">
             <Label>Role</Label>
             <Input value={profileData?.role || ''} disabled />
           </div>
+
+          <Separator />
+
+          <div>
+            <Label className="text-base font-semibold">Address</Label>
+            <p className="text-sm text-muted-foreground mb-3">Your contact address information</p>
+            
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="street">Street Address</Label>
+                <Input
+                  id="street"
+                  value={street}
+                  onChange={(e) => setStreet(e.target.value)}
+                  placeholder="Enter your street address"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="city">City</Label>
+                  <Input
+                    id="city"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter city"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="state">State / Province</Label>
+                  <Input
+                    id="state"
+                    value={state}
+                    onChange={(e) => setState(e.target.value)}
+                    placeholder="Enter state or province"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="postalCode">Postal Code</Label>
+                  <Input
+                    id="postalCode"
+                    value={postalCode}
+                    onChange={(e) => setPostalCode(e.target.value)}
+                    placeholder="Enter postal code"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="country">Country</Label>
+                  <Input
+                    id="country"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="Enter country"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-2">
+            <Label htmlFor="bio">Bio</Label>
+            <Textarea
+              id="bio"
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              placeholder="Tell us a bit about yourself..."
+              rows={4}
+            />
+          </div>
+
           <Button onClick={handleSaveProfile} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
             Save Profile
@@ -553,6 +855,9 @@ const SettingsPage = () => {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Test Accounts Manager - Only visible to admins */}
+      <TestAccountsManager />
 
       {/* Data Export */}
       <Card>

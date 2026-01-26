@@ -1164,12 +1164,9 @@ export default function DailyFlow() {
         timeoutPromise(fetchOverdueSeedingTasks(7, signal), 20000, []), // Increased to 20s
       ]);
 
-      // Check if aborted before updating state
-      if (signal.aborted) {
-        console.log('[loadTasks] Request aborted before state update');
-        return;
-      }
-      
+      // Note: Even if signal was aborted after fetch completed, we should still use
+      // the fetched data since it's already in memory. Only skip if component unmounted.
+
       // Update passive tray status
       setPassiveTrayStatus(passiveStatus);
 

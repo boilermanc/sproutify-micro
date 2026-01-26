@@ -141,7 +141,7 @@ const SuppliesPage = () => {
         // Smart unit detection: handle cases where quantity doesn't match the stored unit
         // This happens when deductions convert to grams but the unit field still says 'lbs'
         let displayUnit = batch.unit || 'lbs';
-        let displayQuantity = batch.quantity ?? 0;
+        let displayQuantity = Number(Number(batch.quantity ?? 0).toFixed(2));
         const quantityNum = parseFloat(displayQuantity.toString());
 
         // Only convert in specific cases where we're confident the unit is wrong:

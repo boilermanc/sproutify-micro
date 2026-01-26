@@ -72,6 +72,7 @@ import {
   markTraysAsLost,
   LOSS_REASONS,
   completeSoakTask,
+  completeSoakTaskByRecipe,
   completeSeedTask,
   useLeftoverSoakedSeed,
   discardSoakedSeed,
@@ -471,7 +472,9 @@ export default function DailyFlow() {
   const [harvestYield, setHarvestYield] = useState<string>('');
   const [harvestSelectedTrayIds, setHarvestSelectedTrayIds] = useState<number[]>([]);
   const [seedingTask, setSeedingTask] = useState<DailyTask | null>(null);
+  const [seedingDialogReady, setSeedingDialogReady] = useState(false); // Prevents button clicks during dialog transition
   const [soakTask, setSoakTask] = useState<DailyTask | null>(null);
+  const [soakDate, setSoakDate] = useState<string>(() => new Date().toISOString().split('T')[0]); // Default to today
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [availableBatches, setAvailableBatches] = useState<any[]>([]);
   useEffect(() => {
@@ -1754,7 +1757,9 @@ export default function DailyFlow() {
       setSelectedBatchId(null);
       setAvailableBatches([]);
       setSoakQuantityGrams('');
-      
+      // Default soak date to the selected date in Daily Flow (the task's scheduled date)
+      setSoakDate(selectedDate.toISOString().split('T')[0]);
+
       // Fetch available batches for this recipe
       // fetchAvailableBatchesForRecipe will handle fetching recipe_id from request if needed
       await fetchAvailableBatchesForRecipe(task);
@@ -1769,16 +1774,21 @@ export default function DailyFlow() {
         taskSource: task.taskSource,
         recipeId: task.recipeId,
         requestId: task.requestId,
-        crop: task.crop
+        crop: task.crop,
+        currentIsSoakVariety: isSoakVariety, // Log current state before reset
       });
-      setSeedingTask(task);
+      // IMPORTANT: Set dialog not ready to prevent button clicks during transition
+      setSeedingDialogReady(false);
+      // Reset all state BEFORE opening the dialog to prevent stale state flash
+      setIsSoakVariety(false);
+      setAvailableSoakedSeed(null);
       setSelectedBatchId(null);
       setAvailableBatches([]);
       setSeedQuantityCompleted('');
-      // Clear missed step reference for regular tasks
       setMissedStepForSeeding(null);
-      setIsSoakVariety(false);
-      setAvailableSoakedSeed(null);
+      // Now open the dialog AFTER state is reset
+      setSeedingTask(task);
+      console.log('[DailyFlow] State reset complete, dialog should now open with isSoakVariety=false');
 
       // For planting_schedule tasks, we need to fetch batches using recipeId directly
       if (task.taskSource === 'planting_schedule' && task.recipeId) {
@@ -1816,23 +1826,17 @@ export default function DailyFlow() {
 
               if (soakedSeedData && soakedSeedData.length > 0) {
                 setAvailableSoakedSeed(soakedSeedData[0]);
-              } else {
-                // No soaked seed available - show alert
-                const varietyName = recipeData.variety_name || task.crop || 'this variety';
-                showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
-                setSeedingTask(null);
-                return;
               }
+              // If no soaked seed available, dialog will show "no soaked seed" UI
             }
-          } else {
-            showNotification('error', 'Could not determine variety for this recipe.');
-            setSeedingTask(null);
-            return;
           }
         } else {
           // Non-soak variety - fetch available batches for this recipe
           await fetchAvailableBatchesForRecipe(task);
         }
+        // Mark dialog as ready for interaction after all async operations complete
+        setSeedingDialogReady(true);
+        console.log('[DailyFlow] Seeding dialog ready for interaction');
         return;
       }
       
@@ -1877,24 +1881,18 @@ export default function DailyFlow() {
 
                 if (soakedSeedData && soakedSeedData.length > 0) {
                   setAvailableSoakedSeed(soakedSeedData[0]);
-                } else {
-                  // No soaked seed available - show alert
-                  const varietyName = recipeData.variety_name || task.crop || 'this variety';
-                  showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
-                  setSeedingTask(null);
-                  return;
                 }
+                // If no soaked seed available, dialog will show "no soaked seed" UI
               }
-            } else {
-              showNotification('error', 'Could not determine variety for this recipe.');
-              setSeedingTask(null);
-              return;
             }
           } else {
             // Non-soak variety - need batch selection
             await fetchAvailableBatchesForRecipe(task);
           }
         }
+        // Mark dialog as ready for interaction after all async operations complete
+        setSeedingDialogReady(true);
+        console.log('[DailyFlow] Seeding dialog ready for interaction (seed_request path)');
       }
       return;
     }
@@ -2641,11 +2639,11 @@ export default function DailyFlow() {
           batchid: resolvedBatchId,
           batch_id: resolvedBatchId,
           batchId: resolvedBatchId,
-          quantity: batch.quantity,
-          unit: batch.unit || 'grams', // Default to grams if unit is not set
+          quantity: Number(batch.quantity).toFixed(2),
+          unit: batch.unit,
           lot_number: batch.lot_number || null,
           purchasedate: batch.purchasedate,
-          variety_name: varietyName,
+          variety_name: batch.variety,
           trays_possible: batch.trays_possible ?? null,
           quantity_grams:
             batch.quantity_grams ??
@@ -2694,8 +2692,9 @@ export default function DailyFlow() {
       return;
     }
 
-    if (!soakTask.requestId) {
-      showNotification('error', 'Invalid soak task - missing request ID');
+    // Must have either requestId or recipeId
+    if (!soakTask.requestId && !soakTask.recipeId) {
+      showNotification('error', 'Invalid soak task - missing request ID or recipe ID');
       return;
     }
 
@@ -2709,14 +2708,30 @@ export default function DailyFlow() {
 
     try {
       const quantityGrams = parseFloat(soakQuantityGrams);
-      // ✅ Pass the selectedDate as the task_date (the soak date, not seeding date)
-      const taskDateStr = selectedDate.toISOString().split('T')[0];
-      const soakedSeedId = await completeSoakTask(
-        soakTask.requestId,
-        selectedBatchId,
-        quantityGrams,
-        taskDateStr // ✅ NEW: Pass the soak date (Jan 11), not seeding date (Jan 12)
-      );
+      // Use the user-selected soak date from the date picker
+      const taskDateStr = soakDate;
+
+      let soakedSeedId: number;
+
+      if (soakTask.requestId) {
+        // Use original function for tasks with requestId
+        soakedSeedId = await completeSoakTask(
+          soakTask.requestId,
+          selectedBatchId,
+          quantityGrams,
+          taskDateStr
+        );
+      } else if (soakTask.recipeId) {
+        // Use new function for planting_schedule tasks (recipeId only)
+        soakedSeedId = await completeSoakTaskByRecipe(
+          soakTask.recipeId,
+          selectedBatchId,
+          quantityGrams,
+          taskDateStr
+        );
+      } else {
+        throw new Error('No request ID or recipe ID found');
+      }
 
       showNotification('success', `Soak task completed! Soaked seed ID: ${soakedSeedId}`);
       
@@ -5091,6 +5106,24 @@ export default function DailyFlow() {
                   </div>
                 </div>
 
+                {/* Soak Date Selection */}
+                <div className="space-y-2">
+                  <Label htmlFor="soak-date" className="text-sm font-medium">
+                    Soak Date <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="soak-date"
+                    type="date"
+                    value={soakDate}
+                    onChange={(e) => setSoakDate(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-slate-500">
+                    When did you soak (or are soaking) these seeds? Defaults to today.
+                  </p>
+                </div>
+
                 {/* Inventory Warning */}
                 {hasShortage && selectedBatch && (
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 space-y-3">
@@ -5331,6 +5364,7 @@ export default function DailyFlow() {
           setMissedStepForSeeding(null);
           setIsSoakVariety(false);
           setAvailableSoakedSeed(null);
+          setSeedingDialogReady(false);
         }
       }}>
         <DialogContent className="sm:max-w-[550px]">
@@ -5347,6 +5381,11 @@ export default function DailyFlow() {
           </DialogHeader>
 
           {seedingTask && (() => {
+            console.log('[DailyFlow] Rendering seeding dialog content:', {
+              taskId: seedingTask.id,
+              isSoakVariety,
+              hasAvailableSoakedSeed: !!availableSoakedSeed,
+            });
             const remainingTrays = Math.max(0, (seedingTask.quantity || 0) - (seedingTask.quantityCompleted || 0));
             const selectedBatch = availableBatches.find((b) => b.batchid === selectedBatchId);
             const seedPerTray = seedQuantityPerTray || 0;
@@ -5385,20 +5424,100 @@ export default function DailyFlow() {
                 {/* Soak Variety: Show available soaked seed */}
                 {isSoakVariety && (
                   <div className="space-y-3">
-                    {availableSoakedSeed ? (
+                    {!seedingDialogReady ? (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                        <p className="text-sm text-slate-600">Checking for soaked seed...</p>
+                      </div>
+                    ) : availableSoakedSeed ? (
                       <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                         <p className="text-sm font-medium text-green-900 mb-2">Soaked Seed Available</p>
                         <p className="text-base text-green-800">
                           {Number(availableSoakedSeed.quantity_remaining).toFixed(2)} {availableSoakedSeed.unit || 'g'} READY TO SEED
                         </p>
                         <p className="text-xs text-green-600 mt-1">
-                          Soaked: {new Date(availableSoakedSeed.soak_date).toLocaleDateString()} | 
+                          Soaked: {new Date(availableSoakedSeed.soak_date).toLocaleDateString()} |
                           Expires: {new Date(availableSoakedSeed.expires_at).toLocaleDateString()}
                         </p>
                       </div>
                     ) : (
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                        <p className="text-sm text-amber-800">No soaked seed available. Please complete the soak task first.</p>
+                      <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 space-y-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-semibold text-amber-900">No Soaked {seedingTask.crop} Available</p>
+                            <p className="text-xs text-amber-700 mt-1">
+                              This variety requires soaking before seeding. You can start soaking now, reschedule, or cancel this seeding.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 pt-2 border-t border-amber-200">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!seedingDialogReady}
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              console.log('[DailyFlow] Start Soaking Now clicked');
+                              // Create a synthetic soak task from the seeding task
+                              const syntheticSoakTask: DailyTask = {
+                                ...seedingTask,
+                                id: `soak-adhoc-${seedingTask.id}`,
+                                action: 'Soak',
+                                taskSource: 'soak_request',
+                              };
+                              setSeedingTask(null);
+                              setSoakTask(syntheticSoakTask);
+                              setSelectedBatchId(null);
+                              setAvailableBatches([]);
+                              setSoakQuantityGrams('');
+                              // Default to today for ad-hoc soaks (user is soaking now)
+                              setSoakDate(new Date().toISOString().split('T')[0]);
+                              await fetchAvailableBatchesForRecipe(syntheticSoakTask);
+                            }}
+                            className="w-full justify-start text-blue-700 border-blue-300 hover:bg-blue-50"
+                          >
+                            <Beaker className="h-4 w-4 mr-2" />
+                            Start Soaking Now
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!seedingDialogReady}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setRescheduleRequestDialog({
+                                task: seedingTask,
+                                newDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                              });
+                            }}
+                            className="w-full justify-start text-amber-800 border-amber-300 hover:bg-amber-100"
+                          >
+                            <Calendar className="h-4 w-4 mr-2" />
+                            Reschedule Seeding
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!seedingDialogReady}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setCancelRequestDialog({
+                                task: seedingTask,
+                                reason: 'no_soaked_seed',
+                              });
+                            }}
+                            className="w-full justify-start text-red-600 border-red-300 hover:bg-red-50"
+                          >
+                            <XCircle className="h-4 w-4 mr-2" />
+                            Cancel Seeding
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -5581,7 +5700,7 @@ export default function DailyFlow() {
             <Button
               onClick={handleSeedingConfirm}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700"
-              disabled={(!isSoakVariety && !selectedBatchId) || !seedQuantityCompleted || isSubmittingSeeding.current || completingIds.has(seedingTask?.id || '') || (availableBatches.length === 0 && !isSoakVariety)}
+              disabled={(!isSoakVariety && !selectedBatchId) || !seedQuantityCompleted || isSubmittingSeeding.current || completingIds.has(seedingTask?.id || '') || (availableBatches.length === 0 && !isSoakVariety) || (isSoakVariety && !availableSoakedSeed)}
             >
               {isSubmittingSeeding.current || completingIds.has(seedingTask?.id || '') ? (
                 'Processing...'
@@ -5722,6 +5841,7 @@ export default function DailyFlow() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="insufficient_inventory">Insufficient Inventory</SelectItem>
+                    <SelectItem value="no_soaked_seed">No Soaked Seed Available</SelectItem>
                     <SelectItem value="changed_plans">Changed Plans</SelectItem>
                     <SelectItem value="quality_issues">Quality Issues</SelectItem>
                     <SelectItem value="other">Other</SelectItem>
@@ -7166,4 +7286,3 @@ const MissedStepsCard = ({ task, onSkipMissed, onCompleteMissed, onSkipAll, isAn
     </Card>
   );
 };
-

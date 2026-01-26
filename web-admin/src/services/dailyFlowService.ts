@@ -3878,6 +3878,16 @@ export const completeSoakTask = async (
     }
 
     const varietyId = recipeData?.variety_id || null;
+    let varietyName: string | null = null;
+    if (varietyId) {
+      const { data: varietyData } = await getSupabaseClient()
+        .from('varieties')
+        .select('name')
+        .eq('varietyid', varietyId)
+        .maybeSingle();
+      varietyName = varietyData?.name || null;
+    }
+    const farmUuid = requestData.farm_uuid;
 
     // Calculate expiration (48 hours from soak date)
     const soakDate = new Date(taskDate);
@@ -3916,13 +3926,12 @@ export const completeSoakTask = async (
       .upsert({
         farm_uuid: requestData.farm_uuid,
         task_type: 'soaking',
-        task_date: taskDate, // ✅ Soak date, not seeding date
+        task_date: taskDate,
         recipe_id: requestData.recipe_id,
         request_id: requestId,
         status: 'completed',
         completed_at: new Date().toISOString(),
         completed_by: userToUse,
-        quantity: quantityGrams,
         notes: `Soaked ${quantityGrams}g - Soaked seed ID: ${soakedId}`,
       }, {
         onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
@@ -3930,19 +3939,24 @@ export const completeSoakTask = async (
 
     if (completionError) {
       console.warn('[completeSoakTask] Error recording task completion:', completionError);
-      // Don't throw - soaked_seed was created successfully
     }
 
     // Deduct seed inventory from seedbatch
     // First get current quantity, then update
     const { data: batchData, error: batchFetchError } = await getSupabaseClient()
       .from('seedbatches')
-      .select('quantity')
+      .select('quantity, unit')
       .eq('batchid', seedbatchId)
       .single();
 
     if (!batchFetchError && batchData) {
-      const newQuantity = Math.max(0, (batchData.quantity || 0) - quantityGrams);
+      const deductionInBatchUnit =
+        batchData.unit === 'lbs'
+          ? quantityGrams / 453.592
+          : batchData.unit === 'oz'
+            ? quantityGrams / 28.3495
+            : quantityGrams; // already grams
+      const newQuantity = Math.max(0, (batchData.quantity || 0) - deductionInBatchUnit);
       const { error: inventoryError } = await getSupabaseClient()
         .from('seedbatches')
         .update({ quantity: newQuantity })
@@ -3952,6 +3966,16 @@ export const completeSoakTask = async (
         console.warn('[completeSoakTask] Error updating seed inventory:', inventoryError);
         // Don't throw - soaked_seed was created successfully
       }
+
+      await getSupabaseClient()
+        .from('seed_transactions')
+        .insert({
+          farm_uuid: farmUuid,
+          batch_id: seedbatchId,
+          transaction_type: 'soak',
+          quantity_grams: -quantityGrams,
+          notes: `Soaked seed for ${varietyName || 'variety'}`,
+        });
     }
 
     console.log('[completeSoakTask] Success:', {
@@ -3966,6 +3990,152 @@ export const completeSoakTask = async (
     return soakedId || 0;
   } catch (error) {
     console.error('[completeSoakTask] Error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Complete a soak task using recipeId directly (for planting_schedule tasks without requestId)
+ */
+export const completeSoakTaskByRecipe = async (
+  recipeId: number,
+  seedbatchId: number,
+  quantityGrams: number,
+  taskDate: string,
+  userId?: string
+): Promise<number> => {
+  try {
+    const sessionData = localStorage.getItem('sproutify_session');
+    if (!sessionData) throw new Error('No session found');
+
+    const { userId: sessionUserId, farmUuid } = JSON.parse(sessionData);
+    const userToUse = userId || sessionUserId;
+
+    if (!farmUuid) {
+      throw new Error('No farm UUID found in session');
+    }
+
+    // Get recipe details to find variety_id
+    const { data: recipeData, error: recipeError } = await getSupabaseClient()
+      .from('recipes')
+      .select('variety_id, seed_quantity, seed_quantity_unit')
+      .eq('recipe_id', recipeId)
+      .single();
+
+    if (recipeError) {
+      console.warn('[completeSoakTaskByRecipe] Error fetching recipe:', recipeError);
+    }
+
+    const varietyId = recipeData?.variety_id || null;
+    let varietyName: string | null = null;
+    if (varietyId) {
+      const { data: varietyData } = await getSupabaseClient()
+        .from('varieties')
+        .select('name')
+        .eq('varietyid', varietyId)
+        .maybeSingle();
+      varietyName = varietyData?.name || null;
+    }
+
+    // Calculate expiration (48 hours from soak date)
+    const soakDate = new Date(taskDate);
+    const expiresAt = new Date(soakDate);
+    expiresAt.setHours(expiresAt.getHours() + 48);
+
+    // Create soaked_seed record (without request_id for planting_schedule tasks)
+    const { data: soakedSeedData, error: soakedSeedError } = await getSupabaseClient()
+      .from('soaked_seed')
+      .insert({
+        farm_uuid: farmUuid,
+        variety_id: varietyId,
+        seedbatch_id: seedbatchId,
+        request_id: null, // No request_id for planting_schedule tasks
+        quantity_soaked: quantityGrams,
+        quantity_remaining: quantityGrams,
+        unit: 'g',
+        soak_date: taskDate,
+        expires_at: expiresAt.toISOString(),
+        status: 'available',
+        created_by: userToUse,
+      })
+      .select('soaked_id')
+      .single();
+
+    if (soakedSeedError) {
+      console.error('[completeSoakTaskByRecipe] Error creating soaked_seed:', soakedSeedError);
+      throw soakedSeedError;
+    }
+
+    const soakedId = soakedSeedData?.soaked_id;
+
+    // Record task completion
+    const { error: completionError } = await getSupabaseClient()
+      .from('task_completions')
+      .upsert({
+        farm_uuid: farmUuid,
+        task_type: 'soaking',
+        task_date: taskDate,
+        recipe_id: recipeId,
+        request_id: null,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        completed_by: userToUse,
+        notes: `Soaked ${quantityGrams}g - Soaked seed ID: ${soakedId} (ad-hoc from planting schedule)`,
+      }, {
+        onConflict: 'farm_uuid,task_type,task_date,recipe_id,customer_name,product_name'
+      });
+
+    if (completionError) {
+      console.warn('[completeSoakTaskByRecipe] Error recording task completion:', completionError);
+    }
+
+    // Deduct seed inventory from seedbatch
+    const { data: batchData, error: batchFetchError } = await getSupabaseClient()
+      .from('seedbatches')
+      .select('quantity, unit')
+      .eq('batchid', seedbatchId)
+      .single();
+
+    if (!batchFetchError && batchData) {
+      const deductionInBatchUnit =
+        batchData.unit === 'lbs'
+          ? quantityGrams / 453.592
+          : batchData.unit === 'oz'
+            ? quantityGrams / 28.3495
+            : quantityGrams; // already grams
+      const newQuantity = Math.max(0, (batchData.quantity || 0) - deductionInBatchUnit);
+      const { error: inventoryError } = await getSupabaseClient()
+        .from('seedbatches')
+        .update({ quantity: newQuantity })
+        .eq('batchid', seedbatchId);
+
+      if (inventoryError) {
+        console.warn('[completeSoakTaskByRecipe] Error updating seed inventory:', inventoryError);
+      }
+
+      await getSupabaseClient()
+        .from('seed_transactions')
+        .insert({
+          farm_uuid: farmUuid,
+          batch_id: seedbatchId,
+          transaction_type: 'soak',
+          quantity_grams: -quantityGrams,
+          notes: `Soaked seed for ${varietyName || 'variety'}`,
+        });
+    }
+
+    console.log('[completeSoakTaskByRecipe] Success:', {
+      soakedId,
+      recipeId,
+      seedbatchId,
+      quantityGrams,
+      taskDate,
+      expiresAt: expiresAt.toISOString()
+    });
+
+    return soakedId || 0;
+  } catch (error) {
+    console.error('[completeSoakTaskByRecipe] Error:', error);
     throw error;
   }
 };

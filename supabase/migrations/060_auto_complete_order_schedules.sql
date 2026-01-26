@@ -15,75 +15,43 @@ CREATE OR REPLACE FUNCTION check_and_complete_order_schedule()
 RETURNS TRIGGER AS $$
 DECLARE
     v_schedule_id INTEGER;
-    v_standing_order_id INTEGER;
-    v_delivery_date DATE;
-    v_farm_uuid UUID;
-    v_all_fulfilled BOOLEAN := TRUE;
-    v_item RECORD;
-    v_trays_harvested INTEGER;
-    v_trays_needed INTEGER;
+    v_total_trays INTEGER;
+    v_harvested_trays INTEGER;
 BEGIN
     -- Only process if:
     -- 1. Status changed to 'harvested'
     -- 2. Tray has an order_schedule_id
     IF NEW.status = 'harvested' AND NEW.order_schedule_id IS NOT NULL THEN
         v_schedule_id := NEW.order_schedule_id;
-        v_farm_uuid := NEW.farm_uuid;
 
-        -- Get the standing_order_id and delivery_date for this schedule
-        SELECT os.standing_order_id, os.scheduled_delivery_date
-        INTO v_standing_order_id, v_delivery_date
-        FROM order_schedules os
-        WHERE os.schedule_id = v_schedule_id
-          AND os.status NOT IN ('completed', 'skipped');
-
-        -- If schedule not found or already completed, nothing to do
-        IF v_standing_order_id IS NULL THEN
+        -- Check if the order_schedule is still pending/generated
+        IF NOT EXISTS (
+            SELECT 1 FROM order_schedules
+            WHERE schedule_id = v_schedule_id
+              AND status NOT IN ('completed', 'skipped')
+        ) THEN
             RETURN NEW;
         END IF;
 
-        -- Check each standing_order_item to see if it's fulfilled
-        FOR v_item IN
-            SELECT
-                soi.item_id,
-                COALESCE(pv.recipe_id, p.recipe_id) AS recipe_id,
-                CASE
-                    WHEN soi.quantity > 0 THEN CEILING(soi.quantity / 5.0)
-                    ELSE 1
-                END AS trays_needed
-            FROM standing_order_items soi
-            JOIN products p ON p.product_id = soi.product_id
-            LEFT JOIN product_variants pv ON pv.variant_id = soi.variant_id
-            WHERE soi.standing_order_id = v_standing_order_id
-              AND COALESCE(pv.recipe_id, p.recipe_id) IS NOT NULL
-        LOOP
-            -- Count harvested trays for this recipe and schedule
-            -- Include trays harvested today (for this specific delivery)
-            SELECT COUNT(*) INTO v_trays_harvested
-            FROM trays t
-            WHERE t.order_schedule_id = v_schedule_id
-              AND t.recipe_id = v_item.recipe_id
-              AND t.status = 'harvested'
-              AND t.harvest_date IS NOT NULL;
+        -- Count total trays created for this schedule vs harvested trays
+        -- This is simpler and doesn't require the product/variant recipe join
+        SELECT
+            COUNT(*),
+            COUNT(*) FILTER (WHERE status = 'harvested')
+        INTO v_total_trays, v_harvested_trays
+        FROM trays
+        WHERE order_schedule_id = v_schedule_id;
 
-            v_trays_needed := v_item.trays_needed;
-
-            -- If any item is not fully fulfilled, the order is not complete
-            IF v_trays_harvested < v_trays_needed THEN
-                v_all_fulfilled := FALSE;
-                EXIT; -- No need to check further
-            END IF;
-        END LOOP;
-
-        -- If all items are fulfilled, mark the order_schedule as completed
-        IF v_all_fulfilled THEN
+        -- If all trays for this schedule are harvested, mark as completed
+        IF v_total_trays > 0 AND v_harvested_trays >= v_total_trays THEN
             UPDATE order_schedules
             SET status = 'completed',
                 generated_at = COALESCE(generated_at, NOW())
             WHERE schedule_id = v_schedule_id
               AND status NOT IN ('completed', 'skipped');
 
-            RAISE NOTICE 'Order schedule % marked as completed (all items fulfilled)', v_schedule_id;
+            RAISE NOTICE 'Order schedule % marked as completed (% of % trays harvested)',
+                v_schedule_id, v_harvested_trays, v_total_trays;
         END IF;
     END IF;
 
@@ -188,9 +156,8 @@ DECLARE
     v_completed INTEGER := 0;
     v_skipped INTEGER := 0;
     v_schedule RECORD;
-    v_all_fulfilled BOOLEAN;
-    v_item RECORD;
-    v_trays_harvested INTEGER;
+    v_total_trays INTEGER;
+    v_harvested_trays INTEGER;
 BEGIN
     -- Process each pending schedule for today
     FOR v_schedule IN
@@ -201,36 +168,18 @@ BEGIN
           AND os.scheduled_delivery_date = CURRENT_DATE
           AND so.farm_uuid = p_farm_uuid
     LOOP
-        v_all_fulfilled := TRUE;
+        -- Count total trays vs harvested trays for this schedule
+        -- This is simpler and doesn't require the product/variant recipe join
+        SELECT
+            COUNT(*),
+            COUNT(*) FILTER (WHERE status = 'harvested')
+        INTO v_total_trays, v_harvested_trays
+        FROM trays
+        WHERE order_schedule_id = v_schedule.schedule_id;
 
-        -- Check if all items are fulfilled
-        FOR v_item IN
-            SELECT
-                COALESCE(pv.recipe_id, p.recipe_id) AS recipe_id,
-                CASE
-                    WHEN soi.quantity > 0 THEN CEILING(soi.quantity / 5.0)
-                    ELSE 1
-                END AS trays_needed
-            FROM standing_order_items soi
-            JOIN products p ON p.product_id = soi.product_id
-            LEFT JOIN product_variants pv ON pv.variant_id = soi.variant_id
-            WHERE soi.standing_order_id = v_schedule.standing_order_id
-              AND COALESCE(pv.recipe_id, p.recipe_id) IS NOT NULL
-        LOOP
-            SELECT COUNT(*) INTO v_trays_harvested
-            FROM trays t
-            WHERE t.order_schedule_id = v_schedule.schedule_id
-              AND t.recipe_id = v_item.recipe_id
-              AND t.status = 'harvested';
-
-            IF v_trays_harvested < v_item.trays_needed THEN
-                v_all_fulfilled := FALSE;
-                EXIT;
-            END IF;
-        END LOOP;
-
-        -- Mark as completed or skipped
-        IF v_all_fulfilled THEN
+        -- Mark as completed if all trays harvested (or no trays created = skip)
+        -- Mark as skipped if some trays remain unharvested
+        IF v_total_trays > 0 AND v_harvested_trays >= v_total_trays THEN
             UPDATE order_schedules
             SET status = 'completed'
             WHERE schedule_id = v_schedule.schedule_id;

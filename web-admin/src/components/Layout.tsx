@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
@@ -29,6 +29,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import NotificationBell from "./NotificationBell";
+import TrialBanner from "./onboarding/TrialBanner";
+import SubscriptionBlockedModal from "./SubscriptionBlockedModal";
+import { useSubscription } from "@/hooks/useSubscription";
+import { getSupabaseClient } from "@/integrations/supabase/client";
 import logoImage from '../assets/sproutify micro.png';
 
 interface LayoutProps {
@@ -38,15 +42,95 @@ interface LayoutProps {
 const Layout = ({ onLogout }: LayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [farmName, setFarmName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [isTestAccount, setIsTestAccount] = useState(false);
+  const [testAccountChecked, setTestAccountChecked] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const { subscription, isLoading: subscriptionLoading, getTrialDaysRemaining } = useSubscription();
 
   useEffect(() => {
     const sessionData = localStorage.getItem('sproutify_session');
     if (sessionData) {
-      const { farmName: name } = JSON.parse(sessionData);
+      const { farmName: name, email } = JSON.parse(sessionData);
       setFarmName(name || '');
+      setUserEmail(email || '');
     }
   }, []);
+
+  // Check if user is a test account (from database)
+  useEffect(() => {
+    const checkTestAccount = async () => {
+      if (!userEmail) {
+        setTestAccountChecked(true);
+        return;
+      }
+
+      // Quick check: @sproutify.app emails are always test accounts
+      if (userEmail.toLowerCase().endsWith('@sproutify.app')) {
+        setIsTestAccount(true);
+        setTestAccountChecked(true);
+        return;
+      }
+
+      try {
+        const client = getSupabaseClient();
+        const { data, error } = await client
+          .from('test_accounts')
+          .select('email')
+          .ilike('email', userEmail)
+          .maybeSingle();
+
+        if (!error && data) {
+          setIsTestAccount(true);
+        } else {
+          setIsTestAccount(false);
+        }
+      } catch (err) {
+        console.error('Error checking test account status:', err);
+        // Default to not a test account if check fails
+        setIsTestAccount(false);
+      } finally {
+        setTestAccountChecked(true);
+      }
+    };
+
+    checkTestAccount();
+  }, [userEmail]);
+
+  // Determine if user should be blocked
+  const shouldShowBlockedModal = (): boolean => {
+    // Wait until test account check is complete
+    if (!testAccountChecked || subscriptionLoading) return false;
+    if (isTestAccount) return false;
+
+    // Don't block on pricing page - user needs to see plans to subscribe
+    if (location.pathname === '/pricing') return false;
+
+    const status = subscription.status;
+
+    // Block if expired or cancelled
+    if (status === 'expired' || status === 'cancelled') {
+      return true;
+    }
+
+    // Block if trial has ended (trial with 0 or negative days remaining)
+    if (status === 'trial') {
+      const daysRemaining = getTrialDaysRemaining();
+      if (daysRemaining !== null && daysRemaining <= 0) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const getBlockedStatus = (): 'expired' | 'cancelled' | 'trial_ended' => {
+    if (subscription.status === 'cancelled') return 'cancelled';
+    if (subscription.status === 'trial') return 'trial_ended';
+    return 'expired';
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('sproutify_session');
@@ -227,10 +311,29 @@ const Layout = ({ onLogout }: LayoutProps) => {
           </div>
         </div>
 
+        {/* Subscription/Trial Banner */}
+        {!subscriptionLoading && !bannerDismissed && (
+          <TrialBanner
+            trialEndDate={subscription.trialEndDate}
+            subscriptionStatus={subscription.status}
+            activeTrayCount={subscription.activeTrayCount}
+            trayLimit={subscription.trayLimit}
+            onDismiss={() => setBannerDismissed(true)}
+          />
+        )}
+
         <div className="flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </main>
+
+      {/* Subscription Blocked Modal */}
+      {shouldShowBlockedModal() && (
+        <SubscriptionBlockedModal
+          status={getBlockedStatus()}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 };

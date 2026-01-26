@@ -27,12 +27,14 @@ import SuppliesPage from './pages/SuppliesPage';
 import TraysPage from './pages/TraysPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
+import PricingPage from './pages/PricingPage';
 import DailyFlow from './components/DailyFlow';
 import GrowingMicrogreens from './components/GrowingMicrogreens';
 import Layout from './components/Layout';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
 import HelpCenterPage from './pages/HelpCenterPage';
+import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import AdminLogin from './pages/AdminLogin';
 import RequireAdmin from './components/RequireAdmin';
 import AdminLayout from './components/AdminLayout';
@@ -48,6 +50,7 @@ import AdminEmailEvents from './pages/AdminEmailEvents';
 import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import VerifyResetCode from './pages/VerifyResetCode';
+import { ToastProvider } from './components/ui/toast';
 import './App.css';
 
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
@@ -271,79 +274,87 @@ function App() {
   }
 
   return (
-    <Router basename="/admin">
-      <Routes>
-        {/* Admin Portal Routes */}
-          <Route path="/admin-portal/login" element={<AdminLogin />} />
-        <Route path="/admin-portal/reset-password" element={<PasswordResetPage />} />
-        <Route path="/admin-portal/verify-reset" element={<VerifyResetCode />} />
-        <Route path="/admin-portal/signup" element={<BetaSignupPage />} />
-        
-        <Route path="/admin-portal" element={
-          <RequireAdmin>
-            <AdminLayout onLogout={async () => {
+    <ToastProvider>
+      <Router basename="/admin">
+        <Routes>
+          {/* Admin Portal Routes */}
+            <Route path="/admin-portal/login" element={<AdminLogin />} />
+          <Route path="/admin-portal/reset-password" element={<PasswordResetPage />} />
+          <Route path="/admin-portal/verify-reset" element={<VerifyResetCode />} />
+          <Route path="/admin-portal/signup" element={<BetaSignupPage />} />
+          
+          <Route path="/admin-portal" element={
+            <RequireAdmin>
+              <AdminLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_admin_session');
+                setSession(null);
+              }} />
+            </RequireAdmin>
+          }>
+            <Route index element={<AdminDashboard />} />
+            <Route path="farms-users" element={<AdminFarmsUsers />} />
+            <Route path="recipes-varieties" element={<AdminRecipesVarieties />} />
+            <Route path="trays-batches" element={<AdminTraysBatches />} />
+            <Route path="customers-orders" element={<AdminCustomersOrders />} />
+            <Route path="products" element={<AdminProducts />} />
+            <Route path="notifications" element={<AdminNotifications />} />
+            <Route path="email-broadcast" element={<AdminEmailBroadcast />} />
+            <Route path="email-events" element={<AdminEmailEvents />} />
+          </Route>
+
+          {/* Regular User Routes */}
+          <Route path="/login" element={
+            isAuthenticated ? <Navigate to="/" /> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
+          } />
+
+          {/* Checkout Success - standalone page without Layout */}
+          <Route path="/checkout-success" element={
+            isAuthenticated ? <CheckoutSuccessPage /> : <Navigate to="/login" />
+          } />
+
+          <Route path="/" element={
+            isAuthenticated ? <Layout onLogout={async () => {
               clearSupabaseAuthStorage();
               if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
-              localStorage.removeItem('sproutify_admin_session');
+              localStorage.removeItem('sproutify_session');
               setSession(null);
-            }} />
-          </RequireAdmin>
-        }>
-          <Route index element={<AdminDashboard />} />
-          <Route path="farms-users" element={<AdminFarmsUsers />} />
-          <Route path="recipes-varieties" element={<AdminRecipesVarieties />} />
-          <Route path="trays-batches" element={<AdminTraysBatches />} />
-          <Route path="customers-orders" element={<AdminCustomersOrders />} />
-          <Route path="products" element={<AdminProducts />} />
-          <Route path="notifications" element={<AdminNotifications />} />
-          <Route path="email-broadcast" element={<AdminEmailBroadcast />} />
-          <Route path="email-events" element={<AdminEmailEvents />} />
-        </Route>
-
-        {/* Regular User Routes */}
-        <Route path="/login" element={
-          isAuthenticated ? <Navigate to="/" /> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
-        } />
-
-        <Route path="/" element={
-          isAuthenticated ? <Layout onLogout={async () => {
-            clearSupabaseAuthStorage();
-            if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
-            localStorage.removeItem('sproutify_session');
-            setSession(null);
-            setIsAuthenticated(false);
-          }} /> : <Navigate to="/login" />
-        }>
-          <Route index element={<Dashboard />} />
-          <Route path="users" element={<UsersPage />} />
-          <Route path="varieties" element={<VarietiesPage />} />
-          <Route path="recipes" element={<RecipesPage />} />
-          <Route path="recipes/builder" element={<RecipeBuilderPage />} />
-          <Route path="global-recipes" element={<GlobalRecipesPage />} />
-          <Route path="products" element={<ProductsPage />} />
-          <Route path="mix-calculator" element={<MixCalculatorPage />} />
-          <Route path="batches" element={<BatchesPage />} />
-          <Route path="orders" element={<OrdersPage />} />
-          <Route path="standing-orders" element={<StandingOrdersPage />} />
-          <Route path="planting-schedule" element={<PlantingSchedulePage />} />
-          <Route path="calendar" element={<CalendarPage />} />
-          <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
-          <Route path="customers" element={<CustomersPage />} />
-          <Route path="vendors" element={<VendorsPage />} />
-          <Route path="supplies" element={<SuppliesPage />} />
-          <Route path="trays" element={<TraysPage />} />
-          <Route path="trays/:trayId" element={<TraysPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="flow" element={<DailyFlow />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="activity" element={<Activity />} />
-          <Route path="help" element={<HelpCenterPage />} />
-          <Route path="help/:category" element={<HelpCenterPage />} />
-          <Route path="help/:category/:slug" element={<HelpCenterPage />} />
-        </Route>
-      </Routes>
-      {isAuthenticated && <SageChat />}
-    </Router>
+              setIsAuthenticated(false);
+            }} /> : <Navigate to="/login" />
+          }>
+            <Route index element={<Dashboard />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="varieties" element={<VarietiesPage />} />
+            <Route path="recipes" element={<RecipesPage />} />
+            <Route path="recipes/builder" element={<RecipeBuilderPage />} />
+            <Route path="global-recipes" element={<GlobalRecipesPage />} />
+            <Route path="products" element={<ProductsPage />} />
+            <Route path="mix-calculator" element={<MixCalculatorPage />} />
+            <Route path="batches" element={<BatchesPage />} />
+            <Route path="orders" element={<OrdersPage />} />
+            <Route path="standing-orders" element={<StandingOrdersPage />} />
+            <Route path="planting-schedule" element={<PlantingSchedulePage />} />
+            <Route path="calendar" element={<CalendarPage />} />
+            <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
+            <Route path="customers" element={<CustomersPage />} />
+            <Route path="vendors" element={<VendorsPage />} />
+            <Route path="supplies" element={<SuppliesPage />} />
+            <Route path="trays" element={<TraysPage />} />
+            <Route path="trays/:trayId" element={<TraysPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="flow" element={<DailyFlow />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="pricing" element={<PricingPage />} />
+            <Route path="activity" element={<Activity />} />
+            <Route path="help" element={<HelpCenterPage />} />
+            <Route path="help/:category" element={<HelpCenterPage />} />
+            <Route path="help/:category/:slug" element={<HelpCenterPage />} />
+          </Route>
+        </Routes>
+        {isAuthenticated && <SageChat />}
+      </Router>
+    </ToastProvider>
   );
 }
 

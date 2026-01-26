@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { useParams } from 'react-router-dom';
 import { checkHarvestReminders } from '../services/notificationService';
 import { markTraysAsLost, LOSS_REASONS, type LossReason } from '../services/dailyFlowService';
+import { useSubscription, TIER_INFO } from '@/hooks/useSubscription';
 import { Edit, Layers, Plus, Search, Calendar, Package, Sprout, Globe, MoreHorizontal, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,9 @@ const formatBatchQuantity = (quantity?: number | string | null): string => {
 };
 
 const TraysPage = () => {
+  const navigate = useNavigate();
+  const { subscription, canCreateTrays: checkCanCreateTrays, refresh: refreshSubscription } = useSubscription();
+
   const stageColors: Record<string, string> = {
     Germination: 'bg-yellow-500 hover:bg-yellow-600',
     Blackout: 'bg-purple-500 hover:bg-purple-600',
@@ -876,6 +880,32 @@ const TraysPage = () => {
     }
 
     const quantity = Math.max(1, newTray.quantity || 1);
+
+    // Check subscription limit before creating trays
+    if (!checkCanCreateTrays(quantity)) {
+      const tierName = subscription.tier ? TIER_INFO[subscription.tier]?.displayName : 'your current plan';
+
+      if (subscription.status === 'expired' || subscription.status === 'cancelled') {
+        const shouldUpgrade = window.confirm(
+          'Your subscription has ended. You need an active subscription to create trays.\n\nWould you like to view our plans?'
+        );
+        if (shouldUpgrade) {
+          navigate('/pricing');
+        }
+        return;
+      }
+
+      const shouldUpgrade = window.confirm(
+        `You're trying to create ${quantity} tray${quantity > 1 ? 's' : ''}, but ${tierName} only allows ${subscription.trayLimit} active trays.\n` +
+        `You currently have ${subscription.activeTrayCount} active trays.\n\n` +
+        'Would you like to upgrade your plan?'
+      );
+      if (shouldUpgrade) {
+        navigate('/pricing');
+      }
+      return;
+    }
+
     setCreating(true);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
@@ -941,14 +971,17 @@ const TraysPage = () => {
       if (requestError) throw requestError;
 
       // Reset form
-      setNewTray({ 
-        recipe_id: '', 
-        quantity: 1, 
+      setNewTray({
+        recipe_id: '',
+        quantity: 1,
         seed_date: new Date().toISOString().split('T')[0],
-        location: '' 
+        location: ''
       });
       setIsAddDialogOpen(false);
       fetchTrays();
+
+      // Refresh subscription data to update tray count
+      refreshSubscription();
 
       // Check for notifications
       checkHarvestReminders();

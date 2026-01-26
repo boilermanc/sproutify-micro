@@ -760,6 +760,7 @@ const Dashboard = () => {
   // Data State
   const [farmInfo, setFarmInfo] = useState({ farmName: '', farmUuid: '' });
   const [trialEndDate, setTrialEndDate] = useState<string | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalTrays: 0,
     activeTrays: 0,
@@ -824,6 +825,7 @@ const Dashboard = () => {
         farmUuid 
       });
       if (farmRecord?.trial_end_date) setTrialEndDate(farmRecord.trial_end_date);
+      if (farmRecord?.subscription_status) setSubscriptionStatus(farmRecord.subscription_status);
 
       // 2. Parallel Data Fetching (Much Faster)
       const sevenDaysAgo = new Date();
@@ -1501,7 +1503,7 @@ const Dashboard = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          {trialEndDate && (
+          {subscriptionStatus === 'trial' && trialEndDate && (
             <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 px-3 py-1">
               Trial ends {new Date(trialEndDate).toLocaleDateString()}
             </Badge>

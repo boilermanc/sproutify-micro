@@ -3308,15 +3308,18 @@ export default function DailyFlow() {
 
   // Handler for seeding an overdue task (opens the seeding dialog)
   const handleSeedOverdueTask = async (task: DailyTask) => {
-    // Open the seeding dialog with the overdue task
-    setSeedingTask(task);
+    // IMPORTANT: Set dialog not ready to prevent button clicks during transition
+    setSeedingDialogReady(false);
+    // Reset all state BEFORE opening the dialog to prevent stale state flash
+    setIsSoakVariety(false);
+    setAvailableSoakedSeed(null);
     setSelectedBatchId(null);
     setAvailableBatches([]);
     setSeedQuantityCompleted('');
-    setIsSoakVariety(false);
     setMissedStepForSeeding(null);
+    // Now open the dialog AFTER state is reset
+    setSeedingTask(task);
     setLoadingBatches(true);
-    setAvailableSoakedSeed(null);
 
     // Check if recipe requires soaking FIRST, before fetching dry batches
     if (task.recipeId) {
@@ -3350,28 +3353,26 @@ export default function DailyFlow() {
 
             if (soakedSeedData && soakedSeedData.length > 0) {
               setAvailableSoakedSeed(soakedSeedData[0]);
-              setLoadingBatches(false);
-            } else {
-              // No soaked seed available - show alert
-              const varietyName = recipeData.variety_name || task.crop || 'this variety';
-              showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
-              setSeedingTask(null);
-              setLoadingBatches(false);
-              return;
             }
+            // If no soaked seed available, dialog will show "no soaked seed" UI
+            // with options to start soaking, reschedule, or cancel
           }
         } else {
           showNotification('error', 'Could not determine variety for this recipe.');
           setSeedingTask(null);
           setLoadingBatches(false);
+          setSeedingDialogReady(true);
           return;
         }
+        setLoadingBatches(false);
+        setSeedingDialogReady(true);
         return;
       }
     }
 
     // Non-soak variety - fetch available batches for this recipe
     await fetchAvailableBatchesForRecipe(task);
+    setSeedingDialogReady(true);
   };
 
   const handleSkipMissed = async (_task: DailyTask, missedStep: MissedStep) => {
@@ -3391,11 +3392,19 @@ export default function DailyFlow() {
   const handleCompleteMissed = async (task: DailyTask, missedStep: MissedStep) => {
     // Check if this is a seeding step - if so, always open seeding dialog
     const isSeedingStep = (missedStep.description || missedStep.stepName || '').toLowerCase().includes('seed');
-    
+
     if (isSeedingStep) {
+      // IMPORTANT: Set dialog not ready to prevent button clicks during transition
+      setSeedingDialogReady(false);
+      // Reset all state BEFORE opening the dialog to prevent stale state flash
+      setIsSoakVariety(false);
+      setAvailableSoakedSeed(null);
+      setSelectedBatchId(null);
+      setAvailableBatches([]);
+
       // For missed seeding steps, always open the seeding dialog
       // Create a temporary task object for the seeding dialog
-      const seedingTask: DailyTask = {
+      const seedingTaskObj: DailyTask = {
         id: `missed-seeding-${missedStep.stepId}`,
         action: 'Seed',
         crop: task.crop,
@@ -3409,20 +3418,17 @@ export default function DailyFlow() {
         recipeId: task.recipeId,
         stepDescription: missedStep.description || missedStep.stepName,
       };
-      
-      setSeedingTask(seedingTask);
-      setSelectedBatchId(null);
-      setAvailableBatches([]);
+
+      // Now open the dialog AFTER state is reset
+      setSeedingTask(seedingTaskObj);
       // Set default quantity to remaining
-      const remaining = (seedingTask.quantity || 0) - (seedingTask.quantityCompleted || 0);
+      const remaining = (seedingTaskObj.quantity || 0) - (seedingTaskObj.quantityCompleted || 0);
       setSeedQuantityCompleted(remaining.toString());
       // Track the missed step so we can mark it as completed after seeding
       setMissedStepForSeeding({ task, step: missedStep });
-      setIsSoakVariety(false);
-      setAvailableSoakedSeed(null);
 
       // Check if soak variety and fetch data - use recipeId directly (more reliable than requestId)
-      const recipeIdToCheck = seedingTask.recipeId || task.recipeId;
+      const recipeIdToCheck = seedingTaskObj.recipeId || task.recipeId;
       if (recipeIdToCheck) {
         const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
           p_recipe_id: recipeIdToCheck
@@ -3454,27 +3460,25 @@ export default function DailyFlow() {
 
               if (soakedSeedData && soakedSeedData.length > 0) {
                 setAvailableSoakedSeed(soakedSeedData[0]);
-              } else {
-                // No soaked seed available - show alert
-                const varietyName = recipeData.variety_name || task.crop || 'this variety';
-                showNotification('error', `This variety (${varietyName}) requires soaking. Please complete a soak task first.`);
-                setSeedingTask(null);
-                return;
               }
+              // If no soaked seed available, dialog will show "no soaked seed" UI
+              // with options to start soaking, reschedule, or cancel
             }
           } else {
             showNotification('error', 'Could not determine variety for this recipe.');
             setSeedingTask(null);
+            setSeedingDialogReady(true);
             return;
           }
         } else {
           // Non-soak variety - fetch available batches
-          await fetchAvailableBatchesForRecipe(seedingTask);
+          await fetchAvailableBatchesForRecipe(seedingTaskObj);
         }
       } else {
         // No recipe ID available - just fetch batches
-        await fetchAvailableBatchesForRecipe(seedingTask);
+        await fetchAvailableBatchesForRecipe(seedingTaskObj);
       }
+      setSeedingDialogReady(true);
     } else {
       // For other missed steps, just mark as completed normally
       try {

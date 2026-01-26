@@ -990,33 +990,6 @@ export default function DailyFlow() {
     showNotification('error', 'No unassigned trays currently available');
   }, [activeOrderGaps, openAssignModal, showNotification]);
 
-  // Finalize today's deliveries - mark fulfilled as completed, unfulfilled as skipped
-  const handleFinalizeDay = useCallback(async () => {
-    const farmUuid = getFarmUuidFromSession();
-    if (!farmUuid) {
-      showNotification('error', 'No farm selected');
-      return;
-    }
-
-    setIsFinalizingDay(true);
-    try {
-      const result = await finalizeTodaysDeliveries(farmUuid);
-      const total = result.completed + result.skipped;
-      if (total > 0) {
-        showNotification('success', `Day finalized: ${result.completed} completed, ${result.skipped} skipped`);
-        // Reload tasks to refresh the gap display
-        await loadTasks({ suppressLoading: true });
-      } else {
-        showNotification('info', 'No pending deliveries to finalize');
-      }
-    } catch (error: any) {
-      console.error('[DailyFlow] Error finalizing day:', error);
-      showNotification('error', error?.message || 'Failed to finalize day');
-    } finally {
-      setIsFinalizingDay(false);
-    }
-  }, [getFarmUuidFromSession, showNotification, loadTasks]);
-
   const closeAssignModal = useCallback(() => {
     setAssignModalGap(null);
     setAssignableTrays([]);
@@ -1331,6 +1304,33 @@ export default function DailyFlow() {
       console.log('[loadTasks] Refresh completed, flag cleared');
     }
   }, [selectedDate, fetchActionHistory]);
+
+  // Finalize today's deliveries - mark fulfilled as completed, unfulfilled as skipped
+  const handleFinalizeDay = useCallback(async () => {
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      showNotification('error', 'No farm selected');
+      return;
+    }
+
+    setIsFinalizingDay(true);
+    try {
+      const result = await finalizeTodaysDeliveries(farmUuid);
+      const total = result.completed + result.skipped;
+      if (total > 0) {
+        showNotification('success', `Day finalized: ${result.completed} completed, ${result.skipped} skipped`);
+        // Reload tasks to refresh the gap display
+        await loadTasks({ suppressLoading: true });
+      } else {
+        showNotification('info', 'No pending deliveries to finalize');
+      }
+    } catch (error: any) {
+      console.error('[DailyFlow] Error finalizing day:', error);
+      showNotification('error', error?.message || 'Failed to finalize day');
+    } finally {
+      setIsFinalizingDay(false);
+    }
+  }, [getFarmUuidFromSession, showNotification, loadTasks]);
 
   // Cleanup effect to ensure ref is reset and requests are aborted if component unmounts
   useEffect(() => {

@@ -54,7 +54,7 @@ const CheckoutSuccessPage = () => {
             <CheckCircle className="w-10 h-10 text-emerald-600" />
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-            Welcome to the Farmily!
+            Welcome to the Family!
           </h1>
           <p className="text-lg text-gray-600">
             Thank you for subscribing to Sproutify Micro

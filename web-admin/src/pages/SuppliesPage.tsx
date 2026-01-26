@@ -189,6 +189,9 @@ const SuppliesPage = () => {
           }
         }
 
+        // Final rounding for display
+        displayQuantity = Number(displayQuantity.toFixed(2));
+
         return addStatusToSupply({
           id: batchId,
           batch_id: batchId,

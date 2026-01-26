@@ -4078,7 +4078,6 @@ export const completeSoakTaskByRecipe = async (
         task_type: 'soaking',
         task_date: taskDate,
         recipe_id: recipeId,
-        request_id: null,
         status: 'completed',
         completed_at: new Date().toISOString(),
         completed_by: userToUse,

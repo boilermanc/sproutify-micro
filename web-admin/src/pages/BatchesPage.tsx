@@ -477,6 +477,7 @@ const BatchesPage = () => {
         varietyid: parseInt(newBatch.variety_id), // Actual DB column
         vendorid: toNullableNumber(newBatch.vendor_id),
         quantity: parseFloat(newBatch.quantity),
+        unit: newBatch.unit,
         lot_number: newBatch.lot_number,
         purchasedate: newBatch.purchase_date, // Actual DB column
         farm_uuid: farmUuid,
@@ -576,6 +577,7 @@ const BatchesPage = () => {
         varietyid: parseInt(editingBatch.variety_id), // Actual DB column
         vendorid: toNullableNumber(editingBatch.vendor_id),
         quantity: quantityForUpdate,
+        unit: editingBatch.unit,
         lot_number: editingBatch.lot_number || null,
         purchasedate: editingBatch.purchase_date, // Actual DB column
       };

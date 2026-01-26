@@ -3890,9 +3890,10 @@ export const completeSoakTask = async (
     const farmUuid = requestData.farm_uuid;
 
     // Calculate expiration (48 hours from soak date)
-    const soakDate = new Date(taskDate);
-    const expiresAt = new Date(soakDate);
-    expiresAt.setHours(expiresAt.getHours() + 48);
+    // Parse date string as local date to avoid timezone issues
+    const [year, month, day] = taskDate.split('-').map(Number);
+    const soakDate = new Date(year, month - 1, day); // Local midnight
+    const expiresAt = new Date(soakDate.getTime() + 48 * 60 * 60 * 1000);
 
     // Create soaked_seed record
     const { data: soakedSeedData, error: soakedSeedError } = await getSupabaseClient()
@@ -4038,9 +4039,10 @@ export const completeSoakTaskByRecipe = async (
     }
 
     // Calculate expiration (48 hours from soak date)
-    const soakDate = new Date(taskDate);
-    const expiresAt = new Date(soakDate);
-    expiresAt.setHours(expiresAt.getHours() + 48);
+    // Parse date string as local date to avoid timezone issues
+    const [year, month, day] = taskDate.split('-').map(Number);
+    const soakDate = new Date(year, month - 1, day); // Local midnight
+    const expiresAt = new Date(soakDate.getTime() + 48 * 60 * 60 * 1000);
 
     // Create soaked_seed record (without request_id for planting_schedule tasks)
     const { data: soakedSeedData, error: soakedSeedError } = await getSupabaseClient()

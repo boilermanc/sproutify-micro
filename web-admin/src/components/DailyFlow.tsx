@@ -4403,8 +4403,8 @@ export default function DailyFlow() {
                       </div>
                       
                       <div className="mb-4 space-y-1 text-sm text-slate-600">
-                        <p>Soaked: {new Date(soaked.soak_date).toLocaleDateString()}</p>
-                        <p>Expires: {new Date(soaked.expires_at).toLocaleDateString()}</p>
+                        <p>Soaked: {formatLocalDate(soaked.soak_date)}</p>
+                        <p>Expires: {formatLocalDate(soaked.expires_at)}</p>
                         {approxTrays > 0 && (
                           <p className="text-slate-500">~{approxTrays} {approxTrays === 1 ? 'tray' : 'trays'} worth</p>
                         )}
@@ -5439,8 +5439,8 @@ export default function DailyFlow() {
                           {Number(availableSoakedSeed.quantity_remaining).toFixed(2)} {availableSoakedSeed.unit || 'g'} READY TO SEED
                         </p>
                         <p className="text-xs text-green-600 mt-1">
-                          Soaked: {new Date(availableSoakedSeed.soak_date).toLocaleDateString()} |
-                          Expires: {new Date(availableSoakedSeed.expires_at).toLocaleDateString()}
+                          Soaked: {formatLocalDate(availableSoakedSeed.soak_date)} |
+                          Expires: {formatLocalDate(availableSoakedSeed.expires_at)}
                         </p>
                       </div>
                     ) : (

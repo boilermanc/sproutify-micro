@@ -79,6 +79,47 @@ export async function getSowDateForOrder(
   return data?.sow_date || null;
 }
 
+/**
+ * Finalize today's deliveries - mark fulfilled orders as completed, unfulfilled as skipped.
+ * Call this at the end of the day to clear remaining order gaps.
+ */
+export async function finalizeTodaysDeliveries(
+  farmUuid: string
+): Promise<{ completed: number; skipped: number }> {
+  const { data, error } = await getSupabaseClient()
+    .rpc('finalize_todays_deliveries', { p_farm_uuid: farmUuid });
+
+  if (error) {
+    console.error('[finalizeTodaysDeliveries] Error:', error);
+    throw error;
+  }
+
+  // The function returns a single row with completed_count and skipped_count
+  const result = data?.[0] || { completed_count: 0, skipped_count: 0 };
+  return {
+    completed: result.completed_count || 0,
+    skipped: result.skipped_count || 0,
+  };
+}
+
+/**
+ * Skip all past-due order schedules that weren't fulfilled.
+ * Useful for cleaning up old unfulfilled deliveries.
+ */
+export async function skipPastDueSchedules(
+  farmUuid?: string
+): Promise<number> {
+  const { data, error } = await getSupabaseClient()
+    .rpc('auto_skip_past_due_schedules', { p_farm_uuid: farmUuid || null });
+
+  if (error) {
+    console.error('[skipPastDueSchedules] Error:', error);
+    throw error;
+  }
+
+  return data || 0;
+}
+
 
 
 

@@ -87,6 +87,7 @@ import {
 import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
 import type { OrderFulfillmentStatus } from '../services/orderFulfillmentService';
+import { finalizeTodaysDeliveries } from '../services/orderFulfillmentService';
 import type { DailyTask, MissedStep, LossReason } from '../services/dailyFlowService';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -544,6 +545,7 @@ export default function DailyFlow() {
   // Track gaps that have been removed via user action - prevents them from reappearing
   // due to race conditions with pending data fetches
   const removedGapsRef = useRef<Set<string>>(new Set());
+  const [isFinalizingDay, setIsFinalizingDay] = useState(false);
   const [assignModalGap, setAssignModalGap] = useState<OrderGapStatus | null>(null);
   const [assignableTrays, setAssignableTrays] = useState<AssignableTray[]>([]);
   const [isLoadingAssignableTrays, setIsLoadingAssignableTrays] = useState(false);
@@ -987,6 +989,33 @@ export default function DailyFlow() {
     }
     showNotification('error', 'No unassigned trays currently available');
   }, [activeOrderGaps, openAssignModal, showNotification]);
+
+  // Finalize today's deliveries - mark fulfilled as completed, unfulfilled as skipped
+  const handleFinalizeDay = useCallback(async () => {
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      showNotification('error', 'No farm selected');
+      return;
+    }
+
+    setIsFinalizingDay(true);
+    try {
+      const result = await finalizeTodaysDeliveries(farmUuid);
+      const total = result.completed + result.skipped;
+      if (total > 0) {
+        showNotification('success', `Day finalized: ${result.completed} completed, ${result.skipped} skipped`);
+        // Reload tasks to refresh the gap display
+        await loadTasks({ suppressLoading: true });
+      } else {
+        showNotification('info', 'No pending deliveries to finalize');
+      }
+    } catch (error: any) {
+      console.error('[DailyFlow] Error finalizing day:', error);
+      showNotification('error', error?.message || 'Failed to finalize day');
+    } finally {
+      setIsFinalizingDay(false);
+    }
+  }, [getFarmUuidFromSession, showNotification, loadTasks]);
 
   const closeAssignModal = useCallback(() => {
     setAssignModalGap(null);
@@ -3735,6 +3764,15 @@ export default function DailyFlow() {
                 onClick={handleAssignUnassignedGap}
               >
                 Assign Unassigned
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="border border-slate-300 text-slate-700 text-xs uppercase tracking-[0.2em] px-3 py-1 rounded-full hover:bg-slate-100"
+                onClick={handleFinalizeDay}
+                disabled={isFinalizingDay}
+              >
+                {isFinalizingDay ? 'Finalizing...' : 'Finalize Day'}
               </Button>
               </div>
               <div className="mt-4 space-y-3">

@@ -13,7 +13,7 @@ import { Progress } from '@/components/ui/progress';
 import { Building2, User, Bell, Shield, Download, Save, CreditCard, ArrowUpRight, Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { useSubscription, TIER_INFO } from '@/hooks/useSubscription';
-import TestAccountsManager from '@/components/TestAccountsManager';
+
 
 interface FarmData {
   farm_uuid: string;
@@ -855,9 +855,6 @@ const SettingsPage = () => {
           </Button>
         </CardContent>
       </Card>
-
-      {/* Test Accounts Manager - Only visible to admins */}
-      <TestAccountsManager />
 
       {/* Data Export */}
       <Card>

@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   Bell,
-  Mail
+  Mail,
+  Shield
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -42,6 +43,7 @@ const AdminLayout = ({ onLogout }: AdminLayoutProps) => {
     { to: "/admin-portal/notifications", icon: Bell, label: "Notifications" },
     { to: "/admin-portal/email-broadcast", icon: Mail, label: "Email Broadcast" },
     { to: "/admin-portal/email-events", icon: Mail, label: "Email Events" },
+    { to: "/admin-portal/test-accounts", icon: Shield, label: "Test Accounts" },
   ];
 
   return (

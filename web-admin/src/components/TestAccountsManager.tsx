@@ -19,32 +19,23 @@ const TestAccountsManager = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newNotes, setNewNotes] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
   const { addToast } = useToast();
 
   useEffect(() => {
-    checkAdminAndFetchAccounts();
+    fetchAccounts();
   }, []);
 
-  const checkAdminAndFetchAccounts = async () => {
+  const fetchAccounts = async () => {
     setIsLoading(true);
     try {
       const client = getSupabaseClient();
-      const { data: { user } } = await client.auth.getUser();
+      const { data, error } = await client
+        .from('test_accounts')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      // Check if user is a sproutify.app admin
-      const userIsAdmin = user?.email?.toLowerCase().endsWith('@sproutify.app') || false;
-      setIsAdmin(userIsAdmin);
-
-      if (userIsAdmin) {
-        const { data, error } = await client
-          .from('test_accounts')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setTestAccounts(data || []);
-      }
+      if (error) throw error;
+      setTestAccounts(data || []);
     } catch (err) {
       console.error('Error fetching test accounts:', err);
       addToast({
@@ -148,10 +139,6 @@ const TestAccountsManager = () => {
       });
     }
   };
-
-  if (!isAdmin) {
-    return null; // Don't show anything to non-admins
-  }
 
   if (isLoading) {
     return (

@@ -47,6 +47,7 @@ import AdminProducts from './pages/AdminProducts';
 import AdminNotifications from './pages/AdminNotifications';
 import AdminEmailBroadcast from './pages/AdminEmailBroadcast';
 import AdminEmailEvents from './pages/AdminEmailEvents';
+import AdminTestAccounts from './pages/AdminTestAccounts';
 import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import VerifyResetCode from './pages/VerifyResetCode';
@@ -302,6 +303,7 @@ function App() {
             <Route path="notifications" element={<AdminNotifications />} />
             <Route path="email-broadcast" element={<AdminEmailBroadcast />} />
             <Route path="email-events" element={<AdminEmailEvents />} />
+            <Route path="test-accounts" element={<AdminTestAccounts />} />
           </Route>
 
           {/* Regular User Routes */}

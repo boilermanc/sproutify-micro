@@ -34,6 +34,7 @@ import SubscriptionBlockedModal from "./SubscriptionBlockedModal";
 import { useSubscription } from "@/hooks/useSubscription";
 import { getSupabaseClient } from "@/integrations/supabase/client";
 import logoImage from '../assets/sproutify micro.png';
+import sproutifyIcon from '../assets/sproutify_micro_icon.png';
 
 interface LayoutProps {
   onLogout: () => void;
@@ -181,9 +182,7 @@ const Layout = ({ onLogout }: LayoutProps) => {
       >
         <div className="flex h-16 items-center justify-between px-4 border-b border-slate-800">
           <div className={cn("flex items-center gap-2 overflow-hidden", !sidebarOpen && "md:justify-center md:w-full")}>
-            <div className="h-8 w-8 min-w-8 rounded-lg bg-emerald-500 flex items-center justify-center text-white font-bold text-lg">
-              S
-            </div>
+            <img src={sproutifyIcon} alt="Sproutify" className="h-8 w-8 min-w-8 rounded-lg object-cover" />
             <span className={cn("font-bold text-lg whitespace-nowrap transition-all duration-300", 
               !sidebarOpen && "md:hidden"
             )}>

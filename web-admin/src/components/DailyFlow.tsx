@@ -1085,7 +1085,9 @@ export default function DailyFlow() {
   const loadTasks = useCallback(async (options: { suppressLoading?: boolean } = {}) => {
     const showLoading = !options.suppressLoading;
 
-    // Abort any previous in-flight request to prevent stale connection issues
+    // Abort any previous in-flight request — this is the sole concurrency guard.
+    // We intentionally do NOT bail out with an isLoading check because aborting
+    // the previous controller causes that invocation to exit (via AbortError).
     if (loadAbortControllerRef.current) {
       console.log('[loadTasks] Aborting previous request');
       loadAbortControllerRef.current.abort();
@@ -1095,19 +1097,6 @@ export default function DailyFlow() {
     const abortController = new AbortController();
     loadAbortControllerRef.current = abortController;
     const signal = abortController.signal;
-
-    // Check if already loading
-    if (isLoadingTasksRef.current) {
-      const elapsedTime = Date.now() - loadingStartTimeRef.current;
-      // If stuck for more than 30 seconds, force reset
-      if (elapsedTime > 30000) {
-        console.warn('[loadTasks] Refresh appears stuck (>30s), forcing reset');
-        isLoadingTasksRef.current = false;
-      } else {
-        console.warn('[loadTasks] Refresh already in progress, skipping');
-        return;
-      }
-    }
 
     isLoadingTasksRef.current = true;
     loadingStartTimeRef.current = Date.now();
@@ -1129,8 +1118,7 @@ export default function DailyFlow() {
       const gapPromise = farmUuid
         ? fetchOrderGapStatus(farmUuid, signal).catch((error) => {
             if (error.name === 'AbortError') {
-              console.log('[loadTasks] Order gaps fetch aborted');
-              return [];
+              throw error; // Propagate so Promise.all rejects immediately
             }
             console.error('[loadTasks] Error fetching order gaps:', error);
             return [];
@@ -1138,30 +1126,31 @@ export default function DailyFlow() {
         : Promise.resolve<OrderGapStatus[]>([]);
 
       // Force refresh to bypass any caching - pass Date and forceRefresh flag
-      // Add timeout to each promise to prevent hanging
+      // Add timeout to each promise to prevent hanging, but propagate AbortError
       const timeoutPromise = <T,>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> => {
-        return Promise.race([
-          promise,
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
-          )
-        ]).catch((error) => {
-          if (error.name === 'AbortError') {
-            console.log('[loadTasks] Request aborted');
-            return defaultValue;
-          }
-          console.error('[loadTasks] Promise failed or timed out:', error);
-          return defaultValue;
+        let timeoutId: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
         });
+        return Promise.race([promise, timeout])
+          .catch((error) => {
+            // Always propagate AbortError so the caller exits immediately
+            if (error.name === 'AbortError') {
+              throw error;
+            }
+            console.error('[loadTasks] Promise failed or timed out:', error);
+            return defaultValue;
+          })
+          .finally(() => clearTimeout(timeoutId));
       };
 
-      // Increased timeouts to allow slow queries to complete
+      // Timeouts to prevent hanging — AbortError propagates immediately
       const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
-        timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 30000, []), // Increased to 30s
-        timeoutPromise(getActiveTraysCount(signal), 20000, 0), // Increased to 20s
-        timeoutPromise(fetchPassiveTrayStatus(signal), 20000, []), // Increased to 20s
+        timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 30000, []),
+        timeoutPromise(getActiveTraysCount(signal), 20000, 0),
+        timeoutPromise(fetchPassiveTrayStatus(signal), 20000, []),
         gapPromise,
-        timeoutPromise(fetchOverdueSeedingTasks(7, signal), 20000, []), // Increased to 20s
+        timeoutPromise(fetchOverdueSeedingTasks(7, signal), 20000, []),
       ]);
 
       // Note: Even if signal was aborted after fetch completed, we should still use
@@ -1292,13 +1281,23 @@ export default function DailyFlow() {
         setAllAvailableSoakedSeed([]);
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('[loadTasks] Request aborted, exiting cleanly');
+        return; // Don't clear loading flag — the new invocation owns it now
+      }
       console.error('[loadTasks] Error loading tasks:', error);
     } finally {
-      if (showLoading) {
-        setLoading(false);
+      // Only clear the loading flag if this controller is still the active one.
+      // If a newer invocation replaced us, it owns the flag.
+      if (loadAbortControllerRef.current === abortController) {
+        if (showLoading) {
+          setLoading(false);
+        }
+        isLoadingTasksRef.current = false;
+        console.log('[loadTasks] Refresh completed, flag cleared');
+      } else {
+        console.log('[loadTasks] Superseded by newer request, skipping flag clear');
       }
-      isLoadingTasksRef.current = false;
-      console.log('[loadTasks] Refresh completed, flag cleared');
     }
   }, [selectedDate, fetchActionHistory]);
 
@@ -1361,23 +1360,13 @@ export default function DailyFlow() {
           loadAbortControllerRef.current.abort();
           loadAbortControllerRef.current = null;
         }
-        // Reset loading state since we aborted
-        if (isLoadingTasksRef.current) {
-          isLoadingTasksRef.current = false;
-          loadingStartTimeRef.current = 0;
-        }
       } else if (document.visibilityState === 'visible') {
-        // Tab is now visible - trigger a fresh load after a longer delay
-        // Only trigger if we're not already loading
-        console.log('[loadTasks] Tab visible, scheduling fresh load if not already loading');
+        // Tab is now visible - schedule a fresh load.
+        // loadTasks handles concurrency via abort, so no need to check isLoadingTasksRef.
+        console.log('[loadTasks] Tab visible, scheduling fresh load');
         visibilityTimeout = setTimeout(() => {
-          // Double-check we're not already loading before triggering
-          if (!isLoadingTasksRef.current) {
-            loadTasks({ suppressLoading: true });
-          } else {
-            console.log('[loadTasks] Skipping visibility load - already loading');
-          }
-        }, 2000); // Increased delay to 2 seconds to allow session refresh + any ongoing loads to complete
+          loadTasks({ suppressLoading: true });
+        }, 2000);
       }
     };
 
@@ -1441,13 +1430,9 @@ export default function DailyFlow() {
 
   useEffect(() => {
     loadTasks();
-    // Refresh every 5 minutes, but only if not currently loading
+    // Refresh every 5 minutes — loadTasks handles concurrency via abort
     const interval = setInterval(() => {
-      if (!isLoadingTasksRef.current) {
-        loadTasks({ suppressLoading: true });
-      } else {
-        console.log('[loadTasks] Skipping interval refresh - already loading');
-      }
+      loadTasks({ suppressLoading: true });
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadTasks]);

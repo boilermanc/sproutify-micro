@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Loader2, Shield } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, Trash2, Loader2, Shield, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
-import { getSupabaseClient } from '@/integrations/supabase/client';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 interface TestAccount {
   id: number;
@@ -13,17 +13,58 @@ interface TestAccount {
   created_at: string;
 }
 
+interface ProfileResult {
+  id: string;
+  email: string;
+  name: string | null;
+  farms: { farmname: string }[] | null;
+}
+
 const TestAccountsManager = () => {
   const [testAccounts, setTestAccounts] = useState<TestAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
-  const [newNotes, setNewNotes] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ProfileResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const { addToast } = useToast();
 
   useEffect(() => {
     fetchAccounts();
   }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Debounced search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setShowResults(false);
+      return;
+    }
+
+    debounceRef.current = setTimeout(() => {
+      searchProfiles(searchQuery.trim());
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery]);
 
   const fetchAccounts = async () => {
     setIsLoading(true);
@@ -48,36 +89,50 @@ const TestAccountsManager = () => {
     }
   };
 
-  const handleAddAccount = async () => {
-    if (!newEmail.trim()) {
-      addToast({
-        type: 'error',
-        title: 'Error',
-        description: 'Please enter an email address',
-      });
-      return;
-    }
+  const searchProfiles = async (query: string) => {
+    setIsSearching(true);
+    try {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('profile')
+        .select('id, email, name, farms(farmname)')
+        .or(`email.ilike.%${query}%,name.ilike.%${query}%`)
+        .limit(10);
 
-    // Basic email validation
-    if (!newEmail.includes('@')) {
-      addToast({
-        type: 'error',
-        title: 'Error',
-        description: 'Please enter a valid email address',
-      });
-      return;
-    }
+      if (error) throw error;
 
+      // Filter out emails already in test accounts
+      const existingEmails = new Set(testAccounts.map(a => a.email.toLowerCase()));
+      const filtered = (data || []).filter(
+        (p: any) => !existingEmails.has(p.email?.toLowerCase())
+      );
+
+      setSearchResults(filtered);
+      setShowResults(true);
+    } catch (err) {
+      console.error('Error searching profiles:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleAddAccount = async (profile: ProfileResult) => {
     setIsSaving(true);
+    setShowResults(false);
+    setSearchQuery('');
+
     try {
       const client = getSupabaseClient();
       const { data: { user } } = await client.auth.getUser();
 
+      const farmName = profile.farms?.[0]?.farmname;
+      const notes = [profile.name, farmName].filter(Boolean).join(' - ') || null;
+
       const { data, error } = await client
         .from('test_accounts')
         .insert({
-          email: newEmail.toLowerCase().trim(),
-          notes: newNotes.trim() || null,
+          email: profile.email.toLowerCase().trim(),
+          notes,
           created_by: user?.id,
         })
         .select()
@@ -91,13 +146,11 @@ const TestAccountsManager = () => {
       }
 
       setTestAccounts([data, ...testAccounts]);
-      setNewEmail('');
-      setNewNotes('');
 
       addToast({
         type: 'success',
         title: 'Success',
-        description: 'Test account added successfully',
+        description: `${profile.email} added as a test account`,
       });
     } catch (err: any) {
       console.error('Error adding test account:', err);
@@ -158,38 +211,63 @@ const TestAccountsManager = () => {
           <CardTitle>Test Accounts</CardTitle>
         </div>
         <CardDescription>
-          Manage accounts that bypass subscription restrictions. These accounts can access the app even with an expired subscription.
+          Manage accounts that bypass subscription restrictions. Search for registered users by name or email to add them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Add new account form */}
-        <div className="flex gap-2">
-          <Input
-            placeholder="Email address"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            className="flex-1"
-          />
-          <Input
-            placeholder="Notes (optional)"
-            value={newNotes}
-            onChange={(e) => setNewNotes(e.target.value)}
-            className="flex-1"
-          />
-          <Button onClick={handleAddAccount} disabled={isSaving}>
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
+        {/* Search for users */}
+        <div ref={searchRef} className="relative">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search users by name or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => searchResults.length > 0 && setShowResults(true)}
+              className="pl-9"
+              disabled={isSaving}
+            />
+            {isSearching && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
             )}
-          </Button>
+          </div>
+
+          {/* Search results dropdown */}
+          {showResults && searchResults.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+              {searchResults.map((profile) => {
+                const farmName = profile.farms?.[0]?.farmname;
+                return (
+                  <button
+                    key={profile.id}
+                    onClick={() => handleAddAccount(profile)}
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 text-left border-b last:border-b-0 border-slate-100"
+                  >
+                    <div>
+                      <p className="font-medium text-sm">{profile.email}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {[profile.name, farmName].filter(Boolean).join(' · ') || 'No name'}
+                      </p>
+                    </div>
+                    <UserPlus className="h-4 w-4 text-emerald-500 shrink-0 ml-2" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {showResults && searchQuery.trim().length >= 2 && !isSearching && searchResults.length === 0 && (
+            <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg p-4">
+              <p className="text-sm text-muted-foreground text-center">No matching users found</p>
+            </div>
+          )}
         </div>
 
         {/* List of test accounts */}
         <div className="space-y-2">
           {testAccounts.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No test accounts configured. Add an email above.
+              No test accounts configured. Search for a user above to add them.
             </p>
           ) : (
             testAccounts.map((account) => (

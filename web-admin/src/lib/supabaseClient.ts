@@ -75,7 +75,7 @@ if (typeof document !== 'undefined' && supabase) {
       }
 
       // If tab was hidden for more than 2 minutes, do a health check
-      if (timeSinceHidden > 2 * 60 * 1000) {
+      if (timeSinceHidden > 10 * 1000) {
         console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - checking connection health');
 
         try {

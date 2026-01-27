@@ -26,6 +26,22 @@ const supabaseOptions = {
       return fn();
     },
   },
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+  },
+  global: {
+    fetch: (...args: Parameters<typeof fetch>) => {
+      return fetch(...args).catch((err) => {
+        console.error('[Supabase] Fetch failed, connection may be stale:', err);
+        throw err;
+      });
+    },
+  },
+  db: {
+    schema: 'public',
+  },
 };
 
 export const supabase: SupabaseClient | null =
@@ -40,6 +56,44 @@ export function getSupabaseClient(): SupabaseClient {
     throw new Error('Supabase client is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.');
   }
   return supabase;
+}
+
+// Handle tab visibility changes to recover stale connections
+if (typeof document !== 'undefined' && supabase) {
+  let lastVisibilityChange = Date.now();
+
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      const timeSinceHidden = Date.now() - lastVisibilityChange;
+      const minutesHidden = Math.round(timeSinceHidden / 1000 / 60);
+
+      // If tab was hidden for more than 30 minutes, force a full reload
+      // This handles overnight idle where connections are completely stale
+      if (timeSinceHidden > 30 * 60 * 1000) {
+        console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - forcing page reload');
+        window.location.reload();
+        return;
+      }
+
+      // If tab was hidden for more than 5 minutes, refresh the session
+      if (timeSinceHidden > 5 * 60 * 1000) {
+        console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - refreshing session');
+
+        try {
+          const { error } = await supabase.auth.refreshSession();
+          if (error) {
+            console.error('[Supabase] Session refresh failed:', error);
+          } else {
+            console.log('[Supabase] Session refreshed successfully');
+          }
+        } catch (err) {
+          console.error('[Supabase] Session refresh error:', err);
+        }
+      }
+    } else {
+      lastVisibilityChange = Date.now();
+    }
+  });
 }
 
 export type Database = {
@@ -182,4 +236,3 @@ export type Database = {
     };
   };
 };
-

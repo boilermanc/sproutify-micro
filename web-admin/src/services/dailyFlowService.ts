@@ -905,15 +905,44 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         }
         
         if (!scheduleError && allSchedules) {
-          
-          // Process schedules for seeding and soaking tasks
+          // Aggregate schedules by recipe_id + sow_date so quantity reflects total trays needed
+          const aggregatedSchedules = new Map<string, any>();
           for (const schedule of allSchedules) {
             if (!schedule.sow_date || !schedule.recipe_id) continue;
-            
+
             const sowDate = parseLocalDate(schedule.sow_date);
             if (!sowDate) continue;
-            
+
             const sowDateStr = formatDateString(sowDate);
+            const key = `${schedule.recipe_id}-${sowDateStr}`;
+            const traysNeeded = Math.max(1, Number(schedule.trays_needed ?? schedule.quantity ?? 0) || 1);
+            const existing = aggregatedSchedules.get(key);
+
+            if (existing) {
+              existing.trays_needed += traysNeeded;
+              // Preserve the first non-null metadata values
+              existing.customer_name = existing.customer_name || schedule.customer_name || null;
+              existing.customer_id = existing.customer_id ?? schedule.customer_id ?? null;
+              existing.standing_order_id = existing.standing_order_id ?? schedule.standing_order_id ?? null;
+              existing.order_schedule_id = existing.order_schedule_id ?? schedule.order_schedule_id ?? schedule.schedule_id ?? null;
+              existing.delivery_date = existing.delivery_date ?? schedule.delivery_date ?? null;
+            } else {
+              aggregatedSchedules.set(key, {
+                ...schedule,
+                sowDate,
+                sowDateStr,
+                trays_needed: traysNeeded,
+                order_schedule_id: schedule.order_schedule_id ?? schedule.schedule_id ?? null,
+              });
+            }
+          }
+          
+          // Process aggregated schedules for seeding and soaking tasks
+          for (const schedule of aggregatedSchedules.values()) {
+            const sowDate: Date | null = schedule.sowDate || parseLocalDate(schedule.sow_date);
+            if (!sowDate) continue;
+
+            const sowDateStr: string = schedule.sowDateStr || formatDateString(sowDate);
             const soakDuration = soakDurationByRecipe[schedule.recipe_id] || 0;
             const soakDate = new Date(sowDate);
             soakDate.setDate(soakDate.getDate() - soakDuration);
@@ -940,7 +969,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
                 // Get germination weight info for this recipe
                 const germinationWeight = germinationWeightMapForSchedule[schedule.recipe_id];
-                const orderScheduleId = schedule.schedule_id ?? (schedule as any).order_schedule_id ?? undefined;
+                const orderScheduleId = schedule.order_schedule_id ?? schedule.schedule_id ?? undefined;
                 seedingTasks.push({
                   id: `seed-${schedule.recipe_id}-${schedule.recipe_name}-${targetDateStr}`,
                   action: 'Seed',

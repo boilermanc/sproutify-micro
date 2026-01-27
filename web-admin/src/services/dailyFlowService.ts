@@ -4829,43 +4829,33 @@ export const fetchOverdueSeedingTasks = async (
       // Calculate days overdue
       const daysOverdue = Math.floor((today.getTime() - group.sowDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Distribute remaining across schedules (prefer keeping individual schedule context)
-      let remainingToAssign = remaining;
-      for (const schedule of group.schedules) {
-        if (remainingToAssign <= 0) break;
+      // Create a single aggregated task for this recipe+sow_date group
+      const firstSchedule = group.schedules[0];
+      const varietyName = varietyNameMap[firstSchedule.recipe_id] || firstSchedule.recipe_name || 'Unknown';
 
-        const scheduleTrays = schedule.trays_needed || 1;
-        const traysForThisSchedule = Math.min(scheduleTrays, remainingToAssign);
-        remainingToAssign -= traysForThisSchedule;
-
-        const varietyName = varietyNameMap[schedule.recipe_id] || schedule.recipe_name || 'Unknown';
-
-        // Use schedule_id if available, otherwise create unique id using array length
-        const uniqueId = schedule.schedule_id || `${schedule.recipe_id}-${overdueTasks.length}`;
-        overdueTasks.push({
-          id: `overdue-seed-${uniqueId}-${group.sowDateStr}`,
-          action: 'Seed',
-          crop: varietyName,
-          batchId: 'N/A',
-          location: 'Not set',
-          dayCurrent: 0,
-          dayTotal: 0,
-          trays: traysForThisSchedule,
-          status: 'urgent',
-          trayIds: [],
-          recipeId: schedule.recipe_id,
-          taskSource: 'planting_schedule',
-          quantity: traysForThisSchedule,
-          customerName: schedule.customer_name || null,
-          customerId: schedule.customer_id ?? undefined,
-          standingOrderId: schedule.standing_order_id ?? undefined,
-          orderScheduleId: schedule.schedule_id ?? undefined,
-          deliveryDate: schedule.delivery_date || null,
-          isOverdue: true,
-          daysOverdue,
-          sowDate: group.sowDateStr,
-        });
-      }
+      overdueTasks.push({
+        id: `overdue-seed-${key}-${group.sowDateStr}`,
+        action: 'Seed',
+        crop: varietyName,
+        batchId: 'N/A',
+        location: 'Not set',
+        dayCurrent: 0,
+        dayTotal: 0,
+        trays: remaining,
+        status: 'urgent',
+        trayIds: [],
+        recipeId: firstSchedule.recipe_id,
+        taskSource: 'planting_schedule',
+        quantity: remaining,
+        customerName: firstSchedule.customer_name || null,
+        customerId: firstSchedule.customer_id ?? undefined,
+        standingOrderId: firstSchedule.standing_order_id ?? undefined,
+        orderScheduleId: firstSchedule.schedule_id ?? undefined,
+        deliveryDate: firstSchedule.delivery_date || null,
+        isOverdue: true,
+        daysOverdue,
+        sowDate: group.sowDateStr,
+      });
     }
 
     // Sort by sow date (most recent first)

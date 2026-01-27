@@ -915,7 +915,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
 
             const sowDateStr = formatDateString(sowDate);
             const key = `${schedule.recipe_id}-${sowDateStr}`;
-            const traysNeeded = Math.max(1, Number(schedule.trays_needed ?? schedule.quantity ?? 0) || 1);
+            const traysNeeded = Math.max(1, Number(schedule.trays_needed ?? 0) || 1);
             const existing = aggregatedSchedules.get(key);
 
             if (existing) {
@@ -924,7 +924,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
               existing.customer_name = existing.customer_name || schedule.customer_name || null;
               existing.customer_id = existing.customer_id ?? schedule.customer_id ?? null;
               existing.standing_order_id = existing.standing_order_id ?? schedule.standing_order_id ?? null;
-              existing.order_schedule_id = existing.order_schedule_id ?? schedule.order_schedule_id ?? schedule.schedule_id ?? null;
+              existing.order_schedule_id = existing.order_schedule_id ?? schedule.schedule_id ?? null;
               existing.delivery_date = existing.delivery_date ?? schedule.delivery_date ?? null;
             } else {
               aggregatedSchedules.set(key, {
@@ -932,7 +932,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                 sowDate,
                 sowDateStr,
                 trays_needed: traysNeeded,
-                order_schedule_id: schedule.order_schedule_id ?? schedule.schedule_id ?? null,
+                order_schedule_id: schedule.schedule_id ?? null,
               });
             }
           }

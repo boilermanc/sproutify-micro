@@ -40,7 +40,7 @@ const supabaseOptions = {
     },
   },
   db: {
-    schema: 'public',
+    schema: 'public' as const,
   },
 };
 

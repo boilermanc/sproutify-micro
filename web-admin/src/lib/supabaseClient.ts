@@ -67,27 +67,38 @@ if (typeof document !== 'undefined' && supabase) {
       const timeSinceHidden = Date.now() - lastVisibilityChange;
       const minutesHidden = Math.round(timeSinceHidden / 1000 / 60);
 
-      // If tab was hidden for more than 30 minutes, force a full reload
-      // This handles overnight idle where connections are completely stale
+      // If tab was hidden for more than 30 minutes, force a full reload immediately
       if (timeSinceHidden > 30 * 60 * 1000) {
         console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - forcing page reload');
         window.location.reload();
         return;
       }
 
-      // If tab was hidden for more than 5 minutes, refresh the session
-      if (timeSinceHidden > 5 * 60 * 1000) {
-        console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - refreshing session');
+      // If tab was hidden for more than 2 minutes, do a health check
+      if (timeSinceHidden > 2 * 60 * 1000) {
+        console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - checking connection health');
 
         try {
+          // Race between a simple query and a 3-second timeout
+          const healthCheck = Promise.race([
+            supabase.from('farms').select('farm_uuid').limit(1).single(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Health check timeout')), 3000)
+            )
+          ]);
+
+          await healthCheck;
+          console.log('[Supabase] Connection healthy');
+
+          // Connection is healthy, just refresh the session
           const { error } = await supabase.auth.refreshSession();
           if (error) {
             console.error('[Supabase] Session refresh failed:', error);
-          } else {
-            console.log('[Supabase] Session refreshed successfully');
           }
         } catch (err) {
-          console.error('[Supabase] Session refresh error:', err);
+          console.error('[Supabase] Connection unhealthy, forcing reload:', err);
+          window.location.reload();
+          return;
         }
       }
     } else {

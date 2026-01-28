@@ -7,7 +7,10 @@ import {
   LogOut,
   Menu,
   X,
-  Monitor
+  Monitor,
+  Leaf,
+  Users,
+  Tag
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -112,6 +115,45 @@ const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
       {/* Mobile dropdown menu */}
       {mobileMenuOpen && (
         <div className="md:hidden absolute top-16 right-0 left-0 z-30 bg-white border-b border-slate-200 shadow-lg">
+          {/* Secondary Navigation */}
+          <NavLink
+            to="/catalog"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-100 border-b border-slate-100",
+                isActive && "text-emerald-600 bg-emerald-50"
+              )
+            }
+          >
+            <Leaf className="h-5 w-5" />
+            <span>Crop Catalog</span>
+          </NavLink>
+          <NavLink
+            to="/customers"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-100 border-b border-slate-100",
+                isActive && "text-blue-600 bg-blue-50"
+              )
+            }
+          >
+            <Users className="h-5 w-5" />
+            <span>Customers</span>
+          </NavLink>
+          <NavLink
+            to="/labels"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-100 border-b border-slate-100",
+                isActive && "text-purple-600 bg-purple-50"
+              )
+            }
+          >
+            <Tag className="h-5 w-5" />
+            <span>Print Labels</span>
+          </NavLink>
+
+          {/* Actions */}
           {canSwitchToDesktop && (
             <Button
               variant="ghost"

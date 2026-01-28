@@ -32,7 +32,7 @@ import DailyFlow from './components/DailyFlow';
 import GrowingMicrogreens from './components/GrowingMicrogreens';
 import Layout from './components/Layout';
 import FarmHandLayout from './components/FarmHandLayout';
-import { FarmHandTasks, FarmHandSeed, FarmHandHarvest } from './components/farmhand';
+import { FarmHandTasks, FarmHandSeed, FarmHandHarvest, FarmHandCatalog, FarmHandCustomers, FarmHandLabels } from './components/farmhand';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
 import HelpCenterPage from './pages/HelpCenterPage';
@@ -384,6 +384,60 @@ function App() {
             )
           }>
             <Route index element={<FarmHandHarvest />} />
+          </Route>
+
+          <Route path="/catalog" element={
+            isAuthenticated && useSimplifiedLayout ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/recipes" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<FarmHandCatalog />} />
+          </Route>
+
+          <Route path="/customers" element={
+            isAuthenticated && useSimplifiedLayout ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/customers-page" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<FarmHandCustomers />} />
+          </Route>
+
+          <Route path="/labels" element={
+            isAuthenticated && useSimplifiedLayout ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/trays" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<FarmHandLabels />} />
           </Route>
 
           {/* Full Dashboard Routes - For desktop Owners/Farm Managers */}

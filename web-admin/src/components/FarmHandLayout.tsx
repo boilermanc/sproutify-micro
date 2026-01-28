@@ -6,10 +6,12 @@ import {
   Scissors,
   LogOut,
   Menu,
-  X
+  X,
+  Monitor
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from '@/hooks/useIsMobile';
 import sproutifyIcon from '../assets/sproutify_micro_icon.png';
 
 interface FarmHandLayoutProps {
@@ -18,14 +20,17 @@ interface FarmHandLayoutProps {
 
 const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
   const [farmName, setFarmName] = useState('');
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const { isMobile, setDesktopViewPreference } = useIsMobile();
 
   useEffect(() => {
     const sessionData = localStorage.getItem('sproutify_session');
     if (sessionData) {
-      const { farmName: name } = JSON.parse(sessionData);
+      const { farmName: name, role } = JSON.parse(sessionData);
       setFarmName(name || '');
+      setUserRole(role || null);
     }
   }, []);
 
@@ -38,6 +43,17 @@ const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
     localStorage.removeItem('sproutify_session');
     onLogout();
   };
+
+  const handleSwitchToDesktop = () => {
+    setDesktopViewPreference(true);
+    // Navigate to desktop route and reload to apply layout change
+    window.location.href = '/admin/';
+  };
+
+  // Only show "Switch to Desktop" for mobile users who aren't Farm Hands
+  // Farm Hands always see simplified layout regardless of device
+  const isFarmHand = userRole?.toLowerCase() === 'farm hand';
+  const canSwitchToDesktop = isMobile && !isFarmHand;
 
   const navItems = [
     { to: "/tasks", icon: Calendar, label: "Tasks" },
@@ -58,16 +74,29 @@ const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
           )}
         </div>
 
-        {/* Desktop logout */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="hidden md:flex items-center gap-2 text-slate-600 hover:text-red-600 hover:bg-red-50"
-          onClick={handleLogout}
-        >
-          <LogOut className="h-4 w-4" />
-          <span>Logout</span>
-        </Button>
+        {/* Desktop actions */}
+        <div className="hidden md:flex items-center gap-2">
+          {canSwitchToDesktop && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100"
+              onClick={handleSwitchToDesktop}
+            >
+              <Monitor className="h-4 w-4" />
+              <span>Desktop View</span>
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex items-center gap-2 text-slate-600 hover:text-red-600 hover:bg-red-50"
+            onClick={handleLogout}
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Logout</span>
+          </Button>
+        </div>
 
         {/* Mobile menu button */}
         <Button
@@ -83,6 +112,16 @@ const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
       {/* Mobile dropdown menu */}
       {mobileMenuOpen && (
         <div className="md:hidden absolute top-16 right-0 left-0 z-30 bg-white border-b border-slate-200 shadow-lg">
+          {canSwitchToDesktop && (
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-3 px-4 py-3 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-none border-b border-slate-100"
+              onClick={handleSwitchToDesktop}
+            >
+              <Monitor className="h-5 w-5" />
+              <span>Switch to Desktop View</span>
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 px-4 py-3 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-none"

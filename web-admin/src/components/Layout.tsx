@@ -24,7 +24,8 @@ import {
   BarChart3,
   Globe,
   Plus,
-  HelpCircle
+  HelpCircle,
+  Smartphone
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ import NotificationBell from "./NotificationBell";
 import TrialBanner from "./onboarding/TrialBanner";
 import SubscriptionBlockedModal from "./SubscriptionBlockedModal";
 import { useSubscription } from "@/hooks/useSubscription";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { getSupabaseClient } from "@/integrations/supabase/client";
 import logoImage from '../assets/sproutify micro.png';
 import sproutifyIcon from '../assets/sproutify_micro_icon.png';
@@ -50,6 +52,14 @@ const Layout = ({ onLogout }: LayoutProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { subscription, isLoading: subscriptionLoading, getTrialDaysRemaining } = useSubscription();
+  const { isMobile, prefersDesktopView, setDesktopViewPreference } = useIsMobile();
+
+  // Handler to switch back to mobile view
+  const handleSwitchToMobile = () => {
+    setDesktopViewPreference(false);
+    // Navigate to mobile route and reload to apply layout change
+    window.location.href = '/admin/tasks';
+  };
 
   useEffect(() => {
     const sessionData = localStorage.getItem('sproutify_session');
@@ -306,6 +316,19 @@ const Layout = ({ onLogout }: LayoutProps) => {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {/* Show "Switch to Mobile View" for users who overrode mobile detection */}
+            {isMobile && prefersDesktopView && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden sm:flex items-center gap-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100"
+                onClick={handleSwitchToMobile}
+                title="Switch to mobile-optimized view"
+              >
+                <Smartphone className="h-4 w-4" />
+                <span className="hidden lg:inline">Mobile View</span>
+              </Button>
+            )}
             <NotificationBell />
           </div>
         </div>

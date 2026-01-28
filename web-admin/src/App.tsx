@@ -53,6 +53,7 @@ import BetaSignupPage from './pages/BetaSignupPage';
 import PasswordResetPage from './pages/PasswordResetPage';
 import VerifyResetCode from './pages/VerifyResetCode';
 import { ToastProvider } from './components/ui/toast';
+import { useIsMobile } from './hooks/useIsMobile';
 import './App.css';
 
 const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
@@ -82,8 +83,12 @@ function App() {
   const [session, setSession] = useState<SproutifySession | null>(null);
   const hasCheckedSession = useRef(false);
 
-  // Acknowledge session state exists for future component consumption
-  void session;
+  // Mobile detection - mobile users get simplified FarmHandLayout regardless of role
+  const { shouldUseMobileLayout } = useIsMobile();
+
+  // Determine if user should see the simplified mobile/farm-hand layout
+  // True if: mobile device (not overridden) OR Farm Hand role on any device
+  const useSimplifiedLayout = shouldUseMobileLayout || isFarmHandRole(session?.role);
 
   useEffect(() => {
     let isMounted = true;
@@ -316,7 +321,7 @@ function App() {
           {/* Regular User Routes */}
           <Route path="/login" element={
             isAuthenticated
-              ? <Navigate to={isFarmHandRole(session?.role) ? "/tasks" : "/"} />
+              ? <Navigate to={useSimplifiedLayout ? "/tasks" : "/"} />
               : <LoginPage onLogin={() => setIsAuthenticated(true)} />
           } />
 
@@ -325,9 +330,9 @@ function App() {
             isAuthenticated ? <CheckoutSuccessPage /> : <Navigate to="/login" />
           } />
 
-          {/* Farm Hand Routes - Simplified layout with limited access */}
+          {/* Simplified Layout Routes - For mobile users and Farm Hands */}
           <Route path="/tasks" element={
-            isAuthenticated && isFarmHandRole(session?.role) ? (
+            isAuthenticated && useSimplifiedLayout ? (
               <FarmHandLayout onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
@@ -345,7 +350,7 @@ function App() {
           </Route>
 
           <Route path="/seed" element={
-            isAuthenticated && isFarmHandRole(session?.role) ? (
+            isAuthenticated && useSimplifiedLayout ? (
               <FarmHandLayout onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
@@ -363,7 +368,7 @@ function App() {
           </Route>
 
           <Route path="/harvest" element={
-            isAuthenticated && isFarmHandRole(session?.role) ? (
+            isAuthenticated && useSimplifiedLayout ? (
               <FarmHandLayout onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
@@ -380,10 +385,10 @@ function App() {
             <Route index element={<DailyFlow />} />
           </Route>
 
-          {/* Owner/Farm Manager Routes - Full dashboard access */}
+          {/* Full Dashboard Routes - For desktop Owners/Farm Managers */}
           <Route path="/" element={
             isAuthenticated ? (
-              isFarmHandRole(session?.role) ? (
+              useSimplifiedLayout ? (
                 <Navigate to="/tasks" />
               ) : (
                 <Layout onLogout={async () => {
@@ -427,8 +432,8 @@ function App() {
             <Route path="help/:category/:slug" element={<HelpCenterPage />} />
           </Route>
         </Routes>
-        {/* Sage AI Chat - Only for Owners and Farm Managers */}
-        {isAuthenticated && !isFarmHandRole(session?.role) && <SageChat />}
+        {/* Sage AI Chat - Only for desktop Owners and Farm Managers */}
+        {isAuthenticated && !useSimplifiedLayout && <SageChat />}
       </Router>
     </ToastProvider>
   );

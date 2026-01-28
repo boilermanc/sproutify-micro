@@ -1,0 +1,25 @@
+{
+  "name": "Sproutify Micro",
+  "short_name": "Sproutify",
+  "description": "Microgreen farm management made simple",
+  "start_url": "/admin/tasks",
+  "scope": "/admin/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#059669",
+  "background_color": "#f8fafc",
+  "icons": [
+    {
+      "src": "/sproutify_micro_icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/sproutify_micro_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -31,6 +31,7 @@ import PricingPage from './pages/PricingPage';
 import DailyFlow from './components/DailyFlow';
 import GrowingMicrogreens from './components/GrowingMicrogreens';
 import Layout from './components/Layout';
+import FarmHandLayout from './components/FarmHandLayout';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
 import HelpCenterPage from './pages/HelpCenterPage';
@@ -64,6 +65,17 @@ const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): bo
   } catch {
     return false;
   }
+};
+
+// Helper to check if user role is Farm Hand
+const isFarmHandRole = (role: string | null | undefined): boolean => {
+  if (!role) return false;
+  return role.toLowerCase() === 'farm hand';
+};
+
+// Helper to check if role requires onboarding (null/undefined role)
+const needsOnboarding = (role: string | null | undefined): boolean => {
+  return role === null || role === undefined || role.trim() === '';
 };
 
 function App() {
@@ -308,7 +320,9 @@ function App() {
 
           {/* Regular User Routes */}
           <Route path="/login" element={
-            isAuthenticated ? <Navigate to="/" /> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
+            isAuthenticated
+              ? <Navigate to={isFarmHandRole(session?.role) ? "/tasks" : "/"} />
+              : <LoginPage onLogin={() => setIsAuthenticated(true)} />
           } />
 
           {/* Checkout Success - standalone page without Layout */}
@@ -316,14 +330,78 @@ function App() {
             isAuthenticated ? <CheckoutSuccessPage /> : <Navigate to="/login" />
           } />
 
+          {/* Farm Hand Routes - Simplified layout with limited access */}
+          <Route path="/tasks" element={
+            isAuthenticated && isFarmHandRole(session?.role) ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/flow" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<DailyFlow />} />
+          </Route>
+
+          <Route path="/seed" element={
+            isAuthenticated && isFarmHandRole(session?.role) ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/trays" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<TraysPage />} />
+          </Route>
+
+          <Route path="/harvest" element={
+            isAuthenticated && isFarmHandRole(session?.role) ? (
+              <FarmHandLayout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : isAuthenticated ? (
+              <Navigate to="/flow" />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }>
+            <Route index element={<DailyFlow />} />
+          </Route>
+
+          {/* Owner/Farm Manager Routes - Full dashboard access */}
           <Route path="/" element={
-            isAuthenticated ? <Layout onLogout={async () => {
-              clearSupabaseAuthStorage();
-              if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
-              localStorage.removeItem('sproutify_session');
-              setSession(null);
-              setIsAuthenticated(false);
-            }} /> : <Navigate to="/login" />
+            isAuthenticated ? (
+              isFarmHandRole(session?.role) ? (
+                <Navigate to="/tasks" />
+              ) : (
+                <Layout onLogout={async () => {
+                  clearSupabaseAuthStorage();
+                  if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                  localStorage.removeItem('sproutify_session');
+                  setSession(null);
+                  setIsAuthenticated(false);
+                }} />
+              )
+            ) : (
+              <Navigate to="/login" />
+            )
           }>
             <Route index element={<Dashboard />} />
             <Route path="users" element={<UsersPage />} />
@@ -354,7 +432,8 @@ function App() {
             <Route path="help/:category/:slug" element={<HelpCenterPage />} />
           </Route>
         </Routes>
-        {isAuthenticated && <SageChat />}
+        {/* Sage AI Chat - Only for Owners and Farm Managers */}
+        {isAuthenticated && !isFarmHandRole(session?.role) && <SageChat />}
       </Router>
     </ToastProvider>
   );

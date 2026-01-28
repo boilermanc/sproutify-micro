@@ -18,6 +18,12 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
+// Helper to determine the redirect path based on user role
+const getRedirectPath = (role: string | null | undefined): string => {
+  if (!role) return '/';
+  return role.toLowerCase() === 'farm hand' ? '/tasks' : '/';
+};
+
 interface LoginPageProps {
   onLogin: () => void;
 }
@@ -74,12 +80,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
 
       // Dispatch custom event to notify Dashboard that session is ready
-      window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
-        detail: { farmUuid: sessionPayload.farmUuid } 
+      window.dispatchEvent(new CustomEvent('sproutify:session-ready', {
+        detail: { farmUuid: sessionPayload.farmUuid }
       }));
 
       onLogin();
-      navigate('/', { replace: true });
+      navigate(getRedirectPath(sessionPayload.role), { replace: true });
     } catch (error) {
       console.error('Token login error:', error);
       setError(
@@ -117,14 +123,14 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
               userId: profile.id,
             });
             localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-            
+
             // Dispatch custom event to notify Dashboard that session is ready
-            window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
-              detail: { farmUuid: sessionPayload.farmUuid } 
+            window.dispatchEvent(new CustomEvent('sproutify:session-ready', {
+              detail: { farmUuid: sessionPayload.farmUuid }
             }));
-            
+
             onLogin();
-            navigate('/');
+            navigate(getRedirectPath(sessionPayload.role));
             return;
           }
         }
@@ -143,14 +149,14 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
             userId: user.id,
           });
           localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-          
+
           // Dispatch custom event to notify Dashboard that session is ready
-          window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
-            detail: { farmUuid: sessionPayload.farmUuid } 
+          window.dispatchEvent(new CustomEvent('sproutify:session-ready', {
+            detail: { farmUuid: sessionPayload.farmUuid }
           }));
-          
+
           onLogin();
-          navigate('/');
+          navigate(getRedirectPath(sessionPayload.role));
           return;
         }
       }
@@ -168,10 +174,11 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
   handleAutoLoginRef.current = handleAutoLogin;
 
   useEffect(() => {
-    const session = localStorage.getItem('sproutify_session');
-    if (session) {
+    const sessionStr = localStorage.getItem('sproutify_session');
+    if (sessionStr) {
+      const session = JSON.parse(sessionStr);
       onLogin();
-      navigate('/');
+      navigate(getRedirectPath(session?.role));
       return;
     }
 
@@ -244,12 +251,12 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
       localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
 
       // Dispatch custom event to notify Dashboard that session is ready
-      window.dispatchEvent(new CustomEvent('sproutify:session-ready', { 
-        detail: { farmUuid: sessionPayload.farmUuid } 
+      window.dispatchEvent(new CustomEvent('sproutify:session-ready', {
+        detail: { farmUuid: sessionPayload.farmUuid }
       }));
 
       onLogin();
-      navigate('/');
+      navigate(getRedirectPath(sessionPayload.role));
     } catch (error) {
       console.error('Manual login error:', error);
       setError(getErrorMessage(error, 'Invalid credentials. Please try again.'));

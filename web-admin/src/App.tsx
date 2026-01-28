@@ -73,11 +73,6 @@ const isFarmHandRole = (role: string | null | undefined): boolean => {
   return role.toLowerCase() === 'farm hand';
 };
 
-// Helper to check if role requires onboarding (null/undefined role)
-const needsOnboarding = (role: string | null | undefined): boolean => {
-  return role === null || role === undefined || role.trim() === '';
-};
-
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);

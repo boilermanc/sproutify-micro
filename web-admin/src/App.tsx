@@ -32,6 +32,7 @@ import DailyFlow from './components/DailyFlow';
 import GrowingMicrogreens from './components/GrowingMicrogreens';
 import Layout from './components/Layout';
 import FarmHandLayout from './components/FarmHandLayout';
+import { FarmHandTasks, FarmHandSeed, FarmHandHarvest } from './components/farmhand';
 import SageChat from './components/SageChat';
 import Activity from './pages/Activity';
 import HelpCenterPage from './pages/HelpCenterPage';
@@ -346,7 +347,7 @@ function App() {
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<DailyFlow />} />
+            <Route index element={<FarmHandTasks />} />
           </Route>
 
           <Route path="/seed" element={
@@ -364,7 +365,7 @@ function App() {
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<TraysPage />} />
+            <Route index element={<FarmHandSeed />} />
           </Route>
 
           <Route path="/harvest" element={
@@ -382,7 +383,7 @@ function App() {
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<DailyFlow />} />
+            <Route index element={<FarmHandHarvest />} />
           </Route>
 
           {/* Full Dashboard Routes - For desktop Owners/Farm Managers */}

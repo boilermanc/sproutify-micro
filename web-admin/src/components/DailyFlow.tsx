@@ -531,10 +531,44 @@ export default function DailyFlow() {
   const [orderGapStatus, setOrderGapStatus] = useState<OrderGapStatus[]>([]);
   const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
   const [gapMissingVarietyTrays, setGapMissingVarietyTrays] = useState<Record<string, AssignableTray[]>>({});
-  const [gapMissingVarietyTraysLoading, setGapMissingVarietyTraysLoading] = useState<Record<string, boolean>>({});
   const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
   const [gapMismatchedTraysLoading, setGapMismatchedTraysLoading] = useState<Record<string, boolean>>({});
   const [gapRecipeRequirements, setGapRecipeRequirements] = useState<Record<string, OrderFulfillmentStatus[]>>({});
+
+  // Check if all gaps are resolvable (have at least one variety that can be filled)
+  // If ANY gap has ONLY missing varieties (no trays available), the order cannot be finalized
+  const allGapsResolvable = useMemo(() => {
+    if (activeOrderGaps.length === 0) return true;
+
+    return activeOrderGaps.every((gap) => {
+      const gapKey = formatGapKey(gap);
+      const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
+      const mismatchedTrays = gapMismatchedTrays[gapKey] || [];
+      const recipeRequirements = gapRecipeRequirements[gapKey] || [];
+
+      // Check if gap is fixable via traditional means
+      const needsUnassigned = gap.unassigned_ready > 0;
+      const hasNearReady = gap.near_ready_assigned > 0;
+      const hasMismatchedTray = mismatchedTrays.length > 0;
+
+      if (needsUnassigned || hasNearReady || hasMismatchedTray) {
+        return true; // This gap can be resolved
+      }
+
+      // Build variety breakdown and check if any variety is fillable
+      const varietyBreakdown = buildVarietyBreakdown(gap, mismatchedTrays, matchingTrays, recipeRequirements);
+
+      if (varietyBreakdown.length === 0) {
+        // No breakdown available - check if there are matching trays
+        return matchingTrays.length > 0;
+      }
+
+      // Check if ALL varieties are missing (no trays at all)
+      const allMissing = varietyBreakdown.every(v => v.status === 'missing');
+      return !allMissing; // Resolvable if not all missing
+    });
+  }, [activeOrderGaps, gapMissingVarietyTrays, gapMismatchedTrays, gapRecipeRequirements]);
+  const [gapMissingVarietyTraysLoading, setGapMissingVarietyTraysLoading] = useState<Record<string, boolean>>({});
   const [gapReallocationConfirm, setGapReallocationConfirm] = useState<{
     gap: OrderGapStatus;
     tray: MismatchedAssignedTray;
@@ -3747,15 +3781,17 @@ export default function DailyFlow() {
               >
                 Assign Unassigned
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="border border-slate-300 text-slate-700 text-xs uppercase tracking-[0.2em] px-3 py-1 rounded-full hover:bg-slate-100"
-                onClick={handleFinalizeDay}
-                disabled={isFinalizingDay}
-              >
-                {isFinalizingDay ? 'Finalizing...' : 'Finalize Day'}
-              </Button>
+              {allGapsResolvable && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="border border-slate-300 text-slate-700 text-xs uppercase tracking-[0.2em] px-3 py-1 rounded-full hover:bg-slate-100"
+                  onClick={handleFinalizeDay}
+                  disabled={isFinalizingDay}
+                >
+                  {isFinalizingDay ? 'Finalizing...' : 'Finalize Day'}
+                </Button>
+              )}
               </div>
               <div className="mt-4 space-y-3">
                 {activeOrderGaps.map((gap) => {

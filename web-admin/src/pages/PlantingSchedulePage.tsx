@@ -59,6 +59,14 @@ interface ProductRecipeMapping {
   variety_name?: string;
 }
 
+interface DeliveryInfo {
+  schedule_id: number | null;
+  delivery_date: Date;
+  standing_order_id: number;
+  customer_name?: string;
+  order_name: string;
+}
+
 interface PlantingSchedule {
   sow_date: Date;
   delivery_date: Date;
@@ -76,6 +84,7 @@ interface PlantingSchedule {
   seed_quantity_unit?: string; // Unit for seed quantity
   oz_needed?: number; // Ounces needed for this schedule (used for tray calculation)
   expected_yield_oz?: number; // Expected yield per tray in oz
+  deliveries?: DeliveryInfo[]; // Individual delivery info for each tray (used when creating trays)
 }
 
 interface SeedSelectionOption {
@@ -215,6 +224,27 @@ const PlantingSchedulePage = () => {
           };
         })
       );
+
+      // 2.5. Fetch order_schedules to get schedule_id for each delivery
+      // This allows us to link each tray to its specific order schedule
+      const standingOrderIds = ordersWithItems.map(o => o.standing_order_id);
+      const { data: orderSchedulesData } = await getSupabaseClient()
+        .from('order_schedules')
+        .select('schedule_id, standing_order_id, scheduled_delivery_date, status')
+        .in('standing_order_id', standingOrderIds)
+        .in('status', ['pending', 'generated']);
+
+      // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
+      const scheduleIdLookup = new Map<string, number>();
+      if (orderSchedulesData) {
+        for (const schedule of orderSchedulesData) {
+          const deliveryDate = new Date(schedule.scheduled_delivery_date);
+          const dateKey = getLocalDateKey(deliveryDate);
+          const key = `${schedule.standing_order_id}-${dateKey}`;
+          scheduleIdLookup.set(key, schedule.schedule_id);
+        }
+      }
+      console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries');
 
       // 3. Fetch all recipes with their total days and seed quantities
       const { data: recipesData, error: recipesError } = await getSupabaseClient()
@@ -400,24 +430,49 @@ const PlantingSchedulePage = () => {
       // Sort by sow date
       allSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
 
-      // 6.5. Deduplicate schedules with same (standing_order_id, recipe_id, sow_date)
-      // This can happen when multiple delivery days align to the same seeding day
-      // When deduplicating, sum oz_needed and recalculate trays from the total
+      // 6.5. Deduplicate schedules with same (recipe_id, sow_date)
+      // This happens when multiple delivery days align to the same seeding day
+      // Each tray is for ONE delivery only - sum trays across all deliveries
+      // Collect delivery info so we can link each tray to its specific order
       const dedupeMap = new Map<string, PlantingSchedule>();
       for (const schedule of allSchedules) {
         const sowDateKey = getLocalDateKey(schedule.sow_date);
-        const key = `${schedule.standing_order_id}-${schedule.recipe_id}-${sowDateKey}`;
+        const key = `${schedule.recipe_id}-${sowDateKey}`;
         const existing = dedupeMap.get(key);
+
+        // Look up the actual schedule_id from order_schedules
+        const deliveryDateKey = getLocalDateKey(schedule.delivery_date);
+        const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
+        const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
+
+        // Create delivery info for this schedule (one tray per delivery)
+        const deliveryInfo: DeliveryInfo = {
+          schedule_id: scheduleId,
+          delivery_date: schedule.delivery_date,
+          standing_order_id: schedule.standing_order_id,
+          customer_name: schedule.customer_name,
+          order_name: schedule.order_name,
+        };
+
         if (existing) {
-          // Sum oz_needed, then recalculate trays from total oz
+          // Sum quantities - each delivery needs its own tray(s)
+          existing.quantity = (existing.quantity || 0) + (schedule.quantity || 0);
           existing.oz_needed = (existing.oz_needed || 0) + (schedule.oz_needed || 0);
-          const expectedYield = existing.expected_yield_oz || 9;
-          existing.quantity = existing.oz_needed > 0
-            ? Math.ceil(existing.oz_needed / expectedYield)
-            : existing.quantity + schedule.quantity; // Fallback if no oz data
+          // Collect delivery info for tray creation
+          if (!existing.deliveries) existing.deliveries = [];
+          // Add one entry per tray needed for this delivery
+          const traysForDelivery = Math.ceil(schedule.quantity || 1);
+          for (let i = 0; i < traysForDelivery; i++) {
+            existing.deliveries.push(deliveryInfo);
+          }
         } else {
-          // Clone to avoid mutating original
-          dedupeMap.set(key, { ...schedule });
+          // Clone to avoid mutating original and initialize deliveries
+          const traysForDelivery = Math.ceil(schedule.quantity || 1);
+          const deliveries: DeliveryInfo[] = [];
+          for (let i = 0; i < traysForDelivery; i++) {
+            deliveries.push(deliveryInfo);
+          }
+          dedupeMap.set(key, { ...schedule, deliveries });
         }
       }
       const deduplicatedSchedules = Array.from(dedupeMap.values());
@@ -982,23 +1037,42 @@ const PlantingSchedulePage = () => {
       // Convert seeding date to ISO string at midnight
       const sowDateISO = new Date(seedingDate + 'T00:00:00').toISOString();
 
-      // Create tray creation requests (one per tray)
+      // Create tray creation requests - one per delivery so each tray links to its order
       const batchIdForRequest = selectedBatchOption.actualBatchId;
-      const requests = Array.from({ length: numberOfTrays }, () => ({
-        customer_name: null,
-        variety_name: varietyName,
-        recipe_name: recipeData.recipe_name,
-        farm_uuid: farmUuid,
-        user_id: userId,
-        requested_at: sowDateISO,
-        batch_id: batchIdForRequest,
-      }));
+      const deliveries = seedingSchedule.deliveries || [];
+
+      // If we have delivery info, create one request per delivery (with order_schedule_id)
+      // Otherwise fall back to creating identical requests
+      const requests = deliveries.length > 0
+        ? deliveries.map(delivery => ({
+            customer_name: delivery.customer_name || null,
+            variety_name: varietyName,
+            recipe_name: recipeData.recipe_name,
+            farm_uuid: farmUuid,
+            user_id: userId,
+            requested_at: sowDateISO,
+            batch_id: batchIdForRequest,
+            standing_order_id: delivery.standing_order_id,
+            order_schedule_id: delivery.schedule_id,
+          }))
+        : Array.from({ length: numberOfTrays }, () => ({
+            customer_name: null,
+            variety_name: varietyName,
+            recipe_name: recipeData.recipe_name,
+            farm_uuid: farmUuid,
+            user_id: userId,
+            requested_at: sowDateISO,
+            batch_id: batchIdForRequest,
+          }));
 
       console.log('[PlantingSchedule] Creating tray creation requests:', {
         numberOfTrays,
         recipeName: recipeData.recipe_name,
         batchId: batchIdForRequest,
         sowDate: sowDateISO,
+        deliveriesCount: deliveries.length,
+        orderScheduleIds: deliveries.map(d => d.schedule_id),
+        standingOrderIds: deliveries.map(d => d.standing_order_id),
       });
 
       const { error: requestError } = await getSupabaseClient()

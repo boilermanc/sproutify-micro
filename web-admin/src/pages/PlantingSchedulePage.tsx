@@ -296,25 +296,19 @@ const PlantingSchedulePage = () => {
 
       // 2.6. Fetch trays that already have order_schedule_id assigned
       // These deliveries have already been seeded and should be excluded from counts
-      // Include sow_date to ensure we only skip deliveries when sow_date also matches
+      // Each delivery date gets its own unique order_schedule_id, so we only check if ANY tray exists
       const { data: seededTraysData } = await getSupabaseClient()
         .from('trays')
-        .select('order_schedule_id, sow_date')
+        .select('order_schedule_id')
         .eq('farm_uuid', farmUuid)
         .not('order_schedule_id', 'is', null);
 
-      // Map of schedule_id -> sow_date (as YYYY-MM-DD string)
-      const seededScheduleMap = new Map<number, string>();
-      seededTraysData?.forEach(t => {
-        if (t.order_schedule_id !== null && t.sow_date) {
-          // Extract YYYY-MM-DD from sow_date
-          const sowDateStr = String(t.sow_date).split('T')[0];
-          seededScheduleMap.set(t.order_schedule_id, sowDateStr);
-        }
-      });
-      console.log('[PlantingSchedule] DEBUG - Seeded schedule map:', {
-        count: seededScheduleMap.size,
-        entries: Array.from(seededScheduleMap.entries()).slice(0, 10),
+      const seededScheduleIds = new Set<number>(
+        seededTraysData?.map(t => t.order_schedule_id).filter((id): id is number => id !== null) || []
+      );
+      console.log('[PlantingSchedule] DEBUG - Seeded schedule IDs:', {
+        count: seededScheduleIds.size,
+        ids: Array.from(seededScheduleIds).slice(0, 20),
       });
 
       // 3. Fetch all recipes with their total days and seed quantities
@@ -521,11 +515,9 @@ const PlantingSchedulePage = () => {
         const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
-        // Check if this delivery has already been seeded
-        // Must match BOTH order_schedule_id AND sow_date to avoid old trays affecting new schedules
-        const currentSowDateKey = sowDateKey; // Already computed above as YYYY-MM-DD
-        const existingTraySowDate = scheduleId !== null ? seededScheduleMap.get(scheduleId) : undefined;
-        const isAlreadySeeded = scheduleId !== null && existingTraySowDate === currentSowDateKey;
+        // Check if this delivery has already been seeded (any tray exists with this order_schedule_id)
+        // Each delivery date gets its own unique order_schedule_id, so no sow_date check needed
+        const isAlreadySeeded = scheduleId !== null && seededScheduleIds.has(scheduleId);
 
         // DEBUG: Log schedule_id lookup (only for first few)
         if (dedupeMap.size < 3) {
@@ -535,13 +527,11 @@ const PlantingSchedulePage = () => {
             scheduleLookupKey,
             found: scheduleIdLookup.has(scheduleLookupKey),
             scheduleId,
-            currentSowDateKey,
-            existingTraySowDate,
             isAlreadySeeded,
           });
         }
 
-        // Skip this delivery if it's already seeded (same schedule_id AND same sow_date)
+        // Skip this delivery if it's already seeded
         if (isAlreadySeeded) {
           skippedSeededCount++;
           continue;

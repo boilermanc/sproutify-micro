@@ -94,6 +94,12 @@ interface SeedSelectionOption {
   variety_name: string;
   label: string;
   description: string;
+  quantityGrams: number; // Available quantity in grams
+  traysPossible: number; // How many trays this batch can seed
+  lotNumber?: string;
+  purchaseDate?: string;
+  soakDate?: string;
+  expiresAt?: string;
 }
 
 const PlantingSchedulePage = () => {
@@ -108,6 +114,9 @@ const PlantingSchedulePage = () => {
   const [seedingScheduleKey, setSeedingScheduleKey] = useState<string>('');
   const [seedingScheduleRef, setSeedingScheduleRef] = useState<PlantingSchedule | null>(null);
   const [selectedBatchOption, setSelectedBatchOption] = useState<SeedSelectionOption | null>(null);
+  const [showBatchPicker, setShowBatchPicker] = useState(false);
+  const [traysToCreate, setTraysToCreate] = useState(1);
+  const [seedQuantityPerTray, setSeedQuantityPerTray] = useState(0); // grams per tray
   const [availableBatches, setAvailableBatches] = useState<SeedSelectionOption[]>([]);
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [loadingBatches, setLoadingBatches] = useState(false);
@@ -813,14 +822,17 @@ const PlantingSchedulePage = () => {
         return;
       }
 
-      let seedQuantityPerTray = 0;
+      let seedPerTray = 0;
       if (recipeData.seed_quantity) {
         const unit = recipeData.seed_quantity_unit || 'grams';
-        seedQuantityPerTray = unit === 'oz' ? recipeData.seed_quantity * 28.35 : recipeData.seed_quantity;
+        seedPerTray = unit === 'oz' ? recipeData.seed_quantity * 28.35 : recipeData.seed_quantity;
       }
+      // Store for use in tray creation and UI
+      setSeedQuantityPerTray(seedPerTray);
 
       const numberOfTrays = Math.max(1, Math.ceil(schedule.quantity));
-      const totalSeedNeeded = seedQuantityPerTray * numberOfTrays;
+      setTraysToCreate(numberOfTrays); // Default to scheduled quantity
+      const totalSeedNeeded = seedPerTray * numberOfTrays;
 
       if (!recipeData.variety_id) {
         console.error('[PlantingSchedule] Recipe has no variety_id');
@@ -868,18 +880,7 @@ const PlantingSchedulePage = () => {
         return numeric;
       };
 
-      // formatBatchQuantityText removed - now showing trays possible instead
-
-      const formatDateLabel = (value?: string | null) => {
-        if (!value) return 'unknown date';
-        const parsed = new Date(value);
-        if (Number.isNaN(parsed.getTime())) return 'unknown date';
-        return parsed.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-      };
+      // formatBatchQuantityText and formatDateLabel removed - now showing in card format
 
       const resolveBatchIdFromSoaked = (record: any): number | null => {
         const candidates = [
@@ -923,19 +924,19 @@ const PlantingSchedulePage = () => {
             const actualBatchId = resolveBatchIdFromSoaked(soaked);
             if (!actualBatchId) return null;
             const soakIdentifier = soaked.soaked_id ?? index;
-            const soakDateLabel = formatDateLabel(soaked.soak_date);
-            const displayQuantity = `${quantityGrams.toFixed(1)}g`;
-            const expiresLabel = soaked.expires_at ? `Expires ${formatDateLabel(soaked.expires_at)}` : 'Available';
             // Calculate how many trays this batch can seed
-            const traysPossible = seedQuantityPerTray > 0 ? Math.floor(quantityGrams / seedQuantityPerTray) : 0;
-            const traysLabel = traysPossible > 0 ? `enough for ${traysPossible} tray${traysPossible === 1 ? '' : 's'}` : 'insufficient';
+            const traysPossible = seedPerTray > 0 ? Math.floor(quantityGrams / seedPerTray) : 0;
             return {
               key: `soaked-${soakIdentifier}`,
               source: 'soaked_seed',
               actualBatchId,
               variety_name: varietyName,
-              label: `${varietyName || 'Variety'} • Soaked on ${soakDateLabel} - ${displayQuantity} (${traysLabel})`,
-              description: `${expiresLabel} • Batch #${actualBatchId}`,
+              label: `${varietyName || 'Variety'} - Batch #${actualBatchId}`,
+              description: '', // Will be shown in card format instead
+              quantityGrams,
+              traysPossible,
+              soakDate: soaked.soak_date,
+              expiresAt: soaked.expires_at,
             };
           })
           .filter((option): option is SeedSelectionOption => option !== null);
@@ -992,23 +993,18 @@ const PlantingSchedulePage = () => {
       const formattedOptions = qualifyingBatches.map((batch: any) => {
         const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
         // Calculate how many trays this batch can seed
-        const traysPossible = seedQuantityPerTray > 0 ? Math.floor(batchQuantityGrams / seedQuantityPerTray) : 0;
-        const traysLabel = traysPossible > 0 ? `enough for ${traysPossible} tray${traysPossible === 1 ? '' : 's'}` : 'insufficient';
-        const quantityText = `${batchQuantityGrams.toFixed(1)}g available (${traysLabel})`;
-        const descriptionParts = [quantityText];
-        if (batch.lot_number) {
-          descriptionParts.push(`Lot: ${batch.lot_number}`);
-        }
-        if (batch.purchasedate) {
-          descriptionParts.push(`Purchased: ${formatDateLabel(batch.purchasedate)}`);
-        }
+        const traysPossible = seedPerTray > 0 ? Math.floor(batchQuantityGrams / seedPerTray) : 0;
         return {
           key: `seedbatch-${batch.batchid}`,
           source: 'seedbatch' as const,
           actualBatchId: batch.batchid,
           variety_name: varietyName,
           label: `${varietyName} - Batch #${batch.batchid}`,
-          description: descriptionParts.join(' • '),
+          description: '', // Will be shown in card format instead
+          quantityGrams: batchQuantityGrams,
+          traysPossible,
+          lotNumber: batch.lot_number,
+          purchaseDate: batch.purchasedate,
         };
       });
 
@@ -1061,7 +1057,8 @@ const PlantingSchedulePage = () => {
       }
 
       const varietyName = recipeData.variety_name || recipeData.recipe_name || '';
-      const numberOfTrays = Math.ceil(seedingSchedule.quantity);
+      // Use user-specified tray count (allows partial creation)
+      const numberOfTraysToCreate = traysToCreate;
 
       // Convert seeding date to ISO string at midnight
       const sowDateISO = new Date(seedingDate + 'T00:00:00').toISOString();
@@ -1069,17 +1066,20 @@ const PlantingSchedulePage = () => {
       // Create tray creation requests - one per delivery so each tray links to its order
       const batchIdForRequest = selectedBatchOption.actualBatchId;
       const deliveries = seedingSchedule.deliveries || [];
+      // Only use the first N deliveries based on how many trays user wants to create
+      const deliveriesToUse = deliveries.slice(0, numberOfTraysToCreate);
 
-      // DEBUG: Log full deliveries array
-      console.log('[PlantingSchedule] DEBUG - Full deliveries array:', JSON.stringify(deliveries, (_key, value) => {
-        if (value instanceof Date) return value.toISOString();
-        return value;
-      }, 2));
+      // DEBUG: Log deliveries being used
+      console.log('[PlantingSchedule] DEBUG - Creating trays:', {
+        traysToCreate: numberOfTraysToCreate,
+        totalDeliveries: deliveries.length,
+        deliveriesUsed: deliveriesToUse.length,
+      });
 
       // If we have delivery info, create one request per delivery (with order_schedule_id)
       // Otherwise fall back to creating identical requests
-      const requests = deliveries.length > 0
-        ? deliveries.map((delivery, index) => {
+      const requests = deliveriesToUse.length > 0
+        ? deliveriesToUse.map((delivery, index) => {
             const request = {
               customer_name: delivery.customer_name || null,
               variety_name: varietyName,
@@ -1100,7 +1100,7 @@ const PlantingSchedulePage = () => {
             });
             return request;
           })
-        : Array.from({ length: numberOfTrays }, () => ({
+        : Array.from({ length: numberOfTraysToCreate }, () => ({
             customer_name: null,
             variety_name: varietyName,
             recipe_name: recipeData.recipe_name,
@@ -1114,13 +1114,13 @@ const PlantingSchedulePage = () => {
       console.log('[PlantingSchedule] DEBUG - Full requests array to insert:', JSON.stringify(requests, null, 2));
 
       console.log('[PlantingSchedule] Creating tray creation requests:', {
-        numberOfTrays,
+        numberOfTraysToCreate,
         recipeName: recipeData.recipe_name,
         batchId: batchIdForRequest,
         sowDate: sowDateISO,
         deliveriesCount: deliveries.length,
-        orderScheduleIds: deliveries.map(d => d.schedule_id),
-        standingOrderIds: deliveries.map(d => d.standing_order_id),
+        orderScheduleIds: deliveriesToUse.map(d => d.schedule_id),
+        standingOrderIds: deliveriesToUse.map(d => d.standing_order_id),
       });
 
       const { error: requestError } = await getSupabaseClient()
@@ -1147,7 +1147,7 @@ const PlantingSchedulePage = () => {
           completed_at: new Date().toISOString(),
           completed_by: userId,
           batch_id: batchIdForRequest,
-          quantity_used: numberOfTrays,
+          quantity_used: numberOfTraysToCreate,
           quantity_unit: 'trays',
           customer_name: seedingSchedule.customer_name || null,
           product_name: seedingSchedule.product_name || null,
@@ -1184,7 +1184,7 @@ const PlantingSchedulePage = () => {
       // Show success toast immediately
       setToastNotification({
         type: 'success',
-        message: `Successfully seeded ${numberOfTrays} ${numberOfTrays === 1 ? 'tray' : 'trays'} of ${recipeDisplayName}!`,
+        message: `Successfully seeded ${numberOfTraysToCreate} ${numberOfTraysToCreate === 1 ? 'tray' : 'trays'} of ${recipeDisplayName}!`,
       });
 
       // Trigger fade-out animation
@@ -1549,55 +1549,84 @@ const PlantingSchedulePage = () => {
 
               {/* Batch Selection */}
               <div className="space-y-3">
-                <Label htmlFor="batch-select" className="text-sm font-medium">
-                  Select Seed Batch <span className="text-red-500">*</span>
+                <Label className="text-sm font-medium">
+                  Seed Batch <span className="text-red-500">*</span>
                 </Label>
                 {loadingBatches ? (
                   <div className="text-sm text-slate-500">Loading available batches...</div>
                 ) : availableBatches.length === 0 ? (
                   <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
                     <p>
-                      {batchNotice ?? 'No available batches found for this recipe. Please ensure you have:'}
+                      {batchNotice ?? 'No available batches found for this recipe.'}
                     </p>
-                    {!batchNotice && (
-                      <ul className="list-disc list-inside mt-2 space-y-1">
-                        <li>A seed batch for this variety</li>
-                        <li>Sufficient quantity for {Math.ceil(seedingSchedule.quantity)} {Math.ceil(seedingSchedule.quantity) === 1 ? 'tray' : 'trays'}</li>
-                        <li>An active batch status</li>
-                      </ul>
+                  </div>
+                ) : selectedBatchOption ? (
+                  // Show selected batch as a card
+                  <div className="border border-emerald-300 bg-emerald-50 rounded-lg p-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-emerald-900">Batch #{selectedBatchOption.actualBatchId}</p>
+                        <p className="text-sm text-emerald-700">
+                          {selectedBatchOption.quantityGrams.toFixed(1)}g available
+                          {selectedBatchOption.traysPossible > 0 && (
+                            <span className="ml-1">• Enough for {selectedBatchOption.traysPossible} tray{selectedBatchOption.traysPossible === 1 ? '' : 's'}</span>
+                          )}
+                        </p>
+                        {selectedBatchOption.lotNumber && (
+                          <p className="text-xs text-emerald-600">Lot: {selectedBatchOption.lotNumber}</p>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowBatchPicker(true)}
+                        className="text-emerald-700 hover:text-emerald-900"
+                      >
+                        Change
+                      </Button>
+                    </div>
+                    {selectedBatchOption.traysPossible < traysToCreate && (
+                      <div className="mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+                        ⚠️ This batch only has enough for {selectedBatchOption.traysPossible} tray{selectedBatchOption.traysPossible === 1 ? '' : 's'}, but you want to create {traysToCreate}.
+                      </div>
                     )}
                   </div>
                 ) : (
-                  <Select
-                    value={selectedBatchOption?.key || ''}
-                    onValueChange={(value) => {
-                      const option = availableBatches.find(batch => batch.key === value);
-                      setSelectedBatchOption(option || null);
-                    }}
+                  // Show button to open batch picker
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowBatchPicker(true)}
+                    className="w-full justify-start text-slate-500"
                   >
-                    <SelectTrigger id="batch-select" className="w-full">
-                      <SelectValue placeholder="Select a seed batch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableBatches.map((option) => (
-                        <SelectItem key={option.key} value={option.key}>
-                          <div className="flex flex-col">
-                            <span className="font-medium">
-                              {option.label}
-                            </span>
-                            <span className="text-xs text-slate-500">
-                              {option.description}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <Package className="h-4 w-4 mr-2" />
+                    Select a seed batch ({availableBatches.length} available)
+                  </Button>
                 )}
-                {selectedBatchOption && (
-                  <div className="text-xs text-slate-500">
-                    Selected batch will be used to create {Math.ceil(seedingSchedule.quantity)} {Math.ceil(seedingSchedule.quantity) === 1 ? 'tray' : 'trays'}
-                  </div>
+              </div>
+
+              {/* Trays to Create */}
+              <div className="space-y-2">
+                <Label htmlFor="trays-count" className="text-sm font-medium">
+                  Trays to Create
+                </Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="trays-count"
+                    type="number"
+                    min={1}
+                    max={Math.ceil(seedingSchedule.quantity)}
+                    value={traysToCreate}
+                    onChange={(e) => setTraysToCreate(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-slate-500">
+                    of {Math.ceil(seedingSchedule.quantity)} scheduled
+                  </span>
+                </div>
+                {traysToCreate < Math.ceil(seedingSchedule.quantity) && (
+                  <p className="text-xs text-amber-600">
+                    Creating partial order: {Math.ceil(seedingSchedule.quantity) - traysToCreate} tray{Math.ceil(seedingSchedule.quantity) - traysToCreate === 1 ? '' : 's'} will still be needed.
+                  </p>
                 )}
               </div>
 
@@ -1648,6 +1677,85 @@ const PlantingSchedulePage = () => {
                   Create Trays
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Picker Modal */}
+      <Dialog open={showBatchPicker} onOpenChange={setShowBatchPicker}>
+        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Select Seed Batch</DialogTitle>
+            <DialogDescription>
+              Choose a batch to use for seeding. Each batch shows how many trays it can produce.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto py-4 space-y-3">
+            {availableBatches.map((batch) => (
+              <button
+                key={batch.key}
+                onClick={() => {
+                  setSelectedBatchOption(batch);
+                  setShowBatchPicker(false);
+                  // Auto-adjust trays if batch can't support requested amount
+                  if (batch.traysPossible < traysToCreate && batch.traysPossible > 0) {
+                    setTraysToCreate(batch.traysPossible);
+                  }
+                }}
+                className={`w-full text-left p-4 rounded-lg border transition-all ${
+                  selectedBatchOption?.key === batch.key
+                    ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200'
+                    : 'border-gray-200 hover:border-emerald-300 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">Batch #{batch.actualBatchId}</span>
+                      {batch.source === 'soaked_seed' && (
+                        <Badge variant="outline" className="text-xs">Soaked</Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 text-sm text-gray-600">
+                      <span className="font-medium">{batch.quantityGrams.toFixed(1)}g</span> available
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                      {batch.lotNumber && <span>Lot: {batch.lotNumber}</span>}
+                      {batch.purchaseDate && (
+                        <span>Purchased: {new Date(batch.purchaseDate).toLocaleDateString()}</span>
+                      )}
+                      {batch.soakDate && (
+                        <span>Soaked: {new Date(batch.soakDate).toLocaleDateString()}</span>
+                      )}
+                      {batch.expiresAt && (
+                        <span className="text-amber-600">Expires: {new Date(batch.expiresAt).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right ml-4">
+                    {batch.traysPossible > 0 ? (
+                      <div className={`text-sm font-medium ${
+                        batch.traysPossible >= traysToCreate ? 'text-emerald-600' : 'text-amber-600'
+                      }`}>
+                        {batch.traysPossible} tray{batch.traysPossible === 1 ? '' : 's'}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-red-500">Insufficient</div>
+                    )}
+                    {seedQuantityPerTray > 0 && (
+                      <div className="text-xs text-gray-400">
+                        {seedQuantityPerTray.toFixed(1)}g/tray
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBatchPicker(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>

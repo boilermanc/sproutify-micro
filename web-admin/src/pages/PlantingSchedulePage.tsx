@@ -249,8 +249,8 @@ const PlantingSchedulePage = () => {
       // DEBUG: Log raw order_schedules data
       console.log('[PlantingSchedule] DEBUG - Raw order_schedules data:', {
         error: orderSchedulesError,
-        count: orderSchedulesData?.length || 0,
-        data: orderSchedulesData?.slice(0, 10), // Show first 10 entries
+        totalRecords: orderSchedulesData?.length || 0,
+        sampleData: orderSchedulesData?.slice(0, 5), // Show first 5 as sample
       });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
@@ -471,8 +471,9 @@ const PlantingSchedulePage = () => {
         const existing = dedupeMap.get(key);
 
         // Look up the actual schedule_id from order_schedules
-        // delivery_date is a Date object, convert to ISO string to get YYYY-MM-DD
-        const deliveryDateKey = new Date(schedule.delivery_date).toISOString().split('T')[0];
+        // delivery_date is a Date object - use LOCAL date components (not UTC which shifts the date)
+        const deliveryDate = new Date(schedule.delivery_date);
+        const deliveryDateKey = `${deliveryDate.getFullYear()}-${String(deliveryDate.getMonth() + 1).padStart(2, '0')}-${String(deliveryDate.getDate()).padStart(2, '0')}`;
         const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 

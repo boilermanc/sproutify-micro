@@ -294,6 +294,22 @@ const PlantingSchedulePage = () => {
       console.log('[PlantingSchedule] DEBUG - scheduleIdLookup entries:', Array.from(scheduleIdLookup.entries()).slice(0, 10));
       console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries');
 
+      // 2.6. Fetch trays that already have order_schedule_id assigned
+      // These deliveries have already been seeded and should be excluded from counts
+      const { data: seededTraysData } = await getSupabaseClient()
+        .from('trays')
+        .select('order_schedule_id')
+        .eq('farm_uuid', farmUuid)
+        .not('order_schedule_id', 'is', null);
+
+      const seededScheduleIds = new Set<number>(
+        seededTraysData?.map(t => t.order_schedule_id).filter((id): id is number => id !== null) || []
+      );
+      console.log('[PlantingSchedule] DEBUG - Seeded schedule IDs:', {
+        count: seededScheduleIds.size,
+        ids: Array.from(seededScheduleIds).slice(0, 10),
+      });
+
       // 3. Fetch all recipes with their total days and seed quantities
       const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
@@ -482,7 +498,10 @@ const PlantingSchedulePage = () => {
       // This happens when multiple delivery days align to the same seeding day
       // Each tray is for ONE delivery only - sum trays across all deliveries
       // Collect delivery info so we can link each tray to its specific order
+      // Skip deliveries that already have trays (order_schedule_id in seededScheduleIds)
       const dedupeMap = new Map<string, PlantingSchedule>();
+      let skippedSeededCount = 0;
+
       for (const schedule of allSchedules) {
         const sowDateKey = getLocalDateKey(schedule.sow_date);
         const key = `${schedule.recipe_id}-${sowDateKey}`;
@@ -495,6 +514,9 @@ const PlantingSchedulePage = () => {
         const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
+        // Check if this delivery has already been seeded (has a tray with this order_schedule_id)
+        const isAlreadySeeded = scheduleId !== null && seededScheduleIds.has(scheduleId);
+
         // DEBUG: Log schedule_id lookup (only for first few)
         if (dedupeMap.size < 3) {
           console.log('[PlantingSchedule] DEBUG - schedule_id lookup:', {
@@ -503,7 +525,14 @@ const PlantingSchedulePage = () => {
             scheduleLookupKey,
             found: scheduleIdLookup.has(scheduleLookupKey),
             scheduleId,
+            isAlreadySeeded,
           });
+        }
+
+        // Skip this delivery if it's already seeded
+        if (isAlreadySeeded) {
+          skippedSeededCount++;
+          continue;
         }
 
         // Create delivery info for this schedule (one tray per delivery)
@@ -539,7 +568,7 @@ const PlantingSchedulePage = () => {
       const deduplicatedSchedules = Array.from(dedupeMap.values());
       deduplicatedSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
 
-      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules`);
+      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded deliveries)`);
 
       // 7. Filter out schedules where trays have already been created
       // Check for existing trays or task_completions for each schedule

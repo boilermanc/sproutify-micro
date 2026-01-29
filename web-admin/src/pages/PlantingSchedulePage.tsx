@@ -234,7 +234,8 @@ const PlantingSchedulePage = () => {
         .from('order_schedules')
         .select('schedule_id, standing_order_id, scheduled_delivery_date, status')
         .in('standing_order_id', standingOrderIds)
-        .in('status', ['pending', 'generated']);
+        .in('status', ['pending', 'generated'])
+        .limit(1000); // Override default limit to get all records
 
       // DEBUG: Log raw order_schedules data
       console.log('[PlantingSchedule] DEBUG - Raw order_schedules data:', {

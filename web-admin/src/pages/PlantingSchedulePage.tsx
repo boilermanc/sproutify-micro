@@ -244,12 +244,13 @@ const PlantingSchedulePage = () => {
       });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
+      // Use UTC date to avoid timezone mismatch (order_schedules stores dates in UTC)
       const scheduleIdLookup = new Map<string, number>();
       if (orderSchedulesData) {
         for (const schedule of orderSchedulesData) {
-          const deliveryDate = new Date(schedule.scheduled_delivery_date);
-          const dateKey = getLocalDateKey(deliveryDate);
-          const key = `${schedule.standing_order_id}-${dateKey}`;
+          // Extract UTC date string (YYYY-MM-DD) to match how delivery_date is stored
+          const utcDateKey = new Date(schedule.scheduled_delivery_date).toISOString().split('T')[0];
+          const key = `${schedule.standing_order_id}-${utcDateKey}`;
           scheduleIdLookup.set(key, schedule.schedule_id);
         }
       }
@@ -452,8 +453,9 @@ const PlantingSchedulePage = () => {
         const existing = dedupeMap.get(key);
 
         // Look up the actual schedule_id from order_schedules
-        const deliveryDateKey = getLocalDateKey(schedule.delivery_date);
-        const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
+        // Use UTC date to match how scheduleIdLookup keys are built
+        const utcDeliveryDateKey = new Date(schedule.delivery_date).toISOString().split('T')[0];
+        const scheduleLookupKey = `${schedule.standing_order_id}-${utcDeliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
         // DEBUG: Log schedule_id lookup (only for first few)
@@ -464,7 +466,7 @@ const PlantingSchedulePage = () => {
             scheduleId,
             standing_order_id: schedule.standing_order_id,
             delivery_date: schedule.delivery_date,
-            deliveryDateKey,
+            utcDeliveryDateKey,
           });
         }
 

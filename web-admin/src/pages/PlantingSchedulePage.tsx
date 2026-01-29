@@ -228,11 +228,20 @@ const PlantingSchedulePage = () => {
       // 2.5. Fetch order_schedules to get schedule_id for each delivery
       // This allows us to link each tray to its specific order schedule
       const standingOrderIds = ordersWithItems.map(o => o.standing_order_id);
-      const { data: orderSchedulesData } = await getSupabaseClient()
+      console.log('[PlantingSchedule] DEBUG - Fetching order_schedules for standing_order_ids:', standingOrderIds);
+
+      const { data: orderSchedulesData, error: orderSchedulesError } = await getSupabaseClient()
         .from('order_schedules')
         .select('schedule_id, standing_order_id, scheduled_delivery_date, status')
         .in('standing_order_id', standingOrderIds)
         .in('status', ['pending', 'generated']);
+
+      // DEBUG: Log raw order_schedules data
+      console.log('[PlantingSchedule] DEBUG - Raw order_schedules data:', {
+        error: orderSchedulesError,
+        count: orderSchedulesData?.length || 0,
+        data: orderSchedulesData?.slice(0, 10), // Show first 10 entries
+      });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
       const scheduleIdLookup = new Map<string, number>();
@@ -244,6 +253,8 @@ const PlantingSchedulePage = () => {
           scheduleIdLookup.set(key, schedule.schedule_id);
         }
       }
+      // DEBUG: Log lookup map contents
+      console.log('[PlantingSchedule] DEBUG - scheduleIdLookup entries:', Array.from(scheduleIdLookup.entries()).slice(0, 10));
       console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries');
 
       // 3. Fetch all recipes with their total days and seed quantities
@@ -444,6 +455,18 @@ const PlantingSchedulePage = () => {
         const deliveryDateKey = getLocalDateKey(schedule.delivery_date);
         const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
+
+        // DEBUG: Log schedule_id lookup (only for first few)
+        if (dedupeMap.size < 3) {
+          console.log('[PlantingSchedule] DEBUG - schedule_id lookup:', {
+            scheduleLookupKey,
+            found: scheduleIdLookup.has(scheduleLookupKey),
+            scheduleId,
+            standing_order_id: schedule.standing_order_id,
+            delivery_date: schedule.delivery_date,
+            deliveryDateKey,
+          });
+        }
 
         // Create delivery info for this schedule (one tray per delivery)
         const deliveryInfo: DeliveryInfo = {
@@ -1041,20 +1064,36 @@ const PlantingSchedulePage = () => {
       const batchIdForRequest = selectedBatchOption.actualBatchId;
       const deliveries = seedingSchedule.deliveries || [];
 
+      // DEBUG: Log full deliveries array
+      console.log('[PlantingSchedule] DEBUG - Full deliveries array:', JSON.stringify(deliveries, (_key, value) => {
+        if (value instanceof Date) return value.toISOString();
+        return value;
+      }, 2));
+
       // If we have delivery info, create one request per delivery (with order_schedule_id)
       // Otherwise fall back to creating identical requests
       const requests = deliveries.length > 0
-        ? deliveries.map(delivery => ({
-            customer_name: delivery.customer_name || null,
-            variety_name: varietyName,
-            recipe_name: recipeData.recipe_name,
-            farm_uuid: farmUuid,
-            user_id: userId,
-            requested_at: sowDateISO,
-            batch_id: batchIdForRequest,
-            standing_order_id: delivery.standing_order_id,
-            order_schedule_id: delivery.schedule_id,
-          }))
+        ? deliveries.map((delivery, index) => {
+            const request = {
+              customer_name: delivery.customer_name || null,
+              variety_name: varietyName,
+              recipe_name: recipeData.recipe_name,
+              farm_uuid: farmUuid,
+              user_id: userId,
+              requested_at: sowDateISO,
+              batch_id: batchIdForRequest,
+              standing_order_id: delivery.standing_order_id,
+              order_schedule_id: delivery.schedule_id,
+            };
+            // DEBUG: Log each request being built
+            console.log(`[PlantingSchedule] DEBUG - Tray request ${index + 1}:`, {
+              order_schedule_id: delivery.schedule_id,
+              standing_order_id: delivery.standing_order_id,
+              delivery_date: delivery.delivery_date,
+              customer_name: delivery.customer_name,
+            });
+            return request;
+          })
         : Array.from({ length: numberOfTrays }, () => ({
             customer_name: null,
             variety_name: varietyName,
@@ -1064,6 +1103,9 @@ const PlantingSchedulePage = () => {
             requested_at: sowDateISO,
             batch_id: batchIdForRequest,
           }));
+
+      // DEBUG: Log full requests array before insert
+      console.log('[PlantingSchedule] DEBUG - Full requests array to insert:', JSON.stringify(requests, null, 2));
 
       console.log('[PlantingSchedule] Creating tray creation requests:', {
         numberOfTrays,

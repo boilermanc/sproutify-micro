@@ -868,11 +868,7 @@ const PlantingSchedulePage = () => {
         return numeric;
       };
 
-      const formatBatchQuantityText = (quantity: number | string | null | undefined, unit?: string | null) => {
-        const numeric = typeof quantity === 'number' ? quantity : Number(quantity ?? 0);
-        const formattedValue = Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
-        return `${formattedValue} ${unit || 'grams'} available`;
-      };
+      // formatBatchQuantityText removed - now showing trays possible instead
 
       const formatDateLabel = (value?: string | null) => {
         if (!value) return 'unknown date';
@@ -922,20 +918,23 @@ const PlantingSchedulePage = () => {
         const soakedOptions = (soakedSeedsData || [])
           .map<SeedSelectionOption | null>((soaked: any, index: number) => {
             const quantityGrams = convertToGrams(soaked.quantity_remaining ?? 0, soaked.unit);
-            const hasEnough = totalSeedNeeded > 0 ? quantityGrams >= totalSeedNeeded : true;
-            if (!hasEnough) return null;
+            // Show all batches with quantity > 0, let user decide how many trays to seed
+            if (quantityGrams <= 0) return null;
             const actualBatchId = resolveBatchIdFromSoaked(soaked);
             if (!actualBatchId) return null;
             const soakIdentifier = soaked.soaked_id ?? index;
             const soakDateLabel = formatDateLabel(soaked.soak_date);
-            const displayQuantity = `${quantityGrams.toFixed(2)} g remaining`;
+            const displayQuantity = `${quantityGrams.toFixed(1)}g`;
             const expiresLabel = soaked.expires_at ? `Expires ${formatDateLabel(soaked.expires_at)}` : 'Available';
+            // Calculate how many trays this batch can seed
+            const traysPossible = seedQuantityPerTray > 0 ? Math.floor(quantityGrams / seedQuantityPerTray) : 0;
+            const traysLabel = traysPossible > 0 ? `enough for ${traysPossible} tray${traysPossible === 1 ? '' : 's'}` : 'insufficient';
             return {
               key: `soaked-${soakIdentifier}`,
               source: 'soaked_seed',
               actualBatchId,
               variety_name: varietyName,
-              label: `${varietyName || 'Variety'} • Soaked on ${soakDateLabel} - ${displayQuantity}`,
+              label: `${varietyName || 'Variety'} • Soaked on ${soakDateLabel} - ${displayQuantity} (${traysLabel})`,
               description: `${expiresLabel} • Batch #${actualBatchId}`,
             };
           })
@@ -984,14 +983,18 @@ const PlantingSchedulePage = () => {
         return;
       }
 
+      // Show all batches with quantity > 0, let user decide how many trays to seed
       const qualifyingBatches = (batchesData || []).filter((batch: any) => {
         const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
-        const passes = totalSeedNeeded > 0 ? batchQuantityGrams >= totalSeedNeeded : true;
-        return passes;
+        return batchQuantityGrams > 0;
       });
 
       const formattedOptions = qualifyingBatches.map((batch: any) => {
-        const quantityText = formatBatchQuantityText(batch.quantity, batch.unit);
+        const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
+        // Calculate how many trays this batch can seed
+        const traysPossible = seedQuantityPerTray > 0 ? Math.floor(batchQuantityGrams / seedQuantityPerTray) : 0;
+        const traysLabel = traysPossible > 0 ? `enough for ${traysPossible} tray${traysPossible === 1 ? '' : 's'}` : 'insufficient';
+        const quantityText = `${batchQuantityGrams.toFixed(1)}g available (${traysLabel})`;
         const descriptionParts = [quantityText];
         if (batch.lot_number) {
           descriptionParts.push(`Lot: ${batch.lot_number}`);

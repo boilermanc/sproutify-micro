@@ -254,15 +254,22 @@ const PlantingSchedulePage = () => {
       });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
-      // Extract YYYY-MM-DD directly from string to avoid timezone interpretation issues
+      // scheduled_delivery_date comes from DB as string like '2025-12-10' or '2025-12-10T00:00:00'
       const scheduleIdLookup = new Map<string, number>();
       if (orderSchedulesData) {
         for (const schedule of orderSchedulesData) {
-          // Extract date string directly (first 10 chars = YYYY-MM-DD) to avoid Date parsing issues
-          const dateStr = String(schedule.scheduled_delivery_date);
-          const dateKey = dateStr.substring(0, 10); // YYYY-MM-DD
+          // DB returns date as string, split on T to get YYYY-MM-DD
+          const dateKey = String(schedule.scheduled_delivery_date).split('T')[0];
           const key = `${schedule.standing_order_id}-${dateKey}`;
           scheduleIdLookup.set(key, schedule.schedule_id);
+          // DEBUG: Log first few entries
+          if (scheduleIdLookup.size <= 3) {
+            console.log('[PlantingSchedule] DEBUG - Building lookup:', {
+              raw: schedule.scheduled_delivery_date,
+              dateKey,
+              key,
+            });
+          }
         }
       }
       // DEBUG: Log lookup map contents
@@ -464,21 +471,19 @@ const PlantingSchedulePage = () => {
         const existing = dedupeMap.get(key);
 
         // Look up the actual schedule_id from order_schedules
-        // Extract YYYY-MM-DD directly from string to match how scheduleIdLookup keys are built
-        const dateStr = String(schedule.delivery_date);
-        const deliveryDateKey = dateStr.substring(0, 10); // YYYY-MM-DD
+        // delivery_date is a Date object, convert to ISO string to get YYYY-MM-DD
+        const deliveryDateKey = new Date(schedule.delivery_date).toISOString().split('T')[0];
         const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
         // DEBUG: Log schedule_id lookup (only for first few)
         if (dedupeMap.size < 3) {
           console.log('[PlantingSchedule] DEBUG - schedule_id lookup:', {
+            raw_delivery_date: schedule.delivery_date,
+            deliveryDateKey,
             scheduleLookupKey,
             found: scheduleIdLookup.has(scheduleLookupKey),
             scheduleId,
-            standing_order_id: schedule.standing_order_id,
-            delivery_date: schedule.delivery_date,
-            deliveryDateKey,
           });
         }
 
@@ -1669,7 +1674,7 @@ const PlantingSchedulePage = () => {
             <Button
               onClick={handleSeedingConfirm}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700"
-              disabled={!selectedBatchOption || !seedingDate || isSubmittingSeeding.current || availableBatches.length === 0 || isCreatingTray}
+              disabled={!selectedBatchOption || !seedingDate || isSubmittingSeeding.current || availableBatches.length === 0 || isCreatingTray || traysToCreate <= 0 || (selectedBatchOption?.traysPossible === 0)}
             >
               {isCreatingTray ? (
                 'Creating...'

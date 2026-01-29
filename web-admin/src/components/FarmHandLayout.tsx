@@ -104,11 +104,10 @@ const FarmHandLayout = ({ onLogout }: FarmHandLayoutProps) => {
         {/* Mobile menu button */}
         <Button
           variant="ghost"
-          size="icon"
-          className="md:hidden text-slate-600"
+          className="md:hidden text-slate-600 h-12 w-12 p-0 min-w-[48px] min-h-[48px]"
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         >
-          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </Button>
       </header>
 

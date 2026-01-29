@@ -254,13 +254,14 @@ const PlantingSchedulePage = () => {
       });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
-      // Use UTC date to avoid timezone mismatch (order_schedules stores dates in UTC)
+      // Extract YYYY-MM-DD directly from string to avoid timezone interpretation issues
       const scheduleIdLookup = new Map<string, number>();
       if (orderSchedulesData) {
         for (const schedule of orderSchedulesData) {
-          // Extract UTC date string (YYYY-MM-DD) to match how delivery_date is stored
-          const utcDateKey = new Date(schedule.scheduled_delivery_date).toISOString().split('T')[0];
-          const key = `${schedule.standing_order_id}-${utcDateKey}`;
+          // Extract date string directly (first 10 chars = YYYY-MM-DD) to avoid Date parsing issues
+          const dateStr = String(schedule.scheduled_delivery_date);
+          const dateKey = dateStr.substring(0, 10); // YYYY-MM-DD
+          const key = `${schedule.standing_order_id}-${dateKey}`;
           scheduleIdLookup.set(key, schedule.schedule_id);
         }
       }
@@ -463,9 +464,10 @@ const PlantingSchedulePage = () => {
         const existing = dedupeMap.get(key);
 
         // Look up the actual schedule_id from order_schedules
-        // Use UTC date to match how scheduleIdLookup keys are built
-        const utcDeliveryDateKey = new Date(schedule.delivery_date).toISOString().split('T')[0];
-        const scheduleLookupKey = `${schedule.standing_order_id}-${utcDeliveryDateKey}`;
+        // Extract YYYY-MM-DD directly from string to match how scheduleIdLookup keys are built
+        const dateStr = String(schedule.delivery_date);
+        const deliveryDateKey = dateStr.substring(0, 10); // YYYY-MM-DD
+        const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
         // DEBUG: Log schedule_id lookup (only for first few)
@@ -476,7 +478,7 @@ const PlantingSchedulePage = () => {
             scheduleId,
             standing_order_id: schedule.standing_order_id,
             delivery_date: schedule.delivery_date,
-            utcDeliveryDateKey,
+            deliveryDateKey,
           });
         }
 

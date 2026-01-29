@@ -256,14 +256,15 @@ const PlantingSchedulePage = () => {
         last3: orderSchedulesData?.slice(-3),
       });
 
-      // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id
+      // Create lookup map: "standing_order_id-recipe_id-YYYY-MM-DD" → schedule_id
+      // Key must be unique per (standing_order, recipe, delivery_date) combination
       // scheduled_delivery_date comes from DB as string like '2025-12-10' or '2025-12-10T00:00:00'
       const scheduleIdLookup = new Map<string, number>();
       if (orderSchedulesData) {
         for (const schedule of orderSchedulesData) {
           // DB returns date as string, split on T to get YYYY-MM-DD
           const dateKey = String(schedule.scheduled_delivery_date).split('T')[0];
-          const key = `${schedule.standing_order_id}-${dateKey}`;
+          const key = `${schedule.standing_order_id}-${schedule.recipe_id}-${dateKey}`;
           scheduleIdLookup.set(key, schedule.schedule_id);
           // DEBUG: Log first few entries
           if (scheduleIdLookup.size <= 3) {
@@ -271,6 +272,7 @@ const PlantingSchedulePage = () => {
               raw: schedule.scheduled_delivery_date,
               dateKey,
               key,
+              recipe_id: schedule.recipe_id,
             });
           }
         }
@@ -495,9 +497,10 @@ const PlantingSchedulePage = () => {
 
         // Look up the actual schedule_id from order_schedules
         // delivery_date is a Date object - use LOCAL date components (not UTC which shifts the date)
+        // Key format: "standing_order_id-recipe_id-YYYY-MM-DD"
         const deliveryDate = new Date(schedule.delivery_date);
         const deliveryDateKey = `${deliveryDate.getFullYear()}-${String(deliveryDate.getMonth() + 1).padStart(2, '0')}-${String(deliveryDate.getDate()).padStart(2, '0')}`;
-        const scheduleLookupKey = `${schedule.standing_order_id}-${deliveryDateKey}`;
+        const scheduleLookupKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${deliveryDateKey}`;
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
         // Check if this delivery has already been seeded (any tray exists with this order_schedule_id)
@@ -510,6 +513,7 @@ const PlantingSchedulePage = () => {
             raw_delivery_date: schedule.delivery_date,
             deliveryDateKey,
             scheduleLookupKey,
+            recipe_id: schedule.recipe_id,
             found: scheduleIdLookup.has(scheduleLookupKey),
             scheduleId,
             isAlreadySeeded,

@@ -843,6 +843,11 @@ const PlantingSchedulePage = () => {
   };
 
   const fetchAvailableBatchesForRecipe = async (schedule: PlantingSchedule) => {
+    console.log('[PlantingSchedule] fetchAvailableBatchesForRecipe CALLED', {
+      recipe_id: schedule.recipe_id,
+      recipe_name: schedule.recipe_name,
+      schedule,
+    });
     setLoadingBatches(true);
     setSelectedBatchOption(null);
     setAvailableBatches([]);
@@ -850,11 +855,13 @@ const PlantingSchedulePage = () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
+        console.log('[PlantingSchedule] No session data found, returning early');
         setAvailableBatches([]);
         return;
       }
 
       const { farmUuid } = JSON.parse(sessionData);
+      console.log('[PlantingSchedule] Querying recipe for batch lookup...', { recipe_id: schedule.recipe_id, farmUuid });
 
       const { data: recipeData, error: recipeError } = await getSupabaseClient()
         .from('recipes')
@@ -862,6 +869,8 @@ const PlantingSchedulePage = () => {
         .eq('recipe_id', schedule.recipe_id)
         .eq('farm_uuid', farmUuid)
         .single();
+
+      console.log('[PlantingSchedule] Recipe query result:', { recipeData, recipeError });
 
       if (recipeError || !recipeData) {
         console.error('[PlantingSchedule] Error fetching recipe:', recipeError);
@@ -881,7 +890,7 @@ const PlantingSchedulePage = () => {
       const totalSeedNeeded = seedPerTray * numberOfTrays;
 
       if (!recipeData.variety_id) {
-        console.error('[PlantingSchedule] Recipe has no variety_id');
+        console.error('[PlantingSchedule] Recipe has no variety_id - returning early');
         return;
       }
 
@@ -1054,10 +1063,12 @@ const PlantingSchedulePage = () => {
         };
       });
 
+      console.log('[PlantingSchedule] Setting availableBatches:', { count: formattedOptions.length, formattedOptions });
       setAvailableBatches(formattedOptions);
     } catch (error) {
       console.error('[PlantingSchedule] Error in fetchAvailableBatchesForRecipe:', error);
     } finally {
+      console.log('[PlantingSchedule] fetchAvailableBatchesForRecipe FINISHED');
       setLoadingBatches(false);
     }
   };

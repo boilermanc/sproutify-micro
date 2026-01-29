@@ -239,18 +239,36 @@ const PlantingSchedulePage = () => {
       const standingOrderIds = ordersWithItems.map(o => o.standing_order_id);
       console.log('[PlantingSchedule] DEBUG - Fetching order_schedules for standing_order_ids:', standingOrderIds);
 
+      // DEBUG: First check ALL order_schedules regardless of status to see what exists
+      const { data: allOrderSchedules } = await getSupabaseClient()
+        .from('order_schedules')
+        .select('schedule_id, standing_order_id, scheduled_delivery_date, status')
+        .in('standing_order_id', standingOrderIds)
+        .limit(1000);
+
+      console.log('[PlantingSchedule] DEBUG - ALL order_schedules (any status):', {
+        total: allOrderSchedules?.length || 0,
+        byStatus: allOrderSchedules?.reduce((acc, s) => {
+          acc[s.status] = (acc[s.status] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>),
+        dec2025Schedules: allOrderSchedules?.filter(s =>
+          String(s.scheduled_delivery_date).startsWith('2025-12')
+        ).map(s => ({ date: s.scheduled_delivery_date, status: s.status, id: s.schedule_id })),
+      });
+
       const { data: orderSchedulesData, error: orderSchedulesError } = await getSupabaseClient()
         .from('order_schedules')
         .select('schedule_id, standing_order_id, scheduled_delivery_date, status')
         .in('standing_order_id', standingOrderIds)
         .in('status', ['pending', 'generated'])
-        .limit(1000); // Override default limit to get all records
+        .limit(1000);
 
       // DEBUG: Log raw order_schedules data
-      console.log('[PlantingSchedule] DEBUG - Raw order_schedules data:', {
+      console.log('[PlantingSchedule] DEBUG - Filtered order_schedules (pending/generated only):', {
         error: orderSchedulesError,
         totalRecords: orderSchedulesData?.length || 0,
-        sampleData: orderSchedulesData?.slice(0, 5), // Show first 5 as sample
+        sampleData: orderSchedulesData?.slice(0, 5),
       });
 
       // Create lookup map: "standing_order_id-YYYY-MM-DD" → schedule_id

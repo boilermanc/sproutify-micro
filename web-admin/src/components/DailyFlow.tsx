@@ -595,6 +595,8 @@ export default function DailyFlow() {
   const [batchHarvestRows, setBatchHarvestRows] = useState<BatchHarvestRow[]>([]);
   const [batchHarvestSelected, setBatchHarvestSelected] = useState<Record<number, boolean>>({});
   const [batchHarvestYields, setBatchHarvestYields] = useState<Record<number, string>>({});
+  // Customers for quick assign dropdown on unassigned tray cards
+  const [customers, setCustomers] = useState<Array<{ customer_id: number; customer_name: string }>>([]);
   // State for "Complete Order & Harvest Early" confirmation modal
   const [earlyHarvestConfirm, setEarlyHarvestConfirm] = useState<{
     group: HarvestGroup;
@@ -667,6 +669,27 @@ export default function DailyFlow() {
       return null;
     }
   }, []);
+
+  // Fetch customers for quick assign dropdown on unassigned tray cards
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      const farmUuid = getFarmUuidFromSession();
+      if (!farmUuid) return;
+
+      const { data } = await getSupabaseClient()
+        .from('customers')
+        .select('customerid, name')
+        .eq('farm_uuid', farmUuid)
+        .order('name', { ascending: true });
+
+      const normalized = (data || []).map((c: any) => ({
+        customer_id: c.customerid,
+        customer_name: c.name || '',
+      }));
+      setCustomers(normalized);
+    };
+    fetchCustomers();
+  }, [getFarmUuidFromSession]);
 
   // ✅ OPTIMIZED: Consolidated gap data fetcher - eliminates 25-50 queries
   const updateAllGapData = useCallback(async (gaps: OrderGapStatus[]) => {
@@ -3274,6 +3297,29 @@ export default function DailyFlow() {
     setLossNotes('');
   };
 
+  // Quick assign handler for unassigned tray cards
+  const handleQuickAssign = useCallback(async (trayId: number, customerId: number) => {
+    const success = await assignTrayToCustomer(trayId, customerId);
+    if (success) {
+      showNotification('success', `Tray ${trayId} assigned`);
+      loadTasks({ suppressLoading: true }); // Refresh to move tray to customer's section
+    } else {
+      showNotification('error', 'Failed to assign tray');
+    }
+  }, [loadTasks, showNotification]);
+
+  // Find matching order gap for an unassigned tray (for smart auto-assign button)
+  const findMatchingGapForTray = useCallback((trayId: number): OrderGapStatus | null => {
+    for (const gap of activeOrderGaps) {
+      const gapKey = formatGapKey(gap);
+      const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
+      if (matchingTrays.some(t => t.tray_id === trayId)) {
+        return gap;
+      }
+    }
+    return null;
+  }, [activeOrderGaps, gapMissingVarietyTrays]);
+
   const handleLostConfirm = async () => {
     if (!lostTask || !lossReason) return;
 
@@ -4303,19 +4349,61 @@ export default function DailyFlow() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                      {group.tasks.map((task) => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          variant="harvest"
-                          onComplete={handleComplete}
-                          isCompleting={completingIds.has(task.id)}
-                          isAnimatingOut={animatingOut.has(task.id)}
-                          onViewDetails={handleViewDetails}
-                          onMarkAsLost={handleMarkAsLost}
-                          navigate={navigate}
-                        />
-                      ))}
+                      {group.tasks.map((task) => {
+                        // Check if this unassigned tray matches an order gap
+                        const matchingGap = !group.customerName && task.trayIds?.length === 1
+                          ? findMatchingGapForTray(task.trayIds[0])
+                          : null;
+
+                        return (
+                          <div key={task.id} className="space-y-2">
+                            <TaskCard
+                              task={task}
+                              variant="harvest"
+                              onComplete={handleComplete}
+                              isCompleting={completingIds.has(task.id)}
+                              isAnimatingOut={animatingOut.has(task.id)}
+                              onViewDetails={handleViewDetails}
+                              onMarkAsLost={handleMarkAsLost}
+                              navigate={navigate}
+                            />
+                            {/* Smart assign: show button if tray matches an order gap */}
+                            {!group.customerName && task.trayIds && task.trayIds.length === 1 && (
+                              matchingGap ? (
+                                <Button
+                                  size="sm"
+                                  className="w-full bg-emerald-500 hover:bg-emerald-600"
+                                  onClick={() => handleQuickAssign(task.trayIds![0], matchingGap.customer_id)}
+                                >
+                                  Assign to {matchingGap.customer_name}
+                                </Button>
+                              ) : (
+                                <Select
+                                  value=""
+                                  onValueChange={(value) => handleQuickAssign(task.trayIds![0], parseInt(value))}
+                                >
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue placeholder="Assign to customer..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {customers.map((c) => (
+                                      <SelectItem key={c.customer_id} value={c.customer_id.toString()}>
+                                        {c.customer_name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )
+                            )}
+                            {/* Multi-tray cards: show hint to click card for individual assignment */}
+                            {!group.customerName && task.trayIds && task.trayIds.length > 1 && (
+                              <p className="text-xs text-slate-500 px-1">
+                                {task.trayIds.length} trays - click card to assign individually
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );

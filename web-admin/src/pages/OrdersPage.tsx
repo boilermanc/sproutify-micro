@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 type DateRangePreset = '7d' | '30d' | '90d' | 'month' | 'year' | 'custom';
 type TabType = 'orders' | 'delivery-history';
 type DeliverySortField = 'date' | 'customer' | 'trays' | 'yield' | 'amount';
+type OrderSortField = 'orderId' | 'customer' | 'date' | 'type' | 'items' | 'total' | 'status';
 type SortDirection = 'asc' | 'desc';
 
 interface DeliveryHistoryRow {
@@ -70,6 +71,11 @@ const OrdersPage = () => {
   const [deliverySortField, setDeliverySortField] = useState<DeliverySortField>('date');
   const [deliverySortDirection, setDeliverySortDirection] = useState<SortDirection>('desc');
   const [expandedDeliveries, setExpandedDeliveries] = useState<Set<string>>(new Set());
+
+  // Orders table sorting state
+  const [orderSortField, setOrderSortField] = useState<OrderSortField>('date');
+  const [orderSortDirection, setOrderSortDirection] = useState<SortDirection>('desc');
+
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -918,10 +924,56 @@ const OrdersPage = () => {
     }
   };
 
-  const filteredOrders = orders.filter(order => 
-    order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.orderId.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Toggle sort field for orders table
+  const toggleOrderSort = (field: OrderSortField) => {
+    if (orderSortField === field) {
+      setOrderSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setOrderSortField(field);
+      setOrderSortDirection('desc');
+    }
+  };
+
+  // Filter and sort orders
+  const sortedFilteredOrders = orders
+    .filter(order =>
+      order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.orderId.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      const multiplier = orderSortDirection === 'asc' ? 1 : -1;
+      let compare = 0;
+
+      switch (orderSortField) {
+        case 'orderId':
+          compare = a.orderId.localeCompare(b.orderId);
+          break;
+        case 'customer':
+          compare = a.customer.localeCompare(b.customer);
+          break;
+        case 'date':
+          compare = (a.dateISO || '').localeCompare(b.dateISO || '');
+          break;
+        case 'type':
+          compare = (a.order_type || '').localeCompare(b.order_type || '');
+          break;
+        case 'items':
+          const aItems = a.isNewOrder ? (a.itemCount || 0) : (a.trayCount || 0);
+          const bItems = b.isNewOrder ? (b.itemCount || 0) : (b.trayCount || 0);
+          compare = aItems - bItems;
+          break;
+        case 'total':
+          // Parse total from string like "$123.45" to number
+          const aTotal = parseFloat((a.total || '$0').replace(/[$,]/g, '')) || 0;
+          const bTotal = parseFloat((b.total || '$0').replace(/[$,]/g, '')) || 0;
+          compare = aTotal - bTotal;
+          break;
+        case 'status':
+          compare = (a.status || '').localeCompare(b.status || '');
+          break;
+      }
+      return compare * multiplier;
+    });
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status.toLowerCase()) {
@@ -1266,20 +1318,35 @@ const OrdersPage = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Order ID</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Items</TableHead>
-              <TableHead>Total</TableHead>
-              <TableHead>Status</TableHead>
+              {[
+                { field: 'orderId' as OrderSortField, label: 'Order ID' },
+                { field: 'customer' as OrderSortField, label: 'Customer' },
+                { field: 'date' as OrderSortField, label: 'Date' },
+                { field: 'type' as OrderSortField, label: 'Type' },
+                { field: 'items' as OrderSortField, label: 'Items' },
+                { field: 'total' as OrderSortField, label: 'Total' },
+                { field: 'status' as OrderSortField, label: 'Status' },
+              ].map(({ field, label }) => (
+                <TableHead
+                  key={field}
+                  className="cursor-pointer hover:bg-slate-50 select-none"
+                  onClick={() => toggleOrderSort(field)}
+                >
+                  <div className="flex items-center gap-1">
+                    {label}
+                    {orderSortField === field && (
+                      <ArrowUpDown className={`h-3 w-3 ${orderSortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
+                </TableHead>
+              ))}
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredOrders.length === 0 ? (
+            {sortedFilteredOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-32 text-center">
+                <TableCell colSpan={8} className="h-32 text-center">
                   <div className="flex flex-col items-center justify-center text-muted-foreground">
                     <FileText className="h-8 w-8 mb-2 opacity-50" />
                     <p>No orders found.</p>
@@ -1292,7 +1359,7 @@ const OrdersPage = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredOrders.map((order) => (
+              sortedFilteredOrders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell className="font-medium">
                     <button

@@ -516,6 +516,7 @@ export default function DailyFlow() {
   const [cancelRequestDialog, setCancelRequestDialog] = useState<{ task: DailyTask; reason: string } | null>(null);
   const [isCancellingRequest, setIsCancellingRequest] = useState(false);
   const [rescheduleRequestDialog, setRescheduleRequestDialog] = useState<{ task: DailyTask; newDate: string } | null>(null);
+  const [skipOverdueDialog, setSkipOverdueDialog] = useState<DailyTask | null>(null);
   const [passiveStepDetails, setPassiveStepDetails] = useState<{ stepName: string; varieties: Array<{ recipe: string; trays: number }>; totalTrays: number } | null>(null);
   const [manageOrderDialog, setManageOrderDialog] = useState<DailyTask | null>(null);
   const [fulfillmentAction, setFulfillmentAction] = useState<FulfillmentActionType | ''>('');
@@ -1115,6 +1116,7 @@ export default function DailyFlow() {
   const isLoadingTasksRef = useRef(false);
   const loadingStartTimeRef = useRef<number>(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const consecutiveTimeoutsRef = useRef(0);
 
   const loadTasks = useCallback(async (options: { suppressLoading?: boolean } = {}) => {
     const showLoading = !options.suppressLoading;
@@ -1167,12 +1169,31 @@ export default function DailyFlow() {
           timeoutId = setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
         });
         return Promise.race([promise, timeout])
+          .then((result) => {
+            // Success - reset consecutive timeout counter
+            consecutiveTimeoutsRef.current = 0;
+            return result;
+          })
           .catch((error) => {
             // Always propagate AbortError so the caller exits immediately
             if (error.name === 'AbortError') {
               throw error;
             }
             console.error('[loadTasks] Promise failed or timed out:', error);
+
+            // Track consecutive timeouts - likely indicates stale connection
+            if (error.message?.includes('timed out')) {
+              consecutiveTimeoutsRef.current++;
+              console.warn('[loadTasks] Consecutive timeouts:', consecutiveTimeoutsRef.current);
+
+              // After 3 consecutive timeouts, force page reload to reset connection
+              if (consecutiveTimeoutsRef.current >= 3) {
+                console.error('[loadTasks] Too many consecutive timeouts - forcing page reload to reset connection');
+                window.location.reload();
+                return defaultValue; // Won't reach here but TypeScript needs it
+              }
+            }
+
             return defaultValue;
           })
           .finally(() => clearTimeout(timeoutId));
@@ -1395,11 +1416,27 @@ export default function DailyFlow() {
           loadAbortControllerRef.current = null;
         }
       } else if (document.visibilityState === 'visible') {
-        // Tab is now visible - schedule a fresh load.
+        // Tab is now visible - schedule a fresh load after a quick connection check.
         // loadTasks handles concurrency via abort, so no need to check isLoadingTasksRef.
         console.log('[loadTasks] Tab visible, scheduling fresh load');
-        visibilityTimeout = setTimeout(() => {
-          loadTasks({ suppressLoading: true });
+        visibilityTimeout = setTimeout(async () => {
+          // Quick connection health check before starting queries
+          // This catches stale connections earlier than individual query timeouts
+          try {
+            const healthCheck = Promise.race([
+              getSupabaseClient().from('farms').select('farm_uuid').limit(1),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Pre-load health check timeout')), 3000)
+              )
+            ]);
+            await healthCheck;
+            // Reset timeout counter on successful health check
+            consecutiveTimeoutsRef.current = 0;
+            loadTasks({ suppressLoading: true });
+          } catch (error) {
+            console.error('[loadTasks] Pre-load health check failed, forcing page reload:', error);
+            window.location.reload();
+          }
         }, 2000);
       }
     };
@@ -2807,10 +2844,17 @@ export default function DailyFlow() {
   const handleCancelRequest = async () => {
     if (!cancelRequestDialog || isCancellingRequest) return;
 
+    // Guard: requestId must exist to cancel a request
+    if (!cancelRequestDialog.task.requestId) {
+      showNotification('error', 'Cannot cancel: this task does not have an associated request. Tasks from standing orders cannot be cancelled here.');
+      setCancelRequestDialog(null);
+      return;
+    }
+
     setIsCancellingRequest(true);
     try {
       await cancelSeedingRequest(
-        cancelRequestDialog.task.requestId!,
+        cancelRequestDialog.task.requestId,
         cancelRequestDialog.reason
       );
       showNotification('success', 'Request cancelled successfully');
@@ -3344,11 +3388,71 @@ export default function DailyFlow() {
 
   // Handler for skipping overdue seeding tasks (local skip - removes from view for this session)
   const handleSkipOverdueSeeding = (task: DailyTask) => {
-    if (!confirm(`Skip this overdue seeding for ${task.crop}? You decided not to seed for this delivery.`)) {
+    setSkipOverdueDialog(task);
+  };
+
+  // Confirm skip overdue seeding - persists to database
+  const confirmSkipOverdueSeeding = async () => {
+    if (!skipOverdueDialog) return;
+
+    const farmUuid = getFarmUuidFromSession();
+    if (!farmUuid) {
+      showNotification('error', 'No farm selected');
+      setSkipOverdueDialog(null);
       return;
     }
-    setSkippedOverdueTasks(prev => new Set(prev).add(task.id));
-    showNotification('success', `Skipped overdue seeding for ${task.crop}`);
+
+    try {
+      // Get schedule IDs from the task
+      const scheduleIds = skipOverdueDialog.scheduleIds || [];
+
+      if (scheduleIds.length > 0) {
+        // Mark order_schedules as skipped
+        const { error: scheduleError } = await getSupabaseClient()
+          .from('order_schedules')
+          .update({
+            status: 'skipped',
+            notes: `Skipped from Daily Flow - missed sow date ${skipOverdueDialog.sowDate || 'unknown'}`,
+          })
+          .in('schedule_id', scheduleIds);
+
+        if (scheduleError) {
+          console.error('[DailyFlow] Error updating order_schedules:', scheduleError);
+          throw scheduleError;
+        }
+      }
+
+      // Record task completion for audit trail (insert, ignore duplicates)
+      const { error: completionError } = await getSupabaseClient()
+        .from('task_completions')
+        .insert({
+          farm_uuid: farmUuid,
+          task_type: 'sowing',
+          task_date: skipOverdueDialog.sowDate || new Date().toISOString().split('T')[0],
+          recipe_id: skipOverdueDialog.recipeId,
+          customer_name: skipOverdueDialog.customerName || null,
+          status: 'skipped',
+          completed_at: new Date().toISOString(),
+          notes: `Skipped overdue seeding - ${scheduleIds.length} schedule(s) affected`,
+        });
+
+      if (completionError && !completionError.message?.includes('duplicate')) {
+        console.error('[DailyFlow] Error recording task completion:', completionError);
+        // Don't throw - the schedules are already marked, just log this
+      }
+
+      // Update local state to hide the task
+      setSkippedOverdueTasks(prev => new Set(prev).add(skipOverdueDialog.id));
+      showNotification('success', `Skipped overdue seeding for ${skipOverdueDialog.crop}`);
+
+      // Reload tasks after a short delay to refresh the list
+      setTimeout(() => loadTasks({ suppressLoading: true }), 100);
+    } catch (error: any) {
+      console.error('[DailyFlow] Error skipping overdue task:', error);
+      showNotification('error', error?.message || 'Failed to skip task');
+    }
+
+    setSkipOverdueDialog(null);
   };
 
   // Handler for seeding an overdue task (opens the seeding dialog)
@@ -5248,20 +5352,22 @@ export default function DailyFlow() {
                           <Calendar className="h-4 w-4 mr-2" />
                           Reschedule Request
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setCancelRequestDialog({
-                              task: soakTask,
-                              reason: 'insufficient_inventory'
-                            });
-                          }}
-                          className="w-full justify-start text-red-600 border-red-300 hover:bg-red-50"
-                        >
-                          <XCircle className="h-4 w-4 mr-2" />
-                          Cancel Request
-                        </Button>
+                        {soakTask.requestId && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setCancelRequestDialog({
+                                task: soakTask,
+                                reason: 'insufficient_inventory'
+                              });
+                            }}
+                            className="w-full justify-start text-red-600 border-red-300 hover:bg-red-50"
+                          >
+                            <XCircle className="h-4 w-4 mr-2" />
+                            Cancel Request
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -5559,24 +5665,26 @@ export default function DailyFlow() {
                             <Calendar className="h-4 w-4 mr-2" />
                             Reschedule Seeding
                           </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={!seedingDialogReady}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCancelRequestDialog({
-                                task: seedingTask,
-                                reason: 'no_soaked_seed',
-                              });
-                            }}
-                            className="w-full justify-start text-red-600 border-red-300 hover:bg-red-50"
-                          >
-                            <XCircle className="h-4 w-4 mr-2" />
-                            Cancel Seeding
-                          </Button>
+                          {seedingTask.requestId && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!seedingDialogReady}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setCancelRequestDialog({
+                                  task: seedingTask,
+                                  reason: 'no_soaked_seed',
+                                });
+                              }}
+                              className="w-full justify-start text-red-600 border-red-300 hover:bg-red-50"
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Cancel Seeding
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -5692,20 +5800,22 @@ export default function DailyFlow() {
                             <Calendar className="h-4 w-4 mr-2" />
                             Reschedule Request
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              setCancelRequestDialog({
-                                task: seedingTask,
-                                reason: 'insufficient_inventory',
-                              })
-                            }
-                            className="justify-start text-red-600 border-red-300 hover:bg-red-50"
-                          >
-                            <XCircle className="h-4 w-4 mr-2" />
-                            Cancel Request
-                          </Button>
+                          {seedingTask.requestId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setCancelRequestDialog({
+                                  task: seedingTask,
+                                  reason: 'insufficient_inventory',
+                                })
+                              }
+                              className="justify-start text-red-600 border-red-300 hover:bg-red-50"
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Cancel Request
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -5920,6 +6030,38 @@ export default function DailyFlow() {
               disabled={!cancelRequestDialog?.reason || isCancellingRequest}
             >
               {isCancellingRequest ? 'Cancelling...' : 'Cancel Request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Skip Overdue Seeding Confirmation Dialog */}
+      <Dialog open={!!skipOverdueDialog} onOpenChange={(open) => !open && setSkipOverdueDialog(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Skip Overdue Seeding?</DialogTitle>
+            <DialogDescription>
+              This will remove the task from your view for this session.
+            </DialogDescription>
+          </DialogHeader>
+          {skipOverdueDialog && (
+            <div className="py-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-amber-900">
+                  {skipOverdueDialog.crop}
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  {skipOverdueDialog.quantity || skipOverdueDialog.trays} tray{(skipOverdueDialog.quantity || skipOverdueDialog.trays) !== 1 ? 's' : ''} • {skipOverdueDialog.daysOverdue} day{skipOverdueDialog.daysOverdue !== 1 ? 's' : ''} overdue
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSkipOverdueDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmSkipOverdueSeeding} variant="default">
+              Skip Seeding
             </Button>
           </DialogFooter>
         </DialogContent>

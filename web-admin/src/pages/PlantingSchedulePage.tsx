@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Sprout, Package, Clock, AlertCircle, AlertTriangle, ChevronRight, Check, Printer, X } from 'lucide-react';
+import { Calendar, Sprout, Package, Clock, AlertCircle, AlertTriangle, ChevronRight, Check, Printer, X, SkipForward } from 'lucide-react';
 import SeedingPlanPrint from '../components/print/SeedingPlanPrint';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { calculateStandingOrderSowDates } from '../services/predictiveScheduler';
@@ -561,6 +561,25 @@ const PlantingSchedulePage = () => {
 
       console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded deliveries)`);
 
+      // DEBUG: Log all schedules with sow_date < today BEFORE tray-check filtering
+      const todayForDebug = new Date();
+      todayForDebug.setHours(0, 0, 0, 0);
+      const overdueBeforeFilter = deduplicatedSchedules.filter(s => {
+        const sowDate = new Date(s.sow_date);
+        sowDate.setHours(0, 0, 0, 0);
+        return sowDate < todayForDebug;
+      });
+      console.log('[PlantingSchedule] DEBUG - Overdue schedules BEFORE tray-check filter:', {
+        count: overdueBeforeFilter.length,
+        schedules: overdueBeforeFilter.map(s => ({
+          recipe_name: s.recipe_name,
+          sow_date: getLocalDateKey(s.sow_date),
+          quantity_needed: Math.ceil(s.quantity),
+          recipe_id: s.recipe_id,
+          deliveries_count: s.deliveries?.length || 0,
+        })),
+      });
+
       // 7. Filter out schedules where trays have already been created
       // Check for existing trays or task_completions for each schedule
       const filteredSchedules: PlantingSchedule[] = [];
@@ -577,9 +596,10 @@ const PlantingSchedulePage = () => {
       const recipeIds = [...new Set(deduplicatedSchedules.map(s => s.recipe_id))];
       
       // Fetch all existing trays for these recipes (no date filter - we need all of them)
+      // Include scheduled_sow_date to match against the original planned date (not actual sow_date)
       const { data: existingTrays, error: traysError } = await getSupabaseClient()
         .from('trays')
-        .select('recipe_id, sow_date')
+        .select('recipe_id, sow_date, scheduled_sow_date')
         .eq('farm_uuid', farmUuid)
         .in('recipe_id', recipeIds);
       
@@ -604,19 +624,31 @@ const PlantingSchedulePage = () => {
 
       if (existingTrays && existingTrays.length > 0) {
         existingTrays.forEach((tray: any) => {
-          if (tray.recipe_id && tray.sow_date) {
-            // Extract YYYY-MM-DD directly from the date string to avoid timezone shifts
-            const sowDateStr = String(tray.sow_date);
-            const trayDateKey = sowDateStr.includes('T')
-              ? sowDateStr.split('T')[0]
-              : sowDateStr.slice(0, 10);
+          if (tray.recipe_id && (tray.scheduled_sow_date || tray.sow_date)) {
+            // Use scheduled_sow_date as the key for matching (the originally planned date)
+            // This ensures a tray scheduled for Feb 2 but seeded on Feb 3 counts against Feb 2
+            // Fall back to sow_date for legacy trays without scheduled_sow_date
+            const matchDateStr = String(tray.scheduled_sow_date || tray.sow_date);
+            const trayDateKey = matchDateStr.includes('T')
+              ? matchDateStr.split('T')[0]
+              : matchDateStr.slice(0, 10);
             incrementSeededTrays(tray.recipe_id, trayDateKey, 1);
           }
         });
       }
 
-      const candidateOffsets = [0, -1, 1];
+      // Only check exact date match now that we use scheduled_sow_date for lookup
+      // The ±1 day offsets were needed when matching on actual sow_date (which varies)
+      const candidateOffsets = [0];
       let filteredCount = 0;
+
+      // DEBUG: Log seeded trays map before filtering
+      console.log('[PlantingSchedule] DEBUG - Seeded trays by recipe/date:',
+        Array.from(seededTraysByRecipeDate.entries()).map(([recipeId, dateMap]) => ({
+          recipe_id: recipeId,
+          dates: Array.from(dateMap.entries()),
+        }))
+      );
 
       for (const schedule of deduplicatedSchedules) {
         const scheduleDate = new Date(schedule.sow_date);
@@ -624,8 +656,13 @@ const PlantingSchedulePage = () => {
         const scheduledTrays = Math.max(1, Math.ceil(schedule.quantity || 0));
         const recipeSeedMap = seededTraysByRecipeDate.get(schedule.recipe_id);
 
+        // DEBUG: Check if this is an overdue schedule
+        const isOverdueSchedule = scheduleDate < todayForDebug;
+
         if (recipeSeedMap && recipeSeedMap.size > 0) {
           let remainingToCover = scheduledTrays;
+          const debugOffsets: { offset: number; dateKey: string; available: number; used: number }[] = [];
+
           for (const offset of candidateOffsets) {
             if (remainingToCover <= 0) {
               break;
@@ -636,16 +673,41 @@ const PlantingSchedulePage = () => {
             const available = recipeSeedMap.get(candidateKey) || 0;
 
             if (available <= 0) {
+              debugOffsets.push({ offset, dateKey: candidateKey, available: 0, used: 0 });
               continue;
             }
             const used = Math.min(available, remainingToCover);
             recipeSeedMap.set(candidateKey, available - used);
             remainingToCover -= used;
+            debugOffsets.push({ offset, dateKey: candidateKey, available, used });
           }
+
+          // DEBUG: Log filtering decision for overdue schedules
+          if (isOverdueSchedule) {
+            console.log('[PlantingSchedule] DEBUG - Tray check for OVERDUE schedule:', {
+              recipe_name: schedule.recipe_name,
+              recipe_id: schedule.recipe_id,
+              sow_date: getLocalDateKey(scheduleDate),
+              trays_needed: scheduledTrays,
+              remaining_after_check: remainingToCover,
+              will_be_filtered: remainingToCover <= 0,
+              offset_checks: debugOffsets,
+            });
+          }
+
           if (remainingToCover <= 0) {
             filteredCount++;
             continue;
           }
+        } else if (isOverdueSchedule) {
+          // DEBUG: Log overdue schedules that have no seeded trays at all
+          console.log('[PlantingSchedule] DEBUG - OVERDUE schedule with NO seeded trays:', {
+            recipe_name: schedule.recipe_name,
+            recipe_id: schedule.recipe_id,
+            sow_date: getLocalDateKey(scheduleDate),
+            trays_needed: scheduledTrays,
+            will_be_kept: true,
+          });
         }
 
         filteredSchedules.push(schedule);
@@ -693,6 +755,25 @@ const PlantingSchedulePage = () => {
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    // DEBUG: Count overdue in schedules state before filtering
+    const overdueInState = schedules.filter(s => {
+      const d = new Date(s.sow_date);
+      d.setHours(0, 0, 0, 0);
+      return d < now;
+    });
+    console.log('[PlantingSchedule] DEBUG - filterSchedules() called:', {
+      schedules_total: schedules.length,
+      overdue_in_schedules_state: overdueInState.length,
+      overdue_details: overdueInState.map(s => ({
+        recipe_name: s.recipe_name,
+        sow_date: s.sow_date,
+        quantity: Math.ceil(s.quantity),
+      })),
+      dateRange,
+      sevenDaysAgo: sevenDaysAgo.toISOString(),
+      now: now.toISOString(),
+    });
+
     const filtered = schedules.filter(schedule => {
       const sowDate = new Date(schedule.sow_date);
       sowDate.setHours(0, 0, 0, 0);
@@ -700,6 +781,17 @@ const PlantingSchedulePage = () => {
       const isOverdue = sowDate >= sevenDaysAgo && sowDate < now;
       const isInRange = sowDate >= now && sowDate <= endDate;
       return isOverdue || isInRange;
+    });
+
+    // DEBUG: Log filtered results
+    const overdueInFiltered = filtered.filter(s => {
+      const d = new Date(s.sow_date);
+      d.setHours(0, 0, 0, 0);
+      return d < now;
+    });
+    console.log('[PlantingSchedule] DEBUG - filterSchedules() result:', {
+      filtered_total: filtered.length,
+      overdue_in_filtered: overdueInFiltered.length,
     });
 
     setFilteredSchedules(filtered);
@@ -722,11 +814,41 @@ const PlantingSchedulePage = () => {
     return grouped;
   };
 
+  // Separate overdue schedules from upcoming/today schedules
+  const separateSchedules = useCallback((schedules: PlantingSchedule[]) => {
+    const today = getToday();
+    const overdue: PlantingSchedule[] = [];
+    const upcoming: PlantingSchedule[] = [];
+
+    schedules.forEach(schedule => {
+      const sowDate = new Date(schedule.sow_date);
+      sowDate.setHours(0, 0, 0, 0);
+      if (sowDate < today) {
+        overdue.push(schedule);
+      } else {
+        upcoming.push(schedule);
+      }
+    });
+
+    // Sort overdue by date descending (most recent first)
+    overdue.sort((a, b) => new Date(b.sow_date).getTime() - new Date(a.sow_date).getTime());
+
+    return { overdue, upcoming };
+  }, []);
+
   const getDaysUntil = (date: Date) => {
     const today = getToday();
     const targetDate = new Date(date);
     targetDate.setHours(0, 0, 0, 0);
     const diff = targetDate.getTime() - today.getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+  };
+
+  const getDaysOverdue = (date: Date) => {
+    const today = getToday();
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+    const diff = today.getTime() - targetDate.getTime();
     return Math.floor(diff / (1000 * 60 * 60 * 24));
   };
 
@@ -820,6 +942,9 @@ const PlantingSchedulePage = () => {
 
   // Handle skipping an overdue schedule
   const handleSkipSchedule = (schedule: PlantingSchedule) => {
+    if (!confirm(`Skip this overdue seeding for ${schedule.recipe_name}? This will remove it from your view for this session.`)) {
+      return;
+    }
     const scheduleKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${getLocalDateKey(new Date(schedule.sow_date))}`;
     setSkippedSchedules(prev => new Set([...prev, scheduleKey]));
   };
@@ -852,6 +977,18 @@ const PlantingSchedulePage = () => {
     setSelectedBatchOption(null);
     setAvailableBatches([]);
     setBatchNotice(null);
+
+    // Helper to wrap queries with timeout to prevent hanging after tab restoration
+    // Uses PromiseLike to support Supabase query builders which are thenable but not Promises
+    const withTimeout = <T,>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> => {
+      return Promise.race([
+        Promise.resolve(promiseLike),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Query timeout: ${label} took longer than ${ms}ms`)), ms)
+        )
+      ]);
+    };
+
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
@@ -863,12 +1000,16 @@ const PlantingSchedulePage = () => {
       const { farmUuid } = JSON.parse(sessionData);
       console.log('[PlantingSchedule] Querying recipe for batch lookup...', { recipe_id: schedule.recipe_id, farmUuid });
 
-      const { data: recipeData, error: recipeError } = await getSupabaseClient()
-        .from('recipes')
-        .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit')
-        .eq('recipe_id', schedule.recipe_id)
-        .eq('farm_uuid', farmUuid)
-        .single();
+      const { data: recipeData, error: recipeError } = await withTimeout(
+        getSupabaseClient()
+          .from('recipes')
+          .select('recipe_id, recipe_name, variety_id, variety_name, seed_quantity, seed_quantity_unit')
+          .eq('recipe_id', schedule.recipe_id)
+          .eq('farm_uuid', farmUuid)
+          .single(),
+        10000,
+        'recipe lookup'
+      );
 
       console.log('[PlantingSchedule] Recipe query result:', { recipeData, recipeError });
 
@@ -897,11 +1038,15 @@ const PlantingSchedulePage = () => {
       let varietyName = recipeData.variety_name || '';
       let requiresSoaking = false;
       try {
-        const { data: varietyData, error: varietyError } = await getSupabaseClient()
-          .from('varieties')
-          .select('varietyid, name, soakingtimehours')
-          .eq('varietyid', recipeData.variety_id)
-          .single();
+        const { data: varietyData, error: varietyError } = await withTimeout(
+          getSupabaseClient()
+            .from('varieties')
+            .select('varietyid, name, soakingtimehours')
+            .eq('varietyid', recipeData.variety_id)
+            .single(),
+          10000,
+          'variety lookup'
+        );
         if (varietyError && !varietyData) {
           console.error('[PlantingSchedule] Error fetching variety info:', varietyError);
         }
@@ -957,13 +1102,17 @@ const PlantingSchedulePage = () => {
       };
 
       if (requiresSoaking) {
-        const { data: soakedSeedsData, error: soakedSeedsError } = await getSupabaseClient()
-          .from('soaked_seed')
-          .select('soaked_id, seedbatch_id, quantity_remaining, unit, soak_date, expires_at')
-          .eq('farm_uuid', farmUuid)
-          .eq('variety_id', recipeData.variety_id)
-          .eq('status', 'available')
-          .order('soak_date', { ascending: false });
+        const { data: soakedSeedsData, error: soakedSeedsError } = await withTimeout(
+          getSupabaseClient()
+            .from('soaked_seed')
+            .select('soaked_id, seedbatch_id, quantity_remaining, unit, soak_date, expires_at')
+            .eq('farm_uuid', farmUuid)
+            .eq('variety_id', recipeData.variety_id)
+            .eq('status', 'available')
+            .order('soak_date', { ascending: false }),
+          10000,
+          'soaked seeds lookup'
+        );
 
         if (soakedSeedsError) {
           console.error('[PlantingSchedule] Error fetching soaked seeds:', soakedSeedsError);
@@ -1006,10 +1155,14 @@ const PlantingSchedulePage = () => {
         return;
       }
 
-      const { data: allBatches, error: allBatchesError } = await getSupabaseClient()
-        .from('seedbatches')
-        .select('*')
-        .eq('farm_uuid', farmUuid);
+      const { data: allBatches, error: allBatchesError } = await withTimeout(
+        getSupabaseClient()
+          .from('seedbatches')
+          .select('*')
+          .eq('farm_uuid', farmUuid),
+        10000,
+        'all batches debug'
+      );
 
       if (allBatchesError) {
         console.error('[PlantingSchedule] Error fetching all batches for debug:', allBatchesError);
@@ -1020,19 +1173,23 @@ const PlantingSchedulePage = () => {
         });
       }
 
-      const { data: batchesData, error: batchesError } = await getSupabaseClient()
-        .from('seedbatches')
-        .select(`
-          batchid,
-          quantity,
-          unit,
-          lot_number,
-          purchasedate,
-          varietyid
-        `)
-        .eq('farm_uuid', farmUuid)
-        .eq('varietyid', recipeData.variety_id)
-        .order('purchasedate', { ascending: true });
+      const { data: batchesData, error: batchesError } = await withTimeout(
+        getSupabaseClient()
+          .from('seedbatches')
+          .select(`
+            batchid,
+            quantity,
+            unit,
+            lot_number,
+            purchasedate,
+            varietyid
+          `)
+          .eq('farm_uuid', farmUuid)
+          .eq('varietyid', recipeData.variety_id)
+          .order('purchasedate', { ascending: true }),
+        10000,
+        'seed batches lookup'
+      );
 
       if (batchesError) {
         console.error('[PlantingSchedule] Error fetching batches:', batchesError);
@@ -1067,6 +1224,13 @@ const PlantingSchedulePage = () => {
       setAvailableBatches(formattedOptions);
     } catch (error) {
       console.error('[PlantingSchedule] Error in fetchAvailableBatchesForRecipe:', error);
+      // Show user-friendly message for timeout errors (common after tab restoration)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('Query timeout')) {
+        setBatchNotice('Connection timed out. Please close this dialog and try again.');
+      } else {
+        setBatchNotice('Failed to load seed batches. Please try again.');
+      }
     } finally {
       console.log('[PlantingSchedule] fetchAvailableBatchesForRecipe FINISHED');
       setLoadingBatches(false);
@@ -1279,8 +1443,25 @@ const PlantingSchedulePage = () => {
     );
   }
 
-  const groupedSchedules = groupSchedulesByDate(filteredSchedules);
+  // Separate overdue from upcoming schedules
+  const { overdue: overdueSchedules, upcoming: upcomingSchedules } = separateSchedules(filteredSchedules);
+  const filteredOverdue = overdueSchedules.filter(s => !isScheduleSkipped(s));
+  const groupedSchedules = groupSchedulesByDate(upcomingSchedules);
   const dateKeys = Object.keys(groupedSchedules).sort();
+
+  // DEBUG: Log what ends up in filteredOverdue
+  console.log('[PlantingSchedule] DEBUG - Final overdue display:', {
+    filteredSchedules_total: filteredSchedules.length,
+    overdueSchedules_from_separate: overdueSchedules.length,
+    filteredOverdue_after_skip_check: filteredOverdue.length,
+    skipped_count: skippedSchedules.size,
+    overdue_details: filteredOverdue.map(s => ({
+      recipe_name: s.recipe_name,
+      sow_date: s.sow_date,
+      quantity: Math.ceil(s.quantity),
+      customer: s.customer_name,
+    })),
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
@@ -1322,14 +1503,27 @@ const PlantingSchedulePage = () => {
       </div>
 
       {/* Stats Summary */}
-      {filteredSchedules.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {(filteredSchedules.length > 0 || filteredOverdue.length > 0) && (
+        <div className={`grid grid-cols-1 gap-4 ${filteredOverdue.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+          {filteredOverdue.length > 0 && (
+            <Card className="border-amber-300 bg-amber-50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-amber-700">Overdue Seedings</p>
+                    <p className="text-2xl font-bold text-amber-900">{filteredOverdue.length}</p>
+                  </div>
+                  <AlertTriangle className="h-8 w-8 text-amber-600" />
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Upcoming Plantings</p>
-                  <p className="text-2xl font-bold text-gray-900">{filteredSchedules.length}</p>
+                  <p className="text-2xl font-bold text-gray-900">{upcomingSchedules.length}</p>
                 </div>
                 <Sprout className="h-8 w-8 text-emerald-600" />
               </div>
@@ -1365,7 +1559,7 @@ const PlantingSchedulePage = () => {
       )}
 
       {/* Schedule List */}
-      {dateKeys.length === 0 ? (
+      {dateKeys.length === 0 && filteredOverdue.length === 0 ? (
         <EmptyState
           icon={<Calendar className="h-12 w-12 text-gray-400" />}
           title="No upcoming plantings"
@@ -1379,6 +1573,110 @@ const PlantingSchedulePage = () => {
         />
       ) : (
         <div className="space-y-6">
+          {/* Overdue Seedings Section */}
+          {filteredOverdue.length > 0 && (
+            <Card className="border-2 border-amber-300 bg-amber-50 overflow-hidden">
+              <div className="h-1 bg-amber-500 w-full"></div>
+              <CardHeader className="bg-gradient-to-r from-amber-100 to-amber-50 border-b border-amber-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-amber-200">
+                      <AlertTriangle className="h-5 w-5 text-amber-700" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-bold text-amber-900">
+                        Overdue Seedings
+                      </CardTitle>
+                      <CardDescription className="text-amber-700">
+                        These seedings were scheduled but not completed. Seed now to catch up, or skip if not needed.
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <Badge className="bg-amber-200 text-amber-800 font-mono">
+                    {filteredOverdue.length} overdue
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-amber-200">
+                  {filteredOverdue.map((schedule, index) => {
+                    const scheduleKey = getScheduleKey(schedule, index);
+                    const isRemoving = removingScheduleKey === scheduleKey;
+                    const daysOverdue = getDaysOverdue(new Date(schedule.sow_date));
+
+                    return (
+                      <div
+                        key={scheduleKey}
+                        className={`p-4 transition-all duration-300 ease-out hover:bg-amber-100/50 ${
+                          isRemoving ? 'opacity-0 -translate-y-2' : 'opacity-100 translate-y-0'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-semibold text-amber-900">
+                                {schedule.recipe_name}
+                              </h3>
+                              <Badge variant="outline" className="text-xs border-amber-400 text-amber-700">
+                                {Math.ceil(schedule.quantity)} {Math.ceil(schedule.quantity) === 1 ? 'tray' : 'trays'}
+                              </Badge>
+                              <Badge className="bg-amber-100 text-amber-700 font-mono text-xs">
+                                {daysOverdue} {daysOverdue === 1 ? 'day' : 'days'} late
+                              </Badge>
+                            </div>
+                            <div className="space-y-1 text-sm text-amber-700">
+                              <div className="flex items-center gap-2">
+                                <Calendar className="h-4 w-4" />
+                                <span>
+                                  <strong>Was scheduled:</strong> {formatDate(new Date(schedule.sow_date))}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Package className="h-4 w-4" />
+                                <span>
+                                  <strong>Order:</strong> {schedule.order_name}
+                                  {schedule.customer_name && ` • ${schedule.customer_name}`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4" />
+                                <span>
+                                  <strong>Delivery:</strong> {formatDate(schedule.delivery_date)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSkipSchedule(schedule)}
+                              className="text-amber-700 border-amber-400 hover:bg-amber-200"
+                            >
+                              <SkipForward className="h-4 w-4 mr-1" />
+                              Skip
+                            </Button>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleCreateTray(schedule, index)}
+                              className="bg-amber-600 hover:bg-amber-700 text-white"
+                            >
+                              <Sprout className="h-4 w-4 mr-1" />
+                              Seed Now
+                              <ChevronRight className="h-4 w-4 ml-1" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Today and Upcoming Schedules */}
           {dateKeys.map(dateKey => {
             const daySchedules = groupedSchedules[dateKey];
             // Parse as local time (noon) to avoid timezone shifts

@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
-import { Edit, Package, Plus, Search } from 'lucide-react';
+import { Edit, History, Package, Plus, Search } from 'lucide-react';
 import EmptyState from '../components/onboarding/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -47,6 +46,17 @@ const stockToneClassMap: Record<StockStatusTone, string> = {
 };
 
 const GRAMS_PER_POUND = 453.592;
+
+// Common adjustment reasons for seed inventory
+const ADJUSTMENT_REASONS = [
+  { value: 'physical_count', label: 'Physical count correction' },
+  { value: 'spillage', label: 'Spillage / waste' },
+  { value: 'quality_issue', label: 'Quality issue (discarded)' },
+  { value: 'sample_testing', label: 'Sample / testing' },
+  { value: 'received_stock', label: 'Received additional stock' },
+  { value: 'data_entry_error', label: 'Data entry error' },
+  { value: 'other', label: 'Other' },
+] as const;
 
 const getStockStatusInfo = (quantity: number, lowStockThreshold: number | null) => {
   const formattedQuantity = formatQuantityDisplay(quantity);
@@ -164,6 +174,15 @@ const BatchesPage = () => {
   const [editingBatch, setEditingBatch] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // History modal state
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [historyBatch, setHistoryBatch] = useState<any>(null);
+  const [historyTransactions, setHistoryTransactions] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize] = useState(10);
+  const [historySortField, setHistorySortField] = useState<'date' | 'type' | 'amount'>('date');
+  const [historySortDir, setHistorySortDir] = useState<'asc' | 'desc'>('desc');
   const [newBatch, setNewBatch] = useState({
     variety_id: '',
     vendor_id: '',
@@ -240,6 +259,28 @@ const BatchesPage = () => {
 
       if (error) throw error;
 
+      // Fetch seed_transactions aggregated by batch_id to calculate remaining inventory
+      // Transactions store negative values for seed usage (deductions)
+      const { data: transactionsData, error: transError } = await getSupabaseClient()
+        .from('seed_transactions')
+        .select('batch_id, quantity_grams')
+        .eq('farm_uuid', farmUuid);
+
+      if (transError) {
+        console.error('Error fetching seed_transactions:', transError);
+      }
+
+      // Build a map of batch_id -> total_used_grams (sum of all transactions)
+      const transactionTotalsByBatch = new Map<number, number>();
+      if (transactionsData) {
+        for (const tx of transactionsData) {
+          if (tx.batch_id != null) {
+            const current = transactionTotalsByBatch.get(tx.batch_id) || 0;
+            transactionTotalsByBatch.set(tx.batch_id, current + parseNumericValue(tx.quantity_grams));
+          }
+        }
+      }
+
       // Sort batches by purchase date (most recent first) in JavaScript
       // Actual DB column: purchasedate
       const sortedBatches = (data || []).sort((a: any, b: any) => {
@@ -292,7 +333,30 @@ const BatchesPage = () => {
           const thresholdValue = parseNumericValue(
             batch.low_stock_threshold ?? batch.reorderlevel ?? batch.reorder_level
           );
-          const quantityValue = parseNumericValue(batch.quantity);
+          const originalQuantityValue = parseNumericValue(batch.quantity);
+          const batchUnit = batch.unit || 'lbs';
+
+          // Convert original quantity to grams
+          let originalQuantityGrams = originalQuantityValue;
+          if (batchUnit === 'lbs') {
+            originalQuantityGrams = originalQuantityValue * GRAMS_PER_POUND;
+          } else if (batchUnit === 'oz') {
+            originalQuantityGrams = originalQuantityValue * 28.3495;
+          } else if (batchUnit === 'kg') {
+            originalQuantityGrams = originalQuantityValue * 1000;
+          }
+          // else assume already in grams
+
+          // Get transaction total for this batch (negative values = seed usage)
+          const transactionTotal = transactionTotalsByBatch.get(batchId) || 0;
+
+          // Calculate remaining quantity in grams
+          const remainingQuantityGrams = originalQuantityGrams + transactionTotal;
+
+          // Convert remaining quantity back to lbs for stock status calculation
+          // (determineBatchStockStatus expects quantity in lbs and converts to grams internally)
+          const remainingQuantityLbs = remainingQuantityGrams / GRAMS_PER_POUND;
+
           const normalizedBatch = {
             ...batch,
             batch_id: batch.batchid || batch.batch_id, // Map batchid to batch_id
@@ -303,9 +367,11 @@ const BatchesPage = () => {
             vendor_id: vendorId,
             trayCount: count || 0,
             low_stock_threshold: thresholdValue,
-            stock_quantity: quantityValue,
+            stock_quantity: remainingQuantityLbs, // Use remaining quantity, not original
+            original_quantity: originalQuantityValue, // Keep original for reference
+            remaining_quantity_grams: remainingQuantityGrams, // Store for debugging
             stockStatus: determineBatchStockStatus(
-              quantityValue,
+              remainingQuantityLbs,
               thresholdValue,
               varietyId,
               recipeMinSeedMap,
@@ -314,8 +380,8 @@ const BatchesPage = () => {
                 varietyName: variety?.variety_name || variety?.name || '',
               }
             ),
-            vendors: vendor ? { 
-              vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string 
+            vendors: vendor ? {
+              vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string
             } : null,
           };
           return normalizedBatch;
@@ -529,7 +595,7 @@ const BatchesPage = () => {
     const batchId = batch.batch_id || batch.batchid;
     const varietyId = batch.variety_id || batch.varietyid;
     const vendorId = batch.vendor_id || batch.vendorid;
-    
+
     const editData = {
       batch_id: batchId,
       variety_id: varietyId ? varietyId.toString() : '',
@@ -537,100 +603,182 @@ const BatchesPage = () => {
       quantity: formatQuantityDisplay(batch.quantity),
       unit: batch.unit || 'lbs',
       lot_number: batch.lot_number || batch.lotnumber || '',
-      purchase_date: batch.purchase_date || batch.purchasedate 
+      purchase_date: batch.purchase_date || batch.purchasedate
         ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
       cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
       low_stock_threshold: batch.low_stock_threshold ?? null,
       originalQuantity: parseNumericValue(batch.quantity),
+      stock_quantity: batch.stock_quantity, // Remaining inventory in lbs
+      current_quantity_display: formatQuantityDisplay(batch.stock_quantity), // Editable current quantity
+      current_quantity_unit: 'lbs', // Default to lbs for editing
+      stockStatus: batch.stockStatus,
       actualQuantity: '',
-      adjustmentReason: '',
+      adjustmentReasonType: 'physical_count', // Default to most common reason
+      adjustmentReasonCustom: '', // For "Other" option
       is_active: batch.is_active !== undefined ? batch.is_active : true,
+      updated_at: batch.updated_at || null,
+      created_at: batch.created_at || null,
     };
-    
+
     setEditingBatch(editData);
     setIsEditDialogOpen(true);
   };
 
+  const handleViewHistory = async (batch: any) => {
+    const batchId = batch.batch_id || batch.batchid;
+    setHistoryBatch(batch);
+    setIsHistoryDialogOpen(true);
+    setLoadingHistory(true);
+    setHistoryTransactions([]);
+    setHistoryPage(1); // Reset to first page
+    setHistorySortField('date');
+    setHistorySortDir('desc');
+
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      const { farmUuid } = JSON.parse(sessionData);
+
+      const { data, error } = await getSupabaseClient()
+        .from('seed_transactions')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .eq('batch_id', batchId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setHistoryTransactions(data || []);
+    } catch (error) {
+      console.error('Error fetching batch history:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const formatTransactionType = (type: string | null) => {
+    if (!type) return 'Unknown';
+    const typeMap: Record<string, string> = {
+      'sowing': 'Seeding',
+      'seeding': 'Seeding',
+      'manual_adjustment': 'Manual Adjustment',
+      'harvest': 'Harvest',
+      'waste': 'Waste/Loss',
+      'discard': 'Discarded',
+    };
+    return typeMap[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1);
+  };
+
   const handleUpdateBatch = async () => {
-    if (!editingBatch || !editingBatch.variety_id || !editingBatch.quantity) return;
+    if (!editingBatch || !editingBatch.variety_id) return;
 
     setUpdating(true);
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        console.error('No session data found');
+        return;
+      }
       const session = JSON.parse(sessionData);
       const { farmUuid, userId } = session;
+      console.log('[handleUpdateBatch] Starting update for batch:', editingBatch.batch_id);
 
       const batchId = editingBatch.batch_id;
-      const parsedQuantity = toNullableNumber(editingBatch.quantity) ?? 0;
-      const actualQuantityInput =
-        editingBatch.actualQuantity !== undefined && editingBatch.actualQuantity !== ''
-          ? toNullableNumber(editingBatch.actualQuantity)
-          : null;
-      const hasActualQuantity = actualQuantityInput !== null && Number.isFinite(actualQuantityInput);
-      const quantityForUpdate = hasActualQuantity ? actualQuantityInput as number : parsedQuantity;
-      const recordedQuantity =
-        Number.isFinite(editingBatch.originalQuantity) ? editingBatch.originalQuantity : parsedQuantity;
 
-      const payload: any = {
-        varietyid: parseInt(editingBatch.variety_id), // Actual DB column
-        vendorid: toNullableNumber(editingBatch.vendor_id),
-        quantity: quantityForUpdate,
-        unit: editingBatch.unit,
-        lot_number: editingBatch.lot_number || null,
-        purchasedate: editingBatch.purchase_date, // Actual DB column
-      };
-      const isActiveValue = editingBatch.is_active !== undefined ? editingBatch.is_active : true;
-      payload.is_active = isActiveValue;
-      payload.status = isActiveValue ? 'active' : 'inactive';
-
-      // Map cost to totalprice if provided (actual DB column)
-      if (editingBatch.cost) {
-        payload.totalprice = parseFloat(editingBatch.cost);
-        // Calculate priceperounce if we have quantity and unit
-        if (quantityForUpdate > 0 && editingBatch.unit === 'oz') {
-          payload.priceperounce = parseFloat(editingBatch.cost) / quantityForUpdate;
+      // Convert entered quantity to lbs
+      const enteredQty = toNullableNumber(editingBatch.current_quantity_display);
+      const enteredUnit = editingBatch.current_quantity_unit ?? 'lbs';
+      let newCurrentQtyLbs = enteredQty;
+      if (enteredQty !== null) {
+        if (enteredUnit === 'g') {
+          newCurrentQtyLbs = enteredQty / GRAMS_PER_POUND;
+        } else if (enteredUnit === 'oz') {
+          newCurrentQtyLbs = enteredQty / 16;
+        } else if (enteredUnit === 'kg') {
+          newCurrentQtyLbs = (enteredQty * 1000) / GRAMS_PER_POUND;
         }
       }
 
-      const adjustmentDifference =
-        hasActualQuantity && Number.isFinite(recordedQuantity)
-          ? actualQuantityInput! - recordedQuantity
-          : null;
+      const oldCurrentQtyLbs = toNullableNumber(editingBatch.stock_quantity);
 
-      if (adjustmentDifference !== null && Math.abs(adjustmentDifference) >= 0.0001) {
-        const adjustmentNotes = editingBatch.adjustmentReason?.trim() || null;
+      // Calculate adjustment if current quantity changed
+      if (
+        newCurrentQtyLbs !== null &&
+        oldCurrentQtyLbs !== null &&
+        Math.abs(newCurrentQtyLbs - oldCurrentQtyLbs) >= 0.01
+      ) {
+        const adjustmentLbs = newCurrentQtyLbs - oldCurrentQtyLbs;
+        const adjustmentGrams = adjustmentLbs * GRAMS_PER_POUND;
+
+        // Build adjustment notes from selected reason
+        const reasonType = editingBatch.adjustmentReasonType || 'physical_count';
+        let adjustmentNotes: string;
+        if (reasonType === 'other') {
+          adjustmentNotes = editingBatch.adjustmentReasonCustom?.trim() || 'Manual inventory correction';
+        } else {
+          const reasonLabel = ADJUSTMENT_REASONS.find(r => r.value === reasonType)?.label || 'Manual inventory correction';
+          adjustmentNotes = reasonLabel;
+        }
+
+        console.log('[handleUpdateBatch] Inserting adjustment transaction:', { adjustmentGrams, adjustmentNotes, batchId });
         const { error: txError } = await getSupabaseClient()
           .from('seed_transactions')
           .insert([
             {
               transaction_type: 'manual_adjustment',
-              quantity_grams: adjustmentDifference * 453.592,
+              quantity_grams: adjustmentGrams,
               notes: adjustmentNotes,
               batch_id: batchId,
               farm_uuid: farmUuid,
               created_by: userId || null,
             },
           ]);
-        if (txError) throw txError;
+        if (txError) {
+          console.error('[handleUpdateBatch] Transaction insert error:', txError);
+          throw txError;
+        }
+        console.log('[handleUpdateBatch] Transaction inserted successfully');
       }
 
+      // Update batch metadata (NOT the original quantity - that stays as the purchase record)
+      const payload: any = {
+        varietyid: parseInt(editingBatch.variety_id),
+        vendorid: toNullableNumber(editingBatch.vendor_id),
+        lot_number: editingBatch.lot_number || null,
+        purchasedate: editingBatch.purchase_date,
+        updated_at: new Date().toISOString(),
+        updated_by: userId || null,
+      };
+      const isActiveValue = editingBatch.is_active !== undefined ? editingBatch.is_active : true;
+      payload.is_active = isActiveValue;
+      payload.status = isActiveValue ? 'active' : 'inactive';
+
+      // Map cost to totalprice if provided
+      if (editingBatch.cost) {
+        payload.totalprice = parseFloat(editingBatch.cost);
+      }
+
+      console.log('[handleUpdateBatch] Updating batch metadata:', payload);
       const { error } = await getSupabaseClient()
         .from('seedbatches')
         .update(payload)
         .eq('batchid', batchId)
         .eq('farm_uuid', farmUuid);
 
-      if (error) throw error;
+      if (error) {
+        console.error('[handleUpdateBatch] Batch update error:', error);
+        throw error;
+      }
+      console.log('[handleUpdateBatch] Batch updated successfully, closing dialog');
 
       setIsEditDialogOpen(false);
       setEditingBatch(null);
       fetchBatches();
     } catch (error) {
-      console.error('Error updating batch:', error);
+      console.error('[handleUpdateBatch] Error updating batch:', error);
       alert('Failed to update batch');
     } finally {
+      console.log('[handleUpdateBatch] Finally block - resetting updating state');
       setUpdating(false);
     }
   };
@@ -658,7 +806,7 @@ const BatchesPage = () => {
         case 'variety':
           return (a.variety_name || '').localeCompare(b.variety_name || '');
         case 'quantity':
-          return parseNumericValue(b.quantity) - parseNumericValue(a.quantity);
+          return parseNumericValue(b.stock_quantity) - parseNumericValue(a.stock_quantity);
         case 'stock_status':
           const statusOrder = { 'Out of Stock': 0, "Can't Seed": 1, 'Low Stock': 2, 'In Stock': 3 };
           const aStatus = statusOrder[a.stockStatus as keyof typeof statusOrder] ?? 4;
@@ -960,7 +1108,7 @@ const BatchesPage = () => {
                   <TableCell>{batch.variety_name || 'N/A'}</TableCell>
                   <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
                   <TableCell>
-                    {batch.quantity ? `${formatQuantityDisplay(batch.quantity)} ${batch.unit || 'units'}` : 'N/A'}
+                    {batch.stock_quantity !== undefined ? `${formatQuantityDisplay(batch.stock_quantity)} lbs` : 'N/A'}
                   </TableCell>
                   <TableCell>
                     <Badge variant={getBatchStatusVariant(batch.stockStatus)} className="capitalize text-center">
@@ -979,10 +1127,24 @@ const BatchesPage = () => {
                   <TableCell>{batch.trayCount || 0}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         type="button"
+                        title="View History"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleViewHistory(batch);
+                        }}
+                      >
+                        <History className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        title="Edit Batch"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
@@ -1037,12 +1199,24 @@ const BatchesPage = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground">Quantity</Label>
-                  <div>{selectedBatch.quantity ? `${parseFloat(selectedBatch.quantity).toFixed(2)} ${selectedBatch.unit || 'lbs'}` : 'N/A'}</div>
+                  <Label className="text-muted-foreground">Original Purchase</Label>
+                  <div>{selectedBatch.original_quantity ? `${parseFloat(selectedBatch.original_quantity).toFixed(2)} ${selectedBatch.unit || 'lbs'}` : (selectedBatch.quantity ? `${parseFloat(selectedBatch.quantity).toFixed(2)} ${selectedBatch.unit || 'lbs'}` : 'N/A')}</div>
                 </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Remaining Inventory</Label>
+                  <div>{selectedBatch.stock_quantity !== undefined ? `${formatQuantityDisplay(selectedBatch.stock_quantity)} lbs` : 'N/A'}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label className="text-muted-foreground">Lot Number</Label>
                   <div>{selectedBatch.lot_number || selectedBatch.lotnumber || '-'}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Stock Status</Label>
+                  <Badge variant={getBatchStatusVariant(selectedBatch.stockStatus)} className="capitalize">
+                    {selectedBatch.stockStatus || 'Unknown'}
+                  </Badge>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1089,7 +1263,7 @@ const BatchesPage = () => {
                   <Label htmlFor="edit-variety">Variety</Label>
                   <Select 
                     value={editingBatch.variety_id} 
-                    onValueChange={(value) => setEditingBatch({ ...editingBatch, variety_id: value })}
+                    onValueChange={(value) => setEditingBatch((prev: any) => ({ ...prev, variety_id: value }))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select variety" />
@@ -1107,7 +1281,7 @@ const BatchesPage = () => {
                   <Label htmlFor="edit-vendor">Vendor (Optional)</Label>
                   <Select 
                     value={editingBatch.vendor_id || 'none'} 
-                    onValueChange={(value) => setEditingBatch({ ...editingBatch, vendor_id: value === 'none' ? '' : value })}
+                    onValueChange={(value) => setEditingBatch((prev: any) => ({ ...prev, vendor_id: value === 'none' ? '' : value }))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select vendor" />
@@ -1124,21 +1298,26 @@ const BatchesPage = () => {
                 </div>
               </div>
 
+              {/* Current Stock - main editable field */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="edit-quantity">Quantity</Label>
+                  <Label htmlFor="edit-quantity">Current Quantity</Label>
                   <div className="flex gap-2">
                     <Input
                       id="edit-quantity"
                       type="number"
                       step="0.1"
                       placeholder="0.0"
-                      value={editingBatch.quantity}
-                      onChange={(e) => setEditingBatch({ ...editingBatch, quantity: e.target.value })}
+                      value={editingBatch.current_quantity_display ?? formatQuantityDisplay(editingBatch.stock_quantity)}
+                      onChange={(e) => {
+                        const newValue = e.target.value;
+                        setEditingBatch((prev: any) => ({ ...prev, current_quantity_display: newValue }));
+                      }}
+                      className={`${(parseFloat(editingBatch.current_quantity_display ?? editingBatch.stock_quantity) ?? 0) <= 0 ? 'border-rose-300' : ''}`}
                     />
-                    <Select 
-                      value={editingBatch.unit} 
-                      onValueChange={(value) => setEditingBatch({ ...editingBatch, unit: value })}
+                    <Select
+                      value={editingBatch.current_quantity_unit ?? 'lbs'}
+                      onValueChange={(value) => setEditingBatch((prev: any) => ({ ...prev, current_quantity_unit: value }))}
                     >
                       <SelectTrigger className="w-[80px]">
                         <SelectValue />
@@ -1146,8 +1325,8 @@ const BatchesPage = () => {
                       <SelectContent>
                         <SelectItem value="lbs">lbs</SelectItem>
                         <SelectItem value="oz">oz</SelectItem>
-                        <SelectItem value="kg">kg</SelectItem>
                         <SelectItem value="g">g</SelectItem>
+                        <SelectItem value="kg">kg</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1163,10 +1342,32 @@ const BatchesPage = () => {
                         className="pl-6"
                         placeholder="0.00"
                         value={editingBatch.cost}
-                        onChange={(e) => setEditingBatch({ ...editingBatch, cost: e.target.value })}
+                        onChange={(e) => setEditingBatch((prev: any) => ({ ...prev, cost: e.target.value }))}
                       />
                    </div>
                 </div>
+              </div>
+
+              {/* Original Purchase Reference & Last Modified */}
+              <div className="text-sm text-muted-foreground space-y-1">
+                <div>Original purchase: {formatQuantityDisplay(editingBatch.originalQuantity)} {editingBatch.unit}</div>
+                {editingBatch.updated_at ? (
+                  <div>Last modified: {new Date(editingBatch.updated_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}</div>
+                ) : editingBatch.created_at ? (
+                  <div>Created: {new Date(editingBatch.created_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}</div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1176,7 +1377,7 @@ const BatchesPage = () => {
                     id="edit-lot"
                     placeholder="e.g., L-12345"
                     value={editingBatch.lot_number}
-                    onChange={(e) => setEditingBatch({ ...editingBatch, lot_number: e.target.value })}
+                    onChange={(e) => setEditingBatch((prev: any) => ({ ...prev, lot_number: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1185,40 +1386,51 @@ const BatchesPage = () => {
                     id="edit-date"
                     type="date"
                     value={editingBatch.purchase_date}
-                    onChange={(e) => setEditingBatch({ ...editingBatch, purchase_date: e.target.value })}
+                    onChange={(e) => setEditingBatch((prev: any) => ({ ...prev, purchase_date: e.target.value }))}
                   />
                 </div>
               </div>
               {(() => {
                 const isActiveValue = editingBatch.is_active !== undefined ? editingBatch.is_active : true;
-                const recordedQuantity = toNullableNumber(editingBatch.quantity) ?? 0;
+
+                // Convert entered quantity to lbs for calculations
+                const enteredQty = toNullableNumber(editingBatch.current_quantity_display) ?? 0;
+                const enteredUnit = editingBatch.current_quantity_unit ?? 'lbs';
+                let currentQuantityLbs = enteredQty;
+                if (enteredUnit === 'g') {
+                  currentQuantityLbs = enteredQty / GRAMS_PER_POUND;
+                } else if (enteredUnit === 'oz') {
+                  currentQuantityLbs = enteredQty / 16;
+                } else if (enteredUnit === 'kg') {
+                  currentQuantityLbs = (enteredQty * 1000) / GRAMS_PER_POUND;
+                }
+
                 const lowStockThreshold = toNullableNumber(editingBatch.low_stock_threshold);
-                const stockInfo = getStockStatusInfo(recordedQuantity, lowStockThreshold);
+                const stockInfo = getStockStatusInfo(currentQuantityLbs, lowStockThreshold);
                 const stockToneClass = stockToneClassMap[stockInfo.tone] ?? 'text-slate-900';
-                const actualQuantityValue =
-                  editingBatch.actualQuantity !== undefined && editingBatch.actualQuantity !== ''
-                    ? toNullableNumber(editingBatch.actualQuantity)
-                    : null;
-                const recordedForDifference = editingBatch.originalQuantity ?? recordedQuantity;
-                const difference =
-                  actualQuantityValue !== null && recordedForDifference !== null
-                    ? actualQuantityValue - recordedForDifference
-                    : null;
-                const differenceText =
-                  difference !== null ? `${difference >= 0 ? '+' : '-'}${formatQuantityDisplay(Math.abs(difference))} lbs` : '';
                 const inactiveSwitchId = 'edit-inactive';
+
+                // Calculate adjustment preview
+                const oldQuantityLbs = toNullableNumber(editingBatch.stock_quantity) ?? 0;
+                const adjustmentLbs = currentQuantityLbs - oldQuantityLbs;
+                const hasAdjustment = Math.abs(adjustmentLbs) >= 0.01;
 
                 return (
                   <>
                     <div className={`rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm ${stockToneClass}`}>
                       {stockInfo.text}
                     </div>
+                    {hasAdjustment && (
+                      <div className={`rounded-md border px-4 py-3 text-sm ${adjustmentLbs > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                        Adjustment: {adjustmentLbs > 0 ? '+' : ''}{formatQuantityDisplay(adjustmentLbs)} lbs will be recorded
+                      </div>
+                    )}
                     <div className="mt-3 flex items-start gap-3 px-4 py-3">
                       <Switch
                         id={inactiveSwitchId}
                         checked={!isActiveValue}
                         onCheckedChange={(checked) =>
-                          setEditingBatch({ ...editingBatch, is_active: checked ? false : true })
+                          setEditingBatch((prev: any) => ({ ...prev, is_active: checked ? false : true }))
                         }
                       />
                       <div className="space-y-1 text-sm">
@@ -1233,53 +1445,43 @@ const BatchesPage = () => {
                         </p>
                       </div>
                     </div>
-                    <details className="group mt-3 rounded-md border border-slate-200 bg-white">
-                      <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-slate-700">
-                        <span>Adjust Inventory</span>
-                        <span className="inline-block text-xs text-muted-foreground transition-transform duration-150 group-open:rotate-90">
-                          ▼
-                        </span>
-                      </summary>
-                      <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="adjust-actual-quantity">Actual Quantity on Hand (lbs)</Label>
-                          <Input
-                            id="adjust-actual-quantity"
-                            type="number"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={editingBatch.actualQuantity ?? ''}
-                            onChange={(e) =>
-                              setEditingBatch({ ...editingBatch, actualQuantity: e.target.value })
-                            }
-                          />
-                        </div>
+                    {hasAdjustment && (
+                      <div className="space-y-3">
                         <div className="space-y-2">
                           <Label htmlFor="adjust-reason">Adjustment Reason</Label>
-                          <Textarea
-                            id="adjust-reason"
-                            rows={3}
-                            value={editingBatch.adjustmentReason ?? ''}
-                            onChange={(e) =>
-                              setEditingBatch({ ...editingBatch, adjustmentReason: e.target.value })
+                          <Select
+                            value={editingBatch.adjustmentReasonType ?? 'physical_count'}
+                            onValueChange={(value) =>
+                              setEditingBatch((prev: any) => ({ ...prev, adjustmentReasonType: value }))
                             }
-                          />
+                          >
+                            <SelectTrigger id="adjust-reason">
+                              <SelectValue placeholder="Select reason" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ADJUSTMENT_REASONS.map((reason) => (
+                                <SelectItem key={reason.value} value={reason.value}>
+                                  {reason.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <p
-                          className={`text-sm ${
-                            difference !== null
-                              ? difference >= 0
-                                ? 'text-emerald-600'
-                                : 'text-rose-600'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          {difference !== null
-                            ? `Difference: ${differenceText}`
-                            : 'Enter an actual quantity to calculate the adjustment.'}
-                        </p>
+                        {editingBatch.adjustmentReasonType === 'other' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="adjust-reason-custom">Please specify</Label>
+                            <Input
+                              id="adjust-reason-custom"
+                              placeholder="Enter reason for adjustment"
+                              value={editingBatch.adjustmentReasonCustom ?? ''}
+                              onChange={(e) =>
+                                setEditingBatch((prev: any) => ({ ...prev, adjustmentReasonCustom: e.target.value }))
+                              }
+                            />
+                          </div>
+                        )}
                       </div>
-                    </details>
+                    )}
                   </>
                 );
               })()}
@@ -1289,8 +1491,219 @@ const BatchesPage = () => {
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateBatch} disabled={updating || !editingBatch?.variety_id || !editingBatch?.quantity}>
+            <Button onClick={handleUpdateBatch} disabled={updating || !editingBatch?.variety_id}>
               {updating ? 'Updating...' : 'Update Batch'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transaction History Dialog */}
+      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Transaction History</DialogTitle>
+            <DialogDescription>
+              {historyBatch && (
+                <>
+                  Seed usage history for <strong>{historyBatch.variety_name}</strong> (B-{historyBatch.batch_id})
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {loadingHistory ? (
+            <div className="py-8 text-center text-muted-foreground">Loading history...</div>
+          ) : historyTransactions.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              No transactions recorded for this batch yet.
+            </div>
+          ) : (
+            (() => {
+              // Sort transactions
+              const sortedTransactions = [...historyTransactions].sort((a, b) => {
+                let comparison = 0;
+                if (historySortField === 'date') {
+                  comparison = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+                } else if (historySortField === 'type') {
+                  comparison = (a.transaction_type || '').localeCompare(b.transaction_type || '');
+                } else if (historySortField === 'amount') {
+                  comparison = parseNumericValue(a.quantity_grams) - parseNumericValue(b.quantity_grams);
+                }
+                return historySortDir === 'asc' ? comparison : -comparison;
+              });
+
+              // Paginate
+              const totalPages = Math.ceil(sortedTransactions.length / historyPageSize);
+              const startIndex = (historyPage - 1) * historyPageSize;
+              const paginatedTransactions = sortedTransactions.slice(startIndex, startIndex + historyPageSize);
+
+              const handleSort = (field: 'date' | 'type' | 'amount') => {
+                if (historySortField === field) {
+                  setHistorySortDir(historySortDir === 'asc' ? 'desc' : 'asc');
+                } else {
+                  setHistorySortField(field);
+                  setHistorySortDir('desc');
+                }
+                setHistoryPage(1); // Reset to first page on sort change
+              };
+
+              const SortIcon = ({ field }: { field: 'date' | 'type' | 'amount' }) => {
+                if (historySortField !== field) return <span className="ml-1 text-slate-300">↕</span>;
+                return <span className="ml-1">{historySortDir === 'asc' ? '↑' : '↓'}</span>;
+              };
+
+              return (
+                <div className="space-y-4">
+                  {/* Summary */}
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Total Transactions:</span>
+                        <span className="ml-2 font-medium">{historyTransactions.length}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Total Used:</span>
+                        <span className="ml-2 font-medium text-rose-600">
+                          {formatQuantityDisplay(
+                            Math.abs(historyTransactions.reduce((sum, tx) => {
+                              const qty = parseNumericValue(tx.quantity_grams);
+                              return qty < 0 ? sum + qty : sum;
+                            }, 0))
+                          )} g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Adjustments:</span>
+                        <span className="ml-2 font-medium text-emerald-600">
+                          +{formatQuantityDisplay(
+                            historyTransactions.reduce((sum, tx) => {
+                              const qty = parseNumericValue(tx.quantity_grams);
+                              return qty > 0 ? sum + qty : sum;
+                            }, 0)
+                          )} g
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Transaction List */}
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead
+                          className="cursor-pointer hover:bg-slate-100 select-none"
+                          onClick={() => handleSort('date')}
+                        >
+                          Date <SortIcon field="date" />
+                        </TableHead>
+                        <TableHead
+                          className="cursor-pointer hover:bg-slate-100 select-none"
+                          onClick={() => handleSort('type')}
+                        >
+                          Type <SortIcon field="type" />
+                        </TableHead>
+                        <TableHead
+                          className="text-right cursor-pointer hover:bg-slate-100 select-none"
+                          onClick={() => handleSort('amount')}
+                        >
+                          Amount <SortIcon field="amount" />
+                        </TableHead>
+                        <TableHead>Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedTransactions.map((tx, index) => {
+                        const qty = parseNumericValue(tx.quantity_grams);
+                        const isDeduction = qty < 0;
+                        return (
+                          <TableRow key={tx.id || index}>
+                            <TableCell className="text-sm">
+                              {tx.created_at
+                                ? new Date(tx.created_at).toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                  })
+                                : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={isDeduction ? 'secondary' : 'outline'} className="text-xs">
+                                {formatTransactionType(tx.transaction_type)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${isDeduction ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {isDeduction ? '' : '+'}{formatQuantityDisplay(qty)} g
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate" title={tx.notes || ''}>
+                              {tx.notes || '-'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="text-sm text-muted-foreground">
+                        Showing {startIndex + 1}-{Math.min(startIndex + historyPageSize, sortedTransactions.length)} of {sortedTransactions.length}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                          disabled={historyPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            // Show pages around current page
+                            let pageNum: number;
+                            if (totalPages <= 5) {
+                              pageNum = i + 1;
+                            } else if (historyPage <= 3) {
+                              pageNum = i + 1;
+                            } else if (historyPage >= totalPages - 2) {
+                              pageNum = totalPages - 4 + i;
+                            } else {
+                              pageNum = historyPage - 2 + i;
+                            }
+                            return (
+                              <Button
+                                key={pageNum}
+                                variant={historyPage === pageNum ? 'default' : 'outline'}
+                                size="sm"
+                                className="w-8 h-8 p-0"
+                                onClick={() => setHistoryPage(pageNum)}
+                              >
+                                {pageNum}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setHistoryPage(p => Math.min(totalPages, p + 1))}
+                          disabled={historyPage === totalPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsHistoryDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

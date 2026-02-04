@@ -160,6 +160,7 @@ export interface DailyTask {
   deliveryDate?: string;
   standingOrderId?: number;
   orderScheduleId?: number;
+  scheduleIds?: number[]; // All order_schedule IDs for this task (for bulk operations)
   traysNeeded?: number;
   traysReady?: number;
   notes?: string;
@@ -2828,9 +2829,10 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
         const numberOfTrays = Math.max(1, task.trays || 1);
         let usedSoakedSeedEntry: any | null = null;
 
-        if (recipeIdForSoak) {
-          const requiresSoak = await checkRecipeRequiresSoak(recipeIdForSoak);
-          if (requiresSoak) {
+        // Check if variety requires soaking - needed for both soaked seed path and tray_creation_requests
+        const requiresSoak = recipeIdForSoak ? await checkRecipeRequiresSoak(recipeIdForSoak) : false;
+
+        if (recipeIdForSoak && requiresSoak) {
             const soakedSeedEntry = await fetchAvailableSoakedSeedForRecipe(
               farmUuid,
               recipeIdForSoak,
@@ -2865,8 +2867,9 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
               }
             }
           }
-        }
 
+        // For non-soak varieties (or when soaked seed wasn't used), create tray_creation_requests
+        // IMPORTANT: For non-soak varieties, do NOT set seed_date - triggers need it null to create trays
         if (!usedSoakedSeedEntry) {
           console.log('[DailyFlow] completeTask called with batchId:', batchId);
           console.log('[DailyFlow] completeTask task object:', {
@@ -2896,9 +2899,18 @@ export const completeTask = async (task: DailyTask, yieldValue?: number, batchId
             farm_uuid: farmUuid,
             user_id: userId,
             requested_at: sowDateISO,
-            seed_date: taskDateStr, // The intended sow_date (YYYY-MM-DD)
+            // Only set seed_date for soak varieties - non-soak should be null to trigger tray creation
+            // When seed_date is set, database triggers skip processing (for soak workflow)
+            seed_date: requiresSoak ? taskDateStr : null,
             batch_id: batchId,
           }));
+
+          console.log('[DailyFlow] Creating tray requests:', {
+            requiresSoak,
+            seedDateSet: requiresSoak ? taskDateStr : 'null (triggers will create trays)',
+            numberOfTrays,
+            varietyName
+          });
 
           console.log('[DailyFlow] Using batch_id:', batchId, 'for variety:', varietyName);
           console.log('[DailyFlow] Creating tray creation requests:', {
@@ -4851,6 +4863,7 @@ export const fetchOverdueSeedingTasks = async (
         customerId: firstSchedule.customer_id ?? undefined,
         standingOrderId: firstSchedule.standing_order_id ?? undefined,
         orderScheduleId: firstSchedule.schedule_id ?? undefined,
+        scheduleIds: group.schedules.map(s => s.schedule_id).filter((id): id is number => id != null),
         deliveryDate: firstSchedule.delivery_date || null,
         isOverdue: true,
         daysOverdue,

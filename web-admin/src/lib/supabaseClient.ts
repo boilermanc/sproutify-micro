@@ -74,14 +74,17 @@ if (typeof document !== 'undefined' && supabase) {
         return;
       }
 
-      // If tab was hidden for more than 2 minutes, do a health check
-      if (timeSinceHidden > 10 * 1000) {
-        console.log('[Supabase] Tab restored after', minutesHidden, 'minutes - checking connection health');
+      // If tab was hidden for more than 5 seconds, do a health check
+      // Lower threshold catches more stale connection scenarios
+      if (timeSinceHidden > 5 * 1000) {
+        const secondsHidden = Math.round(timeSinceHidden / 1000);
+        console.log('[Supabase] Tab restored after', secondsHidden, 'seconds - checking connection health');
 
         try {
           // Race between a simple query and a 3-second timeout
+          // Using limit(1) without single() to avoid errors if no/multiple rows
           const healthCheck = Promise.race([
-            supabase.from('farms').select('farm_uuid').limit(1).single(),
+            supabase.from('farms').select('farm_uuid').limit(1),
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Health check timeout')), 3000)
             )

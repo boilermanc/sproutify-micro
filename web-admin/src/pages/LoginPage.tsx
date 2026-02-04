@@ -323,7 +323,7 @@ const LoginPage = ({ onLogin }: LoginPageProps) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="team@sproutify.app"
+                placeholder="micro@micro.co"
                 autoComplete="email"
               />
             </div>

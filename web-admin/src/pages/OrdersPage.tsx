@@ -1629,7 +1629,7 @@ const OrdersPage = () => {
             </DialogDescription>
           </DialogHeader>
           {viewingOrder && orderDetails && (
-            <div className="space-y-4 py-4">
+            <div className="space-y-6 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold text-muted-foreground">Order ID</Label>
@@ -1657,9 +1657,11 @@ const OrdersPage = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold text-muted-foreground">Status</Label>
-                  <Badge variant={getStatusBadgeVariant(viewingOrder.status)}>
-                    {viewingOrder.status}
-                  </Badge>
+                  <div className="pt-1">
+                    <Badge variant={getStatusBadgeVariant(viewingOrder.status)}>
+                      {viewingOrder.status}
+                    </Badge>
+                  </div>
                 </div>
               </div>
 

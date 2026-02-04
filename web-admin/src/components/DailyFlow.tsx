@@ -4350,10 +4350,14 @@ export default function DailyFlow() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                       {group.tasks.map((task) => {
-                        // Check if this unassigned tray matches an order gap
-                        const matchingGap = !group.customerName && task.trayIds?.length === 1
-                          ? findMatchingGapForTray(task.trayIds[0])
-                          : null;
+                        // For unassigned trays: if it matches an order gap, don't show here
+                        // (the Order Gaps section handles assignment for those)
+                        if (!group.customerName && task.trayIds?.length === 1) {
+                          const matchingGap = findMatchingGapForTray(task.trayIds[0]);
+                          if (matchingGap) {
+                            return null; // Skip - handled by Order Gaps section
+                          }
+                        }
 
                         return (
                           <div key={task.id} className="space-y-2">
@@ -4367,33 +4371,23 @@ export default function DailyFlow() {
                               onMarkAsLost={handleMarkAsLost}
                               navigate={navigate}
                             />
-                            {/* Smart assign: show button if tray matches an order gap */}
+                            {/* For unassigned trays with no matching order gap, show customer dropdown */}
                             {!group.customerName && task.trayIds && task.trayIds.length === 1 && (
-                              matchingGap ? (
-                                <Button
-                                  size="sm"
-                                  className="w-full bg-emerald-500 hover:bg-emerald-600"
-                                  onClick={() => handleQuickAssign(task.trayIds![0], matchingGap.customer_id)}
-                                >
-                                  Assign to {matchingGap.customer_name}
-                                </Button>
-                              ) : (
-                                <Select
-                                  value=""
-                                  onValueChange={(value) => handleQuickAssign(task.trayIds![0], parseInt(value))}
-                                >
-                                  <SelectTrigger className="h-8 text-sm">
-                                    <SelectValue placeholder="Assign to customer..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {customers.map((c) => (
-                                      <SelectItem key={c.customer_id} value={c.customer_id.toString()}>
-                                        {c.customer_name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )
+                              <Select
+                                value=""
+                                onValueChange={(value) => handleQuickAssign(task.trayIds![0], parseInt(value))}
+                              >
+                                <SelectTrigger className="h-8 text-sm">
+                                  <SelectValue placeholder="Assign to customer..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {customers.map((c) => (
+                                    <SelectItem key={c.customer_id} value={c.customer_id.toString()}>
+                                      {c.customer_name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             )}
                             {/* Multi-tray cards: show hint to click card for individual assignment */}
                             {!group.customerName && task.trayIds && task.trayIds.length > 1 && (

@@ -3310,13 +3310,20 @@ export default function DailyFlow() {
 
   // Find matching order gap for an unassigned tray (for smart auto-assign button)
   const findMatchingGapForTray = useCallback((trayId: number): OrderGapStatus | null => {
+    console.log('[findMatchingGapForTray] Looking for tray:', trayId);
+    console.log('[findMatchingGapForTray] activeOrderGaps:', activeOrderGaps.length);
+    console.log('[findMatchingGapForTray] gapMissingVarietyTrays keys:', Object.keys(gapMissingVarietyTrays));
+
     for (const gap of activeOrderGaps) {
       const gapKey = formatGapKey(gap);
       const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
+      console.log(`[findMatchingGapForTray] Gap ${gapKey}: matchingTrays=`, matchingTrays.map(t => t.tray_id));
       if (matchingTrays.some(t => t.tray_id === trayId)) {
+        console.log('[findMatchingGapForTray] MATCH FOUND for gap:', gap.customer_name);
         return gap;
       }
     }
+    console.log('[findMatchingGapForTray] No match found');
     return null;
   }, [activeOrderGaps, gapMissingVarietyTrays]);
 

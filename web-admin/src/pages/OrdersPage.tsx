@@ -8,7 +8,7 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { Edit, FileText, Plus, Search, Package, Calendar, DollarSign, Truck, ShoppingCart } from 'lucide-react';
+import { Edit, FileText, Plus, Search, Package, Calendar, DollarSign, Truck, ShoppingCart, ChevronDown, ChevronRight, ArrowUpDown } from 'lucide-react';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -22,6 +22,8 @@ import { Textarea } from '@/components/ui/textarea';
 
 type DateRangePreset = '7d' | '30d' | '90d' | 'month' | 'year' | 'custom';
 type TabType = 'orders' | 'delivery-history';
+type DeliverySortField = 'date' | 'customer' | 'trays' | 'yield' | 'amount';
+type SortDirection = 'asc' | 'desc';
 
 interface DeliveryHistoryRow {
   farm_uuid: string;
@@ -65,6 +67,9 @@ const OrdersPage = () => {
   const [deliveryCustomEndDate, setDeliveryCustomEndDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
+  const [deliverySortField, setDeliverySortField] = useState<DeliverySortField>('date');
+  const [deliverySortDirection, setDeliverySortDirection] = useState<SortDirection>('desc');
+  const [expandedDeliveries, setExpandedDeliveries] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -663,12 +668,54 @@ const OrdersPage = () => {
       group.total_amount += Number(row.line_total) || 0;
     });
 
-    // Sort by date descending, then by customer name
-    return Array.from(groupMap.values()).sort((a, b) => {
-      const dateCompare = b.delivery_date.localeCompare(a.delivery_date);
-      if (dateCompare !== 0) return dateCompare;
-      return a.customer_name.localeCompare(b.customer_name);
+    // Sort based on selected field and direction
+    const groups = Array.from(groupMap.values());
+    const multiplier = deliverySortDirection === 'asc' ? 1 : -1;
+
+    return groups.sort((a, b) => {
+      let compare = 0;
+      switch (deliverySortField) {
+        case 'date':
+          compare = a.delivery_date.localeCompare(b.delivery_date);
+          break;
+        case 'customer':
+          compare = a.customer_name.localeCompare(b.customer_name);
+          break;
+        case 'trays':
+          compare = a.total_trays - b.total_trays;
+          break;
+        case 'yield':
+          compare = a.total_yield - b.total_yield;
+          break;
+        case 'amount':
+          compare = a.total_amount - b.total_amount;
+          break;
+      }
+      return compare * multiplier;
     });
+  };
+
+  // Toggle expansion of a delivery group
+  const toggleDeliveryExpansion = (key: string) => {
+    setExpandedDeliveries((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle sort field (clicking same field toggles direction)
+  const toggleDeliverySort = (field: DeliverySortField) => {
+    if (deliverySortField === field) {
+      setDeliverySortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setDeliverySortField(field);
+      setDeliverySortDirection('desc');
+    }
   };
 
   // Calculate delivery history summary
@@ -1335,7 +1382,7 @@ const OrdersPage = () => {
             </Card>
           </div>
 
-          {/* Date Range Filter */}
+          {/* Date Range Filter and Sort Controls */}
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <Label className="text-sm font-medium">Date Range:</Label>
@@ -1370,6 +1417,31 @@ const OrdersPage = () => {
                 />
               </div>
             )}
+            <div className="flex items-center gap-2 ml-auto">
+              <Label className="text-sm font-medium">Sort by:</Label>
+              <div className="flex gap-1">
+                {[
+                  { field: 'date' as DeliverySortField, label: 'Date' },
+                  { field: 'customer' as DeliverySortField, label: 'Customer' },
+                  { field: 'trays' as DeliverySortField, label: 'Trays' },
+                  { field: 'yield' as DeliverySortField, label: 'Yield' },
+                  { field: 'amount' as DeliverySortField, label: 'Amount' },
+                ].map(({ field, label }) => (
+                  <Button
+                    key={field}
+                    variant={deliverySortField === field ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => toggleDeliverySort(field)}
+                    className="text-xs h-8"
+                  >
+                    {label}
+                    {deliverySortField === field && (
+                      <ArrowUpDown className={`ml-1 h-3 w-3 ${deliverySortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                    )}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Delivery History Table */}
@@ -1383,78 +1455,95 @@ const OrdersPage = () => {
               <p className="text-muted-foreground">No deliveries found for the selected date range.</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {groupedDeliveryHistory().map((group) => (
-                <Card key={`${group.delivery_date}-${group.customer_id}`}>
-                  <CardHeader className="py-3 px-4 bg-slate-50 border-b">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-slate-900">{group.customer_name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          <Calendar className="h-3 w-3 inline mr-1" />
-                          {new Date(group.delivery_date + 'T00:00:00').toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </p>
+            <div className="space-y-2">
+              {groupedDeliveryHistory().map((group) => {
+                const groupKey = `${group.delivery_date}-${group.customer_id}`;
+                const isExpanded = expandedDeliveries.has(groupKey);
+                return (
+                  <Card key={groupKey}>
+                    <CardHeader
+                      className="py-3 px-4 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors"
+                      onClick={() => toggleDeliveryExpansion(groupKey)}
+                    >
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                        )}
+                        <div className="flex flex-1 flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-slate-900">{group.customer_name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              <Calendar className="h-3 w-3 inline mr-1" />
+                              {new Date(group.delivery_date + 'T00:00:00').toLocaleDateString('en-US', {
+                                weekday: 'short',
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                              <span className="ml-2 text-xs">({group.items.length} {group.items.length === 1 ? 'item' : 'items'})</span>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-muted-foreground">
+                              {group.total_trays} {group.total_trays === 1 ? 'tray' : 'trays'}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {group.total_yield.toFixed(1)} oz
+                            </span>
+                            <span className="font-semibold text-emerald-600">
+                              ${group.total_amount.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-muted-foreground">
-                          {group.total_trays} {group.total_trays === 1 ? 'tray' : 'trays'}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {group.total_yield.toFixed(1)} oz
-                        </span>
-                        <span className="font-semibold text-emerald-600">
-                          ${group.total_amount.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50/50">
-                          <TableHead className="text-xs">Recipe/Variety</TableHead>
-                          <TableHead className="text-xs text-right">Trays</TableHead>
-                          <TableHead className="text-xs text-right">Yield (oz)</TableHead>
-                          <TableHead className="text-xs text-right">Unit Price</TableHead>
-                          <TableHead className="text-xs text-right">Line Total</TableHead>
-                          <TableHead className="text-xs">Standing Order</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.items.map((item, idx) => (
-                          <TableRow key={`${item.recipe_id}-${idx}`}>
-                            <TableCell className="font-medium">{item.recipe_name}</TableCell>
-                            <TableCell className="text-right">{item.trays_delivered}</TableCell>
-                            <TableCell className="text-right">
-                              {item.total_yield_oz ? Number(item.total_yield_oz).toFixed(1) : '-'}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {item.unit_price ? `$${Number(item.unit_price).toFixed(2)}` : '-'}
-                            </TableCell>
-                            <TableCell className="text-right font-medium">
-                              {item.line_total ? `$${Number(item.line_total).toFixed(2)}` : '-'}
-                            </TableCell>
-                            <TableCell>
-                              {item.standing_order_id ? (
-                                <Badge variant="outline" className="text-xs">
-                                  {item.order_name || `SO-${item.standing_order_id}`}
-                                </Badge>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">-</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardHeader>
+                    {isExpanded && (
+                      <CardContent className="p-0 border-t">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-slate-50/50">
+                              <TableHead className="text-xs">Recipe/Variety</TableHead>
+                              <TableHead className="text-xs text-right">Trays</TableHead>
+                              <TableHead className="text-xs text-right">Yield (oz)</TableHead>
+                              <TableHead className="text-xs text-right">Unit Price</TableHead>
+                              <TableHead className="text-xs text-right">Line Total</TableHead>
+                              <TableHead className="text-xs">Standing Order</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {group.items.map((item, idx) => (
+                              <TableRow key={`${item.recipe_id}-${idx}`}>
+                                <TableCell className="font-medium">{item.recipe_name}</TableCell>
+                                <TableCell className="text-right">{item.trays_delivered}</TableCell>
+                                <TableCell className="text-right">
+                                  {item.total_yield_oz ? Number(item.total_yield_oz).toFixed(1) : '-'}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {item.unit_price ? `$${Number(item.unit_price).toFixed(2)}` : '-'}
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {item.line_total ? `$${Number(item.line_total).toFixed(2)}` : '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {item.standing_order_id ? (
+                                    <Badge variant="outline" className="text-xs">
+                                      {item.order_name || `SO-${item.standing_order_id}`}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">-</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    )}
+                  </Card>
+                );
+              })}
             </div>
           )}
         </>

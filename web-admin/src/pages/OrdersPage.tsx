@@ -8,7 +8,7 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { Edit, FileText, Plus, Search, Package, Calendar, DollarSign } from 'lucide-react';
+import { Edit, FileText, Plus, Search, Package, Calendar, DollarSign, Truck, ShoppingCart } from 'lucide-react';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -21,11 +21,50 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 
 type DateRangePreset = '7d' | '30d' | '90d' | 'month' | 'year' | 'custom';
+type TabType = 'orders' | 'delivery-history';
+
+interface DeliveryHistoryRow {
+  farm_uuid: string;
+  delivery_date: string;
+  customer_name: string;
+  customer_id: number;
+  recipe_name: string;
+  recipe_id: number;
+  standing_order_id: number | null;
+  order_name: string | null;
+  trays_delivered: number;
+  total_yield_oz: number | null;
+  unit_price: number | null;
+  line_total: number | null;
+  status: string;
+}
+
+interface DeliveryGroup {
+  delivery_date: string;
+  customer_name: string;
+  customer_id: number;
+  items: DeliveryHistoryRow[];
+  total_trays: number;
+  total_yield: number;
+  total_amount: number;
+}
 
 const OrdersPage = () => {
+  const [activeTab, setActiveTab] = useState<TabType>('orders');
   const [orders, setOrders] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Delivery History state
+  const [deliveryHistory, setDeliveryHistory] = useState<DeliveryHistoryRow[]>([]);
+  const [deliveryHistoryLoading, setDeliveryHistoryLoading] = useState(false);
+  const [deliveryDatePreset, setDeliveryDatePreset] = useState<DateRangePreset>('30d');
+  const [deliveryCustomStartDate, setDeliveryCustomStartDate] = useState<string>(
+    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  );
+  const [deliveryCustomEndDate, setDeliveryCustomEndDate] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -513,10 +552,135 @@ const OrdersPage = () => {
     }
   };
 
+  // Get date range for delivery history based on preset
+  const getDeliveryDateRange = () => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    let startDate: Date;
+    let endDate: Date = today;
+
+    switch (deliveryDatePreset) {
+      case '7d':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 6);
+        break;
+      case '30d':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 29);
+        break;
+      case '90d':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 89);
+        break;
+      case 'month':
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        break;
+      case 'year':
+        startDate = new Date(today.getFullYear(), 0, 1);
+        break;
+      case 'custom':
+        startDate = new Date(deliveryCustomStartDate);
+        endDate = new Date(deliveryCustomEndDate);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      default:
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 29);
+    }
+
+    startDate.setHours(0, 0, 0, 0);
+    return { startDate, endDate };
+  };
+
+  const fetchDeliveryHistory = async () => {
+    setDeliveryHistoryLoading(true);
+    try {
+      const sessionData = localStorage.getItem('sproutify_session');
+      if (!sessionData) return;
+      const { farmUuid } = JSON.parse(sessionData);
+
+      const { startDate, endDate } = getDeliveryDateRange();
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      const { data, error } = await getSupabaseClient()
+        .from('delivery_history')
+        .select('*')
+        .eq('farm_uuid', farmUuid)
+        .gte('delivery_date', startDateStr)
+        .lte('delivery_date', endDateStr)
+        .order('delivery_date', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching delivery history:', error);
+        setDeliveryHistory([]);
+        return;
+      }
+
+      setDeliveryHistory(data || []);
+    } catch (error) {
+      console.error('Error fetching delivery history:', error);
+      setDeliveryHistory([]);
+    } finally {
+      setDeliveryHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
     fetchCustomers();
   }, []);
+
+  // Fetch delivery history when tab changes or date range changes
+  useEffect(() => {
+    if (activeTab === 'delivery-history') {
+      fetchDeliveryHistory();
+    }
+  }, [activeTab, deliveryDatePreset, deliveryCustomStartDate, deliveryCustomEndDate]);
+
+  // Group delivery history by date + customer
+  const groupedDeliveryHistory = (): DeliveryGroup[] => {
+    const groupMap = new Map<string, DeliveryGroup>();
+
+    deliveryHistory.forEach((row) => {
+      const key = `${row.delivery_date}-${row.customer_id}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          delivery_date: row.delivery_date,
+          customer_name: row.customer_name,
+          customer_id: row.customer_id,
+          items: [],
+          total_trays: 0,
+          total_yield: 0,
+          total_amount: 0,
+        });
+      }
+      const group = groupMap.get(key)!;
+      group.items.push(row);
+      group.total_trays += Number(row.trays_delivered) || 0;
+      group.total_yield += Number(row.total_yield_oz) || 0;
+      group.total_amount += Number(row.line_total) || 0;
+    });
+
+    // Sort by date descending, then by customer name
+    return Array.from(groupMap.values()).sort((a, b) => {
+      const dateCompare = b.delivery_date.localeCompare(a.delivery_date);
+      if (dateCompare !== 0) return dateCompare;
+      return a.customer_name.localeCompare(b.customer_name);
+    });
+  };
+
+  // Calculate delivery history summary
+  const deliverySummary = () => {
+    const totalTrays = deliveryHistory.reduce((sum, row) => sum + (Number(row.trays_delivered) || 0), 0);
+    const totalYield = deliveryHistory.reduce((sum, row) => sum + (Number(row.total_yield_oz) || 0), 0);
+    const totalRevenue = deliveryHistory.reduce((sum, row) => sum + (Number(row.line_total) || 0), 0);
+    const uniqueDates = new Set(deliveryHistory.map((row) => row.delivery_date)).size;
+    const uniqueCustomers = new Set(deliveryHistory.map((row) => row.customer_id)).size;
+
+    return { totalTrays, totalYield, totalRevenue, uniqueDates, uniqueCustomers };
+  };
 
   const handleEditOrder = async (order: any) => {
     setEditingOrder(order);
@@ -886,6 +1050,35 @@ const OrdersPage = () => {
         </Dialog>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'orders'
+              ? 'text-emerald-600 border-b-2 border-emerald-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <ShoppingCart className="h-4 w-4 inline mr-2" />
+          Orders
+        </button>
+        <button
+          onClick={() => setActiveTab('delivery-history')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'delivery-history'
+              ? 'text-emerald-600 border-b-2 border-emerald-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Truck className="h-4 w-4 inline mr-2" />
+          Delivery History
+        </button>
+      </div>
+
+      {/* Orders Tab Content */}
+      {activeTab === 'orders' && (
+        <>
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1102,6 +1295,170 @@ const OrdersPage = () => {
           </TableBody>
         </Table>
       </div>
+        </>
+      )}
+
+      {/* Delivery History Tab Content */}
+      {activeTab === 'delivery-history' && (
+        <>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-sm text-muted-foreground">Deliveries</div>
+                <div className="text-2xl font-bold">{deliverySummary().uniqueDates}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-sm text-muted-foreground">Customers</div>
+                <div className="text-2xl font-bold">{deliverySummary().uniqueCustomers}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-sm text-muted-foreground">Total Trays</div>
+                <div className="text-2xl font-bold">{deliverySummary().totalTrays}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-sm text-muted-foreground">Total Yield</div>
+                <div className="text-2xl font-bold">{deliverySummary().totalYield.toFixed(1)} oz</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-sm text-muted-foreground">Revenue</div>
+                <div className="text-2xl font-bold text-emerald-600">${deliverySummary().totalRevenue.toFixed(2)}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Date Range Filter */}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm font-medium">Date Range:</Label>
+              <Select value={deliveryDatePreset} onValueChange={(value) => setDeliveryDatePreset(value as DateRangePreset)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7d">Last 7 Days</SelectItem>
+                  <SelectItem value="30d">Last 30 Days</SelectItem>
+                  <SelectItem value="90d">Last 90 Days</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
+                  <SelectItem value="year">This Year</SelectItem>
+                  <SelectItem value="custom">Custom Range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {deliveryDatePreset === 'custom' && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="date"
+                  value={deliveryCustomStartDate}
+                  onChange={(e) => setDeliveryCustomStartDate(e.target.value)}
+                  className="w-[140px]"
+                />
+                <span className="text-muted-foreground text-sm">to</span>
+                <Input
+                  type="date"
+                  value={deliveryCustomEndDate}
+                  onChange={(e) => setDeliveryCustomEndDate(e.target.value)}
+                  className="w-[140px]"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Delivery History Table */}
+          {deliveryHistoryLoading ? (
+            <div className="rounded-md border bg-card p-8 text-center">
+              <p className="text-muted-foreground">Loading delivery history...</p>
+            </div>
+          ) : groupedDeliveryHistory().length === 0 ? (
+            <div className="rounded-md border bg-card p-8 text-center">
+              <Truck className="h-8 w-8 mx-auto mb-2 opacity-50 text-muted-foreground" />
+              <p className="text-muted-foreground">No deliveries found for the selected date range.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groupedDeliveryHistory().map((group) => (
+                <Card key={`${group.delivery_date}-${group.customer_id}`}>
+                  <CardHeader className="py-3 px-4 bg-slate-50 border-b">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-slate-900">{group.customer_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          <Calendar className="h-3 w-3 inline mr-1" />
+                          {new Date(group.delivery_date + 'T00:00:00').toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-muted-foreground">
+                          {group.total_trays} {group.total_trays === 1 ? 'tray' : 'trays'}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {group.total_yield.toFixed(1)} oz
+                        </span>
+                        <span className="font-semibold text-emerald-600">
+                          ${group.total_amount.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/50">
+                          <TableHead className="text-xs">Recipe/Variety</TableHead>
+                          <TableHead className="text-xs text-right">Trays</TableHead>
+                          <TableHead className="text-xs text-right">Yield (oz)</TableHead>
+                          <TableHead className="text-xs text-right">Unit Price</TableHead>
+                          <TableHead className="text-xs text-right">Line Total</TableHead>
+                          <TableHead className="text-xs">Standing Order</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.items.map((item, idx) => (
+                          <TableRow key={`${item.recipe_id}-${idx}`}>
+                            <TableCell className="font-medium">{item.recipe_name}</TableCell>
+                            <TableCell className="text-right">{item.trays_delivered}</TableCell>
+                            <TableCell className="text-right">
+                              {item.total_yield_oz ? Number(item.total_yield_oz).toFixed(1) : '-'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {item.unit_price ? `$${Number(item.unit_price).toFixed(2)}` : '-'}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {item.line_total ? `$${Number(item.line_total).toFixed(2)}` : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {item.standing_order_id ? (
+                                <Badge variant="outline" className="text-xs">
+                                  {item.order_name || `SO-${item.standing_order_id}`}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">-</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* View Order Details Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>

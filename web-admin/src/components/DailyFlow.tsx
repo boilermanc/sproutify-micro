@@ -595,7 +595,6 @@ export default function DailyFlow() {
   const [batchHarvestRows, setBatchHarvestRows] = useState<BatchHarvestRow[]>([]);
   const [batchHarvestSelected, setBatchHarvestSelected] = useState<Record<number, boolean>>({});
   const [batchHarvestYields, setBatchHarvestYields] = useState<Record<number, string>>({});
-  const [isBatchHarvesting, setIsBatchHarvesting] = useState(false);
   // State for "Complete Order & Harvest Early" confirmation modal
   const [earlyHarvestConfirm, setEarlyHarvestConfirm] = useState<{
     group: HarvestGroup;
@@ -2338,7 +2337,14 @@ export default function DailyFlow() {
       return;
     }
 
-    setIsBatchHarvesting(true);
+    // Capture data before closing modal (optimistic UI)
+    const capturedGroup = batchHarvestModalGroup;
+    const capturedYields = { ...batchHarvestYields };
+
+    // Close modal immediately for snappy UX
+    setBatchHarvestModalGroup(null);
+    setPendingEarlyHarvestTrays([]);
+
     console.log('[DailyFlow] Batch harvest started', { selectedTrayIds });
     try {
       const sessionData = localStorage.getItem('sproutify_session');
@@ -2358,7 +2364,7 @@ export default function DailyFlow() {
       for (const trayId of selectedTrayIds) {
         console.log('[DailyFlow] Updating tray', trayId);
         const payload: Record<string, any> = { harvest_date: now, status: 'harvested' };
-        const yieldInput = batchHarvestYields[trayId];
+        const yieldInput = capturedYields[trayId];
         if (yieldInput && yieldInput.trim() !== '') {
           const parsed = parseFloat(yieldInput);
           if (!Number.isNaN(parsed)) {
@@ -2379,11 +2385,16 @@ export default function DailyFlow() {
       }
 
       console.log('[DailyFlow] Updating tray_steps for', selectedTrayIds);
+      // IMPORTANT: Set both completed_date and completed_at to ensure the
+      // update_harvest_date trigger uses the correct value. The trigger reads
+      // completed_date, not completed_at.
+      const completionTimestamp = new Date().toISOString();
       const { error: stepsError } = await client
         .from('tray_steps')
         .update({
           completed: true,
-          completed_at: new Date().toISOString(),
+          completed_at: completionTimestamp,
+          completed_date: completionTimestamp,
           status: 'Completed',
         })
         .in('tray_id', selectedTrayIds);
@@ -2392,24 +2403,24 @@ export default function DailyFlow() {
       console.log('[DailyFlow] tray_steps update succeeded');
 
       // Mark order_schedules as completed if this is for a standing order
-      if (batchHarvestModalGroup.customerName && batchHarvestModalGroup.deliveryDate) {
+      if (capturedGroup.customerName && capturedGroup.deliveryDate) {
         // Get standing_order_id from the first task in the group
-        const standingOrderId = batchHarvestModalGroup.tasks[0]?.standingOrderId;
-        
+        const standingOrderId = capturedGroup.tasks[0]?.standingOrderId;
+
         if (standingOrderId) {
           console.log('[DailyFlow] Marking order_schedule as completed:', {
             standing_order_id: standingOrderId,
-            delivery_date: batchHarvestModalGroup.deliveryDate,
-            customer: batchHarvestModalGroup.customerName
+            delivery_date: capturedGroup.deliveryDate,
+            customer: capturedGroup.customerName
           });
 
           const { error: scheduleError } = await client
             .from('order_schedules')
-            .update({ 
+            .update({
               status: 'completed'
             })
             .eq('standing_order_id', standingOrderId)
-            .eq('scheduled_delivery_date', batchHarvestModalGroup.deliveryDate);
+            .eq('scheduled_delivery_date', capturedGroup.deliveryDate);
 
           if (scheduleError) {
             console.error('[DailyFlow] Error marking order_schedule as completed:', scheduleError);
@@ -2424,23 +2435,17 @@ export default function DailyFlow() {
         console.log('[DailyFlow] Unassigned harvest - no order_schedule to update');
       }
 
-      const orderLabel = batchHarvestModalGroup.customerName || 'this order';
+      const orderLabel = capturedGroup.customerName || 'this order';
       showNotification(
         'success',
         `Harvested ${selectedTrayIds.length} ${selectedTrayIds.length === 1 ? 'tray' : 'trays'} for ${orderLabel}`
       );
 
-      // Clear pending early harvest trays (don't revert dates on successful harvest)
-      setPendingEarlyHarvestTrays([]);
-
       console.log('[DailyFlow] Calling loadTasks');
       await loadTasks({ suppressLoading: true });
-      closeBatchHarvestModal();
     } catch (error) {
       console.error('[DailyFlow] Batch harvest error:', error);
       showNotification('error', 'Failed to record batch harvest. Please try again.');
-    } finally {
-      setIsBatchHarvesting(false);
     }
   };
 
@@ -5186,12 +5191,10 @@ export default function DailyFlow() {
             </Button>
             <Button
               onClick={handleRecordBatchHarvest}
-              disabled={isBatchHarvesting || batchHarvestSelectedCount === 0}
+              disabled={batchHarvestSelectedCount === 0}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              {isBatchHarvesting
-                ? 'Recording...'
-                : `Record Harvest${batchHarvestSelectedCount > 0 ? ` (${batchHarvestSelectedCount})` : ''}`}
+              Record Harvest{batchHarvestSelectedCount > 0 ? ` (${batchHarvestSelectedCount})` : ''}
             </Button>
           </DialogFooter>
         </DialogContent>

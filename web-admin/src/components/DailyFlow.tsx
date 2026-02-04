@@ -3308,24 +3308,29 @@ export default function DailyFlow() {
     }
   }, [loadTasks, showNotification]);
 
-  // Find matching order gap for an unassigned tray (for smart auto-assign button)
-  const findMatchingGapForTray = useCallback((trayId: number): OrderGapStatus | null => {
-    console.log('[findMatchingGapForTray] Looking for tray:', trayId);
-    console.log('[findMatchingGapForTray] activeOrderGaps:', activeOrderGaps.length);
-    console.log('[findMatchingGapForTray] gapMissingVarietyTrays keys:', Object.keys(gapMissingVarietyTrays));
-
+  // Find matching order gap for an unassigned tray (for hiding from Unassigned section)
+  const findMatchingGapForTray = useCallback((trayId: number, recipeId?: number): OrderGapStatus | null => {
+    // Check if this tray's recipe matches any gap's requirements
     for (const gap of activeOrderGaps) {
+      // Only consider gaps that have unassigned trays ready
+      if (gap.unassigned_ready <= 0) continue;
+
       const gapKey = formatGapKey(gap);
+      const requirements = gapRecipeRequirements[gapKey] || [];
+
+      // If we have a recipeId, check if it matches any requirement for this gap
+      if (recipeId && requirements.some(req => req.recipe_id === recipeId)) {
+        return gap;
+      }
+
+      // Fallback: check gapMissingVarietyTrays by tray_id
       const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
-      console.log(`[findMatchingGapForTray] Gap ${gapKey}: matchingTrays=`, matchingTrays.map(t => t.tray_id));
       if (matchingTrays.some(t => t.tray_id === trayId)) {
-        console.log('[findMatchingGapForTray] MATCH FOUND for gap:', gap.customer_name);
         return gap;
       }
     }
-    console.log('[findMatchingGapForTray] No match found');
     return null;
-  }, [activeOrderGaps, gapMissingVarietyTrays]);
+  }, [activeOrderGaps, gapRecipeRequirements, gapMissingVarietyTrays]);
 
   const handleLostConfirm = async () => {
     if (!lostTask || !lossReason) return;
@@ -4360,7 +4365,7 @@ export default function DailyFlow() {
                         // For unassigned trays: if it matches an order gap, don't show here
                         // (the Order Gaps section handles assignment for those)
                         if (!group.customerName && task.trayIds?.length === 1) {
-                          const matchingGap = findMatchingGapForTray(task.trayIds[0]);
+                          const matchingGap = findMatchingGapForTray(task.trayIds[0], task.recipeId);
                           if (matchingGap) {
                             return null; // Skip - handled by Order Gaps section
                           }

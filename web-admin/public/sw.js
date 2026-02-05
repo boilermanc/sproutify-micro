@@ -1,10 +1,9 @@
-const CACHE_NAME = 'sproutify-v1';
+const CACHE_NAME = 'sproutify-v2';
 
 // App shell files to cache
 const APP_SHELL = [
   '/admin/',
-  '/admin/tasks',
-  '/sproutify_micro_icon.png',
+  '/admin/sproutify_micro_icon.png',
 ];
 
 // Install event - cache app shell

@@ -4309,6 +4309,20 @@ export default function DailyFlow() {
             
             <div className="space-y-6">
             {harvestGroups.map((group) => {
+              // For unassigned groups: check if ALL tasks match order gaps (if so, hide the entire group)
+              if (!group.customerName) {
+                const visibleTasks = group.tasks.filter((task) => {
+                  if (task.trayIds?.length === 1) {
+                    const matchingGap = findMatchingGapForTray(task.trayIds[0], task.recipeId);
+                    return !matchingGap; // Visible if NO matching gap
+                  }
+                  return true; // Multi-tray tasks are always visible
+                });
+                if (visibleTasks.length === 0) {
+                  return null; // Skip rendering this group entirely
+                }
+              }
+
               const traysReady = group.tasks.reduce((sum, task) => sum + (Number(task.quantity) || 0), 0);
               const groupLabel = group.customerName ? `${group.customerName} Order` : 'Unassigned Trays';
               const deliveryLabel = formatShortDateLabel(group.deliveryDate);

@@ -899,14 +899,14 @@ export default function DailyFlow() {
               };
             });
 
-          // Filter to only matching varieties
+          // Filter to only matching varieties - check BOTH variety_name AND recipe_name
           const matches = assignableTrays.filter((tray) => {
-            const nameToCheck = (
-              (tray.variety_name && tray.variety_name.toLowerCase()) ||
-              (tray.recipe_name && tray.recipe_name.toLowerCase()) ||
-              ''
+            const varietyName = (tray.variety_name || '').toLowerCase();
+            const recipeName = (tray.recipe_name || '').toLowerCase();
+            // missing_varieties contains recipe names, so check both variety and recipe names
+            return missingVarieties.some((name) =>
+              varietyName.includes(name) || recipeName.includes(name)
             );
-            return missingVarieties.some((name) => nameToCheck.includes(name));
           });
 
           newMissingVarietyTrays[gapKey] = matches;

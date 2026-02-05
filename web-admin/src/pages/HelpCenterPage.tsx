@@ -4,10 +4,12 @@ import {
   Search,
   Rocket,
   ShoppingCart,
-  Scissors,
+  CalendarCheck,
   LayoutGrid,
   Package,
   BookOpen,
+  BarChart3,
+  Settings,
   ChevronRight,
   ArrowLeft,
   HelpCircle,
@@ -29,10 +31,12 @@ import { MarkdownRenderer } from '@/components/help/MarkdownRenderer';
 const categoryIcons: Record<string, React.ReactNode> = {
   Rocket: <Rocket className="h-5 w-5" />,
   ShoppingCart: <ShoppingCart className="h-5 w-5" />,
-  Scissors: <Scissors className="h-5 w-5" />,
+  CalendarCheck: <CalendarCheck className="h-5 w-5" />,
   LayoutGrid: <LayoutGrid className="h-5 w-5" />,
   Package: <Package className="h-5 w-5" />,
   BookOpen: <BookOpen className="h-5 w-5" />,
+  BarChart3: <BarChart3 className="h-5 w-5" />,
+  Settings: <Settings className="h-5 w-5" />,
 };
 
 export default function HelpCenterPage() {

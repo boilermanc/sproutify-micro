@@ -14,32 +14,41 @@ Sproutify Micro is your all-in-one platform for managing your microgreens farm. 
 
 ## What You Can Do
 
+### Dashboard & Insights
+Your dashboard gives you an at-a-glance view of your farm: active trays, pending orders, upcoming harvests, daily tasks, and catalog items. Sage, our AI assistant, provides a morning briefing with opportunities, risks, and inventory insights.
+
+### Daily Operations
+The **Daily Flow** guides you through each day's tasks — watering, harvesting, seeding, soaking, blackout removal, and more. The **Calendar** gives you a month-level view of task density so you can plan ahead.
+
 ### Track Your Trays
-Monitor every tray from seeding to harvest. Know exactly what's growing, when it needs attention, and when it'll be ready.
+Monitor every tray from seeding to harvest. Know exactly what's growing, when it needs attention, and when it'll be ready. Track tray losses with detailed reason codes.
 
-### Manage Orders
-Handle both standing orders (recurring) and one-time orders. Never miss a delivery with automated scheduling.
+### Manage Orders & Deliveries
+Handle standing orders (recurring) with automatic seeding schedule generation. Track delivery history with date range filtering, sorting, and customer grouping.
 
-### Daily Workflow
-Our Daily Flow feature guides you through each day's tasks—watering, harvesting, seeding, and more.
+### Products & Recipes
+Define your product catalog with variants and pricing. Create recipes with detailed grow steps and media requirements. Use the planting schedule to auto-calculate sow dates from standing orders.
 
-### Inventory Management
-Keep track of your seed inventory, supplies, and batch history.
+### Inventory & Supplies
+Manage seed batches with stock tracking and low-stock alerts. Track supplies, varieties, and vendors all in one place.
 
-### Recipes & Grow Schedules
-Create and save recipes for different microgreen varieties with custom grow schedules.
+### Reports & Analytics
+Generate harvest, delivery, sales, and seed usage reports with customizable date ranges.
+
+### Team Management
+Invite team members with role-based access. Farm Hands get a simplified mobile-friendly interface focused on daily task execution.
 
 ## Quick Start
 
-1. **Set up your farm** - Configure your farm details in Settings
-2. **Add your varieties** - Create the microgreen varieties you grow
-3. **Create recipes** - Define grow schedules for each variety
-4. **Start tracking trays** - Begin logging your trays as you seed them
-5. **Add customers** - Set up your customer base
-6. **Create orders** - Start managing your sales
+1. **Set up your farm** — Configure your farm name and seeding days in Settings
+2. **Add your varieties** — Browse the global catalog or create custom varieties
+3. **Create recipes** — Define grow schedules with steps and durations
+4. **Add customers** — Set up your customer base with delivery preferences
+5. **Create standing orders** — Set up recurring orders for regular customers
+6. **Start seeding** — Create seeding requests and track trays through their grow cycle
 
 ## Need Help?
 
-Browse the categories on the left to find detailed guides on each feature. If you can't find what you're looking for, reach out to our support team.
+Browse the categories on the left to find detailed guides on each feature. Use the search bar to quickly find what you're looking for.
 `,
 };

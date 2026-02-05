@@ -22,51 +22,47 @@ A standing order is a recurring delivery commitment. For example:
 
 1. Navigate to **Standing Orders** in the sidebar
 2. Click **+ New Standing Order**
-3. Select the **customer**
-4. Add the **products** and quantities
-5. Set the **delivery schedule**:
-   - Select days of the week
-   - Choose start date
-   - Optionally set an end date
-6. Click **Save**
+3. Enter an **order name** for easy reference
+4. Select the **customer**
+5. Choose the **frequency**: Weekly or Bi-weekly
+6. Select **delivery days** (Monday through Sunday)
+7. Set a **start date**
+8. Optionally set an **end date**
+9. Add **order items** — select products with specific variants and quantities
+10. Add any **notes** for special instructions
+11. Click **Save**
 
 ## Delivery Schedule Options
 
-- **Weekly** - Same day(s) every week
-- **Bi-weekly** - Every other week
-- **Monthly** - Same day each month
+- **Weekly** — Delivers on the selected day(s) every week
+- **Bi-weekly** — Delivers on the selected day(s) every other week
 
 ## Managing Existing Orders
 
-### Pause an Order
-If a customer needs to temporarily stop deliveries:
-1. Find the order in the list
-2. Click the **Pause** button
-3. Select a resume date (optional)
+### Search and Browse
+Use the search bar to find orders by name or customer. Active orders show a green "Active" badge; inactive orders show a gray "Inactive" badge.
 
-### Modify Quantities
-To change quantities for future deliveries:
-1. Click on the standing order
-2. Edit the product quantities
-3. Changes apply to all future deliveries
+### Edit an Order
+Click the edit button on any standing order to modify:
+- Order name, customer, frequency, delivery days
+- Start/end dates and notes
+- Add or remove product items and adjust quantities
 
-### Cancel an Order
-To permanently stop a standing order:
-1. Click the order
-2. Select **Cancel Order**
-3. Confirm cancellation
+### Deactivate an Order
+To stop a standing order, delete it from the list. This sets the order to inactive — it won't generate future tasks.
 
-## How Standing Orders Appear in Daily Flow
+## How Standing Orders Drive Scheduling
 
-Standing orders automatically generate tasks in your Daily Flow:
-- **Harvest tasks** are created for the appropriate date
-- **Delivery tasks** appear on the delivery day
-- You'll see what needs to be packed and where it's going
+Standing orders are the foundation of your planting schedule. The system automatically:
+- Calculates when to seed based on delivery dates and recipe grow times
+- Generates seeding tasks in your Daily Flow
+- Creates harvest and delivery tasks on the appropriate dates
 
 ## Tips
 
-- Set up standing orders early in your planning
-- Review standings orders monthly with customers
-- Use notes to track special handling instructions
+- Set up standing orders early so the planting schedule can plan ahead
+- Review orders regularly with customers to keep quantities accurate
+- Use notes to track special handling or packaging instructions
+- Search by customer name to quickly find all their orders
 `,
 };

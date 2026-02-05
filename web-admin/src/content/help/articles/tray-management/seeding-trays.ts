@@ -3,74 +3,69 @@ import type { HelpArticle } from '../../types';
 export const seedingTraysArticle: HelpArticle = {
   slug: 'seeding-trays',
   title: 'Seeding Trays',
-  description: 'How to record and track newly seeded trays',
+  description: 'How to create seeding requests and track newly seeded trays',
   category: 'tray-management',
-  tags: ['seeding', 'trays', 'tracking'],
+  tags: ['seeding', 'trays', 'tracking', 'requests'],
   order: 1,
   content: `
 # Seeding Trays
 
-Every tray starts with seeding. Recording your seeding accurately sets up the entire grow cycle for success.
+Every tray starts with a seeding request. Recording your seeding accurately sets up the entire grow cycle for success.
 
-## Creating a New Tray Record
+## Creating a Seeding Request
 
-### Quick Seeding
+1. Go to the **Trays** page
+2. Click **Add Tray**
+3. Select the **recipe** — choose from your farm recipes or global recipes
+4. Enter the **quantity** — how many trays you want to seed
+5. Select the **seed date** (today's date by default)
+6. Optionally enter a **location** (e.g., "Rack A - Shelf 1")
+7. Click **Create Seeding Request**
 
-1. Go to **Trays** page
-2. Click **+ New Tray**
-3. Select variety and recipe
-4. Confirm seed date
-5. Save
-
-### Detailed Seeding
-
-For more detailed tracking:
-1. Click **+ New Tray**
-2. Fill in all fields:
-   - **Variety** - What you're growing
-   - **Recipe** - Which grow schedule to use
-   - **Seed Date** - When you planted
-   - **Seed Weight** - Amount of seed used
-   - **Tray Location** - Where it's placed
-   - **Notes** - Any relevant details
+The system creates a pending seeding request. Once you physically seed the trays, complete the seeding task in Daily Flow to activate them.
 
 ## Seeding from Daily Flow
 
-When Daily Flow suggests seeding:
-1. See the suggested seeding tasks
-2. Click **Seed Now**
-3. Confirm the details
-4. Tray is automatically created
+When it's time to seed (based on your planting schedule):
+1. Open **Daily Flow**
+2. Find the seeding tasks for today
+3. Click **Complete** after physically seeding
+4. The tray record becomes active and enters the grow cycle
 
-## Batch Seeding
+## Managing Trays
 
-Seeding multiple trays at once:
-1. Go to **Trays**
-2. Click **Batch Seed**
-3. Select variety and recipe
-4. Enter number of trays
-5. System creates individual tray records
+### Filtering and Sorting
+- **Status filters**: All, Active, Harvested, Lost
+- **Sort by**: Tray ID, Batch, Variety, Seeding Date, Customer, Harvest Date
+- **Pagination**: Browse through large tray lists 20 at a time
 
-## Seed Weight Tracking
+### Assigning Trays to Customers
+Unassigned trays can be assigned to customers to fulfill orders. Use the filter to find unassigned trays and match them to open orders.
 
-Recording seed weight helps you:
-- Track seed usage over time
-- Calculate germination rates
-- Manage seed inventory
-- Estimate yields
+### Tray Loss Tracking
+If a tray is lost or damaged:
+1. Select the tray
+2. Click **Mark as Lost**
+3. Choose a loss reason (fungal, mold, contamination, pest, operator error, or other)
+4. Add optional notes
+5. The tray is removed from active inventory
 
 ## Tray Identification
 
-Each tray gets a unique identifier:
-- Auto-generated tray ID
-- Optional custom label
-- QR code for scanning (if enabled)
+Each tray gets an auto-generated unique tray ID. Trays are also associated with:
+- **Batch** — Which seed batch was used
+- **Variety** — What's growing
+- **Recipe** — The grow schedule being followed
+
+## Subscription Limits
+
+Your subscription plan determines how many active trays you can have at once. If you reach your limit, you'll need to harvest or close existing trays before creating new ones.
 
 ## Tips
 
-- Record immediately after seeding
-- Be consistent with measurements
-- Use notes for anything unusual
-- Set tray location accurately for easy finding
+- Create seeding requests ahead of time based on your planting schedule
+- Use the location field to quickly find trays in your grow space
+- Check the "Unassigned" filter to find trays that need customer assignment
+- Record tray losses promptly for accurate inventory tracking
 `,
 };

@@ -21,38 +21,46 @@ Make sure you have:
 
 ## Step 1: Navigate to Trays
 
-Click on **Trays** in the sidebar navigation to open the Tray Management page.
+Click on **Trays** in the sidebar to open the Tray Management page.
 
-## Step 2: Create a New Tray
+## Step 2: Create a Seeding Request
 
-1. Click the **+ New Tray** button
-2. Select the **variety** you're seeding
-3. Choose the **recipe** to use for grow scheduling
-4. Enter the **seed date** (today's date by default)
-5. Optionally add notes about this specific tray
+1. Click the **Add Tray** button
+2. Select the **recipe** for what you're growing
+3. Enter the **quantity** (number of trays)
+4. Set the **seed date** (today's date by default)
+5. Optionally enter a **location** (where the tray will be placed)
+6. Click **Create Seeding Request**
 
-## Step 3: Track Progress
+## Step 3: Complete the Seeding Task
 
-Once created, your tray will appear in the tray list. The system automatically:
+Your seeding request appears as a task in Daily Flow:
+1. Go to **Daily Flow**
+2. Find your seeding task
+3. Physically seed the tray
+4. Click **Complete** to activate the tray record
 
-- Calculates expected harvest date based on your recipe
-- Schedules grow steps (blackout, light, water reminders)
-- Shows the tray in your Daily Flow
+## Step 4: Track Progress
 
-## Step 4: Complete Grow Steps
+Once activated, the system automatically:
+- Calculates the expected harvest date based on your recipe
+- Schedules grow step tasks (blackout, uncover, water)
+- Shows the tray in your Daily Flow each day it needs attention
 
-As your tray progresses, you'll see tasks in your Daily Flow:
+## Step 5: Complete Grow Steps
 
-- **Blackout removal** - When it's time to expose to light
-- **Watering** - Daily or as scheduled
-- **Harvest** - When the tray is ready
+As your tray progresses, you'll see tasks in Daily Flow:
+- **Blackout** — Cover the tray for initial growth
+- **Uncover** — Remove blackout and expose to light
+- **Water** — Daily or as scheduled by the recipe
+- **Harvest** — When the tray reaches the end of its grow cycle
 
-Mark each step complete to keep your records accurate.
+Mark each step complete to keep your records accurate and the schedule on track.
 
 ## Tips for Success
 
-- **Be consistent** with recording data for better insights
-- **Take photos** to track growth patterns over time
-- **Use notes** to record anything unusual about a batch
+- **Be consistent** with completing tasks for accurate grow tracking
+- **Use the location field** to easily find trays in your grow space
+- **Check Daily Flow** at the start of each day for what needs attention
 `,
 };

@@ -1,5 +1,11 @@
-import { seedInventoryArticle } from './seed-inventory';
+import { seedBatchesArticle } from './seed-batches';
+import { varietiesArticle } from './varieties';
+import { suppliesArticle } from './supplies';
+import { vendorsArticle } from './vendors';
 
 export const inventoryArticles = [
-  seedInventoryArticle,
+  seedBatchesArticle,
+  varietiesArticle,
+  suppliesArticle,
+  vendorsArticle,
 ];

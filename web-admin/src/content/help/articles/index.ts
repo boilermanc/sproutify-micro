@@ -1,18 +1,22 @@
 import { gettingStartedArticles } from './getting-started';
 import { ordersCustomersArticles } from './orders-customers';
-import { harvestWorkflowArticles } from './harvest-workflow';
+import { dailyOperationsArticles } from './daily-operations';
 import { trayManagementArticles } from './tray-management';
 import { inventoryArticles } from './inventory';
-import { recipesArticles } from './recipes';
+import { productsRecipesArticles } from './products-recipes';
+import { reportsArticles } from './reports';
+import { settingsTeamArticles } from './settings-team';
 import type { HelpArticle } from '../types';
 
 export const allArticles: HelpArticle[] = [
   ...gettingStartedArticles,
   ...ordersCustomersArticles,
-  ...harvestWorkflowArticles,
+  ...dailyOperationsArticles,
   ...trayManagementArticles,
   ...inventoryArticles,
-  ...recipesArticles,
+  ...productsRecipesArticles,
+  ...reportsArticles,
+  ...settingsTeamArticles,
 ];
 
 export function getArticlesByCategory(categoryId: string): HelpArticle[] {

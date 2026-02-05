@@ -133,6 +133,7 @@ const PlantingSchedulePage = () => {
 
   // Skipped schedules state (persisted for this session)
   const [skippedSchedules, setSkippedSchedules] = useState<Set<string>>(new Set());
+  const [skipDialog, setSkipDialog] = useState<PlantingSchedule | null>(null);
   const [toastNotification, setToastNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Animation state for removing schedules
@@ -942,11 +943,14 @@ const PlantingSchedulePage = () => {
 
   // Handle skipping an overdue schedule
   const handleSkipSchedule = (schedule: PlantingSchedule) => {
-    if (!confirm(`Skip this overdue seeding for ${schedule.recipe_name}? This will remove it from your view for this session.`)) {
-      return;
-    }
-    const scheduleKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${getLocalDateKey(new Date(schedule.sow_date))}`;
+    setSkipDialog(schedule);
+  };
+
+  const confirmSkipSchedule = () => {
+    if (!skipDialog) return;
+    const scheduleKey = `${skipDialog.standing_order_id}-${skipDialog.recipe_id}-${getLocalDateKey(new Date(skipDialog.sow_date))}`;
     setSkippedSchedules(prev => new Set([...prev, scheduleKey]));
+    setSkipDialog(null);
   };
 
   // Check if a schedule has been skipped
@@ -2344,6 +2348,43 @@ const PlantingSchedulePage = () => {
             >
               <Printer className="h-4 w-4 mr-2" />
               Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Skip Overdue Seeding Confirmation Dialog */}
+      <Dialog open={!!skipDialog} onOpenChange={(open) => !open && setSkipDialog(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Skip Overdue Seeding?</DialogTitle>
+            <DialogDescription>
+              This will remove it from your view for this session.
+            </DialogDescription>
+          </DialogHeader>
+          {skipDialog && (
+            <div className="py-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-amber-900">
+                  {skipDialog.recipe_name}
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  {skipDialog.quantity} tray{skipDialog.quantity !== 1 ? 's' : ''} &bull; Scheduled {formatDate(new Date(skipDialog.sow_date))}
+                </p>
+                {skipDialog.customer_name && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    {skipDialog.order_name} &bull; {skipDialog.customer_name}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSkipDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmSkipSchedule} className="bg-amber-600 hover:bg-amber-700">
+              Skip Seeding
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -13,14 +13,9 @@ export interface AssignableTray {
 export async function fetchAssignableTrays(farmUuid: string, productId: number): Promise<AssignableTray[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const readyDateMin = new Date(today);
-  readyDateMin.setDate(readyDateMin.getDate() - 11);
-  const readyDateMax = new Date(today);
-  readyDateMax.setDate(readyDateMax.getDate() - 10);
-  const readyDateMinStr = readyDateMin.toISOString().split('T')[0];
-  const readyDateMaxStr = readyDateMax.toISOString().split('T')[0];
 
-  const { data, error } = await getSupabaseClient()
+  // Query 1: Get all unassigned active trays for this product
+  const { data: trays, error: traysError } = await getSupabaseClient()
     .from('trays')
     .select(`
       tray_id,
@@ -39,37 +34,76 @@ export async function fetchAssignableTrays(farmUuid: string, productId: number):
     .is('customer_id', null)
     .eq('status', 'active')
     .is('harvest_date', null)
-    .gte('sow_date', readyDateMinStr)
-    .lte('sow_date', readyDateMaxStr)
     .order('sow_date', { ascending: true });
 
-  if (error) {
-    console.error('[fetchAssignableTrays] Error fetching trays:', error);
+  if (traysError) {
+    console.error('[fetchAssignableTrays] Error fetching trays:', traysError);
     return [];
   }
 
-  return (data || [])
+  if (!trays || trays.length === 0) {
+    return [];
+  }
+
+  // Query 2: Get harvest step dates for these trays to determine readiness
+  const trayIds = trays.map((t: any) => t.tray_id);
+  const { data: harvestSteps, error: stepsError } = await getSupabaseClient()
+    .from('tray_steps')
+    .select(`
+      tray_id,
+      scheduled_date,
+      steps!inner (
+        step_name
+      )
+    `)
+    .eq('farm_uuid', farmUuid)
+    .in('tray_id', trayIds)
+    .ilike('steps.step_name', '%harvest%')
+    .eq('status', 'Pending');
+
+  if (stepsError) {
+    console.error('[fetchAssignableTrays] Error fetching harvest steps:', stepsError);
+    return [];
+  }
+
+  // Build map of tray_id -> harvest scheduled_date
+  const harvestDateMap = new Map<number, string>();
+  (harvestSteps || []).forEach((step: any) => {
+    if (step.scheduled_date) {
+      harvestDateMap.set(step.tray_id, step.scheduled_date);
+    }
+  });
+
+  // Filter to only trays that are ready (harvest date <= today)
+  return trays
+    .filter((tray: any) => {
+      const harvestDateStr = harvestDateMap.get(tray.tray_id);
+      if (!harvestDateStr) return false;
+      const harvestDate = new Date(harvestDateStr);
+      harvestDate.setHours(0, 0, 0, 0);
+      return harvestDate <= today;
+    })
     .map((tray: any) => {
       const recipe = Array.isArray(tray.recipes) ? tray.recipes[0] : tray.recipes;
+      const harvestDateStr = harvestDateMap.get(tray.tray_id);
+      const harvestDate = harvestDateStr ? new Date(harvestDateStr) : null;
+      if (harvestDate) harvestDate.setHours(0, 0, 0, 0);
+
+      const daysGrown = tray.sow_date
+        ? Math.max(0, Math.floor((today.getTime() - new Date(tray.sow_date).getTime()) / (1000 * 60 * 60 * 24)))
+        : 0;
+      const daysUntilReady = harvestDate
+        ? Math.max(0, Math.floor((harvestDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+        : 0;
+
       return {
         tray_id: tray.tray_id,
         recipe_id: tray.recipe_id,
         recipe_name: recipe?.recipe_name || 'Unknown',
         variety_name: recipe?.variety_name || null,
         sow_date: tray.sow_date,
-        days_grown: tray.sow_date
-          ? Math.max(
-              0,
-              Math.floor((today.getTime() - new Date(tray.sow_date).getTime()) / (1000 * 60 * 60 * 24))
-            )
-          : 0,
-        days_until_ready: Math.max(
-          0,
-          12 -
-            (tray.sow_date
-              ? Math.floor((today.getTime() - new Date(tray.sow_date).getTime()) / (1000 * 60 * 60 * 24))
-              : 0)
-        ),
+        days_grown: daysGrown,
+        days_until_ready: daysUntilReady,
       };
     });
 }

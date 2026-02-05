@@ -1174,7 +1174,7 @@ export default function DailyFlow() {
       const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
 
       const gapPromise = farmUuid
-        ? fetchOrderGapStatus(farmUuid, signal).catch((error) => {
+        ? fetchOrderGapStatus(farmUuid, selectedDate, signal).catch((error) => {
             if (error.name === 'AbortError') {
               throw error; // Propagate so Promise.all rejects immediately
             }
@@ -3310,36 +3310,27 @@ export default function DailyFlow() {
 
   // Find matching order gap for an unassigned tray (for hiding from Unassigned section)
   const findMatchingGapForTray = useCallback((trayId: number, recipeId?: number): OrderGapStatus | null => {
-    console.log('[findMatchingGapForTray] trayId:', trayId, 'recipeId:', recipeId);
-    console.log('[findMatchingGapForTray] activeOrderGaps:', activeOrderGaps.map(g => ({ customer: g.customer_name, unassigned_ready: g.unassigned_ready })));
-    console.log('[findMatchingGapForTray] gapRecipeRequirements:', Object.entries(gapRecipeRequirements).map(([k, v]) => ({ key: k, recipes: v.map(r => r.recipe_id) })));
-
     // Check if this tray's recipe matches any gap's requirements
     for (const gap of activeOrderGaps) {
       // Only consider gaps that have unassigned trays ready
       if (gap.unassigned_ready <= 0) {
-        console.log(`[findMatchingGapForTray] Skipping ${gap.customer_name} - unassigned_ready is ${gap.unassigned_ready}`);
         continue;
       }
 
       const gapKey = formatGapKey(gap);
       const requirements = gapRecipeRequirements[gapKey] || [];
-      console.log(`[findMatchingGapForTray] Gap ${gapKey} has requirements with recipe_ids:`, requirements.map(r => r.recipe_id));
 
       // If we have a recipeId, check if it matches any requirement for this gap
       if (recipeId && requirements.some(req => req.recipe_id === recipeId)) {
-        console.log('[findMatchingGapForTray] MATCH FOUND!');
         return gap;
       }
 
       // Fallback: check gapMissingVarietyTrays by tray_id
       const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
       if (matchingTrays.some(t => t.tray_id === trayId)) {
-        console.log('[findMatchingGapForTray] MATCH by tray_id!');
         return gap;
       }
     }
-    console.log('[findMatchingGapForTray] No match found');
     return null;
   }, [activeOrderGaps, gapRecipeRequirements, gapMissingVarietyTrays]);
 

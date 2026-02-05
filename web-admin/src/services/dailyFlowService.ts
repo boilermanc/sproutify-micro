@@ -203,13 +203,15 @@ export interface OrderGapStatus {
   missing_varieties: string | null;
 }
 
-export async function fetchOrderGapStatus(farmUuid: string, signal?: AbortSignal): Promise<OrderGapStatus[]> {
-  const query = getSupabaseClient()
-    .from('order_gap_status')
-    .select('*')
-    .eq('farm_uuid', farmUuid);
+export async function fetchOrderGapStatus(farmUuid: string, targetDate: Date, signal?: AbortSignal): Promise<OrderGapStatus[]> {
+  const targetDateStr = formatDateString(targetDate);
 
-  const { data, error } = signal ? await query.abortSignal(signal) : await query;
+  // Use RPC function to pass explicit date (fixes timezone bug with CURRENT_DATE)
+  const { data, error } = await getSupabaseClient()
+    .rpc('get_order_gap_status', {
+      target_date: targetDateStr,
+      p_farm_uuid: farmUuid
+    });
 
   if (error) {
     if (error.name === 'AbortError' || signal?.aborted) {

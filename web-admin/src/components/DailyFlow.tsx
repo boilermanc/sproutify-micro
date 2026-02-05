@@ -726,13 +726,9 @@ export default function DailyFlow() {
       const productIds = [...new Set(gaps.map(g => g.product_id).filter(Boolean))];
       const deliveryDates = [...new Set(gaps.map(g => g.scheduled_delivery_date || g.delivery_date).filter(Boolean))];
 
-      // Calculate ready date range for assignable trays
+      // Today's date for readiness checks
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const readyDateMin = new Date(today);
-      readyDateMin.setDate(readyDateMin.getDate() - 11);
-      const readyDateMax = new Date(today);
-      readyDateMax.setDate(readyDateMax.getDate() + 10);
 
       // Fetch ALL required data in parallel (4 queries total, regardless of gap count)
       const [
@@ -866,23 +862,32 @@ export default function DailyFlow() {
         } else {
           // Get recipe IDs for this product
           const recipeIdsForProduct = productRecipeMap.get(gap.product_id) || [];
-          
-          // Filter unassigned trays that match product and are in ready window
+
+          // Filter unassigned trays that match product and are READY (harvest date <= today)
           const assignableTrays = allActiveTrays
             .filter((tray: any) => {
               if (tray.customer_id != null) return false; // Must be unassigned
               if (!recipeIdsForProduct.includes(tray.recipe_id)) return false; // Must match product
               if (!tray.sow_date) return false;
-              
-              // Check if in ready window (-11 to +10 days)
-              const sowDate = new Date(tray.sow_date);
-              return sowDate >= readyDateMin && sowDate <= readyDateMax;
+
+              // Check if tray is ready using harvest step date
+              const harvestInfo = harvestStepMap.get(tray.tray_id);
+              if (!harvestInfo) return false;
+
+              const harvestDate = new Date(harvestInfo.scheduled_date);
+              harvestDate.setHours(0, 0, 0, 0);
+              return harvestDate <= today; // Tray is ready if harvest date is today or earlier
             })
             .map((tray: any) => {
               const recipe = Array.isArray(tray.recipes) ? tray.recipes[0] : tray.recipes;
               const sowDate = new Date(tray.sow_date);
               const daysGrown = Math.max(0, Math.floor((today.getTime() - sowDate.getTime()) / (1000 * 60 * 60 * 24)));
-              
+              const harvestInfo = harvestStepMap.get(tray.tray_id);
+              const harvestDate = harvestInfo ? new Date(harvestInfo.scheduled_date) : null;
+              const daysUntilReady = harvestDate
+                ? Math.max(0, Math.floor((harvestDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+                : 0;
+
               return {
                 tray_id: tray.tray_id,
                 recipe_id: tray.recipe_id,
@@ -890,7 +895,7 @@ export default function DailyFlow() {
                 variety_name: recipe?.variety_name || null,
                 sow_date: tray.sow_date,
                 days_grown: daysGrown,
-                days_until_ready: Math.max(0, 12 - daysGrown),
+                days_until_ready: daysUntilReady,
               };
             });
 

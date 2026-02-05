@@ -414,12 +414,18 @@ function App() {
                 setIsAuthenticated(false);
               }} />
             ) : isAuthenticated ? (
-              <Navigate to="/customers-page" />
+              <Layout onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
             ) : (
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<FarmHandCustomers />} />
+            <Route index element={useSimplifiedLayout ? <FarmHandCustomers /> : <CustomersPage />} />
           </Route>
 
           <Route path="/labels" element={
@@ -472,7 +478,6 @@ function App() {
             <Route path="planting-schedule" element={<PlantingSchedulePage />} />
             <Route path="calendar" element={<CalendarPage />} />
             <Route path="weekly-tasks" element={<WeeklyTasksPage />} />
-            <Route path="customers" element={<CustomersPage />} />
             <Route path="vendors" element={<VendorsPage />} />
             <Route path="supplies" element={<SuppliesPage />} />
             <Route path="trays" element={<TraysPage />} />

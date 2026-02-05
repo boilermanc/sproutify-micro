@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Sprout, Package, Clock, AlertCircle, AlertTriangle, ChevronRight, Check, Printer, X, SkipForward } from 'lucide-react';
+import { Calendar, Sprout, Package, Clock, AlertCircle, AlertTriangle, ChevronRight, ChevronDown, Check, Printer, X, SkipForward } from 'lucide-react';
 import SeedingPlanPrint from '../components/print/SeedingPlanPrint';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { calculateStandingOrderSowDates } from '../services/predictiveScheduler';
@@ -138,6 +138,8 @@ const PlantingSchedulePage = () => {
 
   // Animation state for removing schedules
   const [removingScheduleKey, setRemovingScheduleKey] = useState<string | null>(null);
+  // Track which seeded date groups are expanded (collapsed by default)
+  const [expandedSeededDates, setExpandedSeededDates] = useState<Set<string>>(new Set());
 
   // Helper to generate unique key for a schedule (index required for uniqueness)
   const getScheduleKey = (schedule: PlantingSchedule, index: number): string => {
@@ -1729,13 +1731,21 @@ const PlantingSchedulePage = () => {
                   ? 'border-emerald-200 bg-emerald-50/20'
                   : ''
               }>
-                <CardHeader className={
-                  showOverdue
-                    ? 'bg-gradient-to-r from-amber-50 to-amber-25 border-b'
-                    : allSeeded
-                    ? 'bg-gradient-to-r from-emerald-50/50 to-white border-b'
-                    : 'bg-gradient-to-r from-gray-50 to-white border-b'
-                }>
+                <CardHeader
+                  className={`${
+                    showOverdue
+                      ? 'bg-gradient-to-r from-amber-50 to-amber-25 border-b'
+                      : allSeeded
+                      ? 'bg-gradient-to-r from-emerald-50/50 to-white'
+                      : 'bg-gradient-to-r from-gray-50 to-white border-b'
+                  } ${allSeeded ? 'cursor-pointer select-none' : ''}`}
+                  onClick={allSeeded ? () => setExpandedSeededDates(prev => {
+                    const next = new Set(prev);
+                    if (next.has(dateKey)) next.delete(dateKey);
+                    else next.add(dateKey);
+                    return next;
+                  }) : undefined}
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${
@@ -1772,26 +1782,32 @@ const PlantingSchedulePage = () => {
                         </CardDescription>
                       </div>
                     </div>
-                    {isToday && !allSeeded && (
-                      <Badge className="bg-emerald-600 text-white">
-                        <AlertCircle className="h-3 w-3 mr-1" />
-                        Action Required
-                      </Badge>
-                    )}
-                    {showOverdue && (
-                      <Badge className="bg-amber-500 text-white">
-                        <AlertTriangle className="h-3 w-3 mr-1" />
-                        OVERDUE
-                      </Badge>
-                    )}
-                    {allSeeded && (
-                      <Badge className="bg-emerald-100 text-emerald-700">
-                        <Check className="h-3 w-3 mr-1" />
-                        Complete
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {isToday && !allSeeded && (
+                        <Badge className="bg-emerald-600 text-white">
+                          <AlertCircle className="h-3 w-3 mr-1" />
+                          Action Required
+                        </Badge>
+                      )}
+                      {showOverdue && (
+                        <Badge className="bg-amber-500 text-white">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          OVERDUE
+                        </Badge>
+                      )}
+                      {allSeeded && (
+                        <>
+                          <Badge className="bg-emerald-100 text-emerald-700">
+                            <Check className="h-3 w-3 mr-1" />
+                            Complete
+                          </Badge>
+                          <ChevronDown className={`h-4 w-4 text-emerald-600 transition-transform ${expandedSeededDates.has(dateKey) ? 'rotate-180' : ''}`} />
+                        </>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
+                {(!allSeeded || expandedSeededDates.has(dateKey)) && (
                 <CardContent className="p-0">
                   <div className="divide-y divide-gray-100">
                     {daySchedules
@@ -1885,6 +1901,7 @@ const PlantingSchedulePage = () => {
                       })}
                   </div>
                 </CardContent>
+                )}
               </Card>
             );
           })}

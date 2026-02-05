@@ -521,10 +521,9 @@ const PlantingSchedulePage = () => {
           });
         }
 
-        // Skip this delivery if it's already seeded
+        // Track if this delivery is already seeded (but don't skip it)
         if (isAlreadySeeded) {
           skippedSeededCount++;
-          continue;
         }
 
         // Create delivery info for this schedule (one tray per delivery)
@@ -698,6 +697,8 @@ const PlantingSchedulePage = () => {
 
           if (remainingToCover <= 0) {
             filteredCount++;
+            // Mark as seeded instead of filtering out
+            filteredSchedules.push({ ...schedule, isSeeded: true });
             continue;
           }
         } else if (isOverdueSchedule) {
@@ -1448,10 +1449,14 @@ const PlantingSchedulePage = () => {
   }
 
   // Separate overdue from upcoming schedules
+  // Seeded overdue schedules go into the upcoming/grouped section (not urgent)
   const { overdue: overdueSchedules, upcoming: upcomingSchedules } = separateSchedules(filteredSchedules);
-  const filteredOverdue = overdueSchedules.filter(s => !isScheduleSkipped(s));
-  const groupedSchedules = groupSchedulesByDate(upcomingSchedules);
+  const filteredOverdue = overdueSchedules.filter(s => !isScheduleSkipped(s) && !s.isSeeded);
+  const allGrouped = [...upcomingSchedules, ...overdueSchedules.filter(s => s.isSeeded)];
+  const groupedSchedules = groupSchedulesByDate(allGrouped);
   const dateKeys = Object.keys(groupedSchedules).sort();
+  const unseededSchedules = filteredSchedules.filter(s => !s.isSeeded);
+  const seededSchedules = filteredSchedules.filter(s => s.isSeeded);
 
   // DEBUG: Log what ends up in filteredOverdue
   console.log('[PlantingSchedule] DEBUG - Final overdue display:', {
@@ -1508,7 +1513,7 @@ const PlantingSchedulePage = () => {
 
       {/* Stats Summary */}
       {(filteredSchedules.length > 0 || filteredOverdue.length > 0) && (
-        <div className={`grid grid-cols-1 gap-4 ${filteredOverdue.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+        <div className={`grid grid-cols-1 gap-4 ${filteredOverdue.length > 0 ? 'md:grid-cols-4' : seededSchedules.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
           {filteredOverdue.length > 0 && (
             <Card className="border-amber-300 bg-amber-50">
               <CardContent className="p-4">
@@ -1522,12 +1527,25 @@ const PlantingSchedulePage = () => {
               </CardContent>
             </Card>
           )}
+          {seededSchedules.length > 0 && filteredOverdue.length === 0 && (
+            <Card className="border-emerald-300 bg-emerald-50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-emerald-700">Already Seeded</p>
+                    <p className="text-2xl font-bold text-emerald-900">{seededSchedules.length}</p>
+                  </div>
+                  <Check className="h-8 w-8 text-emerald-600" />
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Upcoming Plantings</p>
-                  <p className="text-2xl font-bold text-gray-900">{upcomingSchedules.length}</p>
+                  <p className="text-2xl font-bold text-gray-900">{unseededSchedules.filter(s => new Date(s.sow_date) >= getToday()).length}</p>
                 </div>
                 <Sprout className="h-8 w-8 text-emerald-600" />
               </div>
@@ -1550,9 +1568,9 @@ const PlantingSchedulePage = () => {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total Trays Needed</p>
+                  <p className="text-sm text-gray-500">Trays Still Needed</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {Math.ceil(filteredSchedules.reduce((sum, s) => sum + s.quantity, 0))}
+                    {Math.ceil(unseededSchedules.reduce((sum, s) => sum + s.quantity, 0))}
                   </p>
                 </div>
                 <Package className="h-8 w-8 text-amber-600" />
@@ -1565,11 +1583,19 @@ const PlantingSchedulePage = () => {
       {/* Schedule List */}
       {dateKeys.length === 0 && filteredOverdue.length === 0 ? (
         <EmptyState
-          icon={<Calendar className="h-12 w-12 text-gray-400" />}
-          title="No upcoming plantings"
+          icon={seededSchedules.length > 0
+            ? <Check className="h-12 w-12 text-emerald-500" />
+            : <Calendar className="h-12 w-12 text-gray-400" />
+          }
+          title={seededSchedules.length > 0
+            ? "All caught up!"
+            : "No upcoming plantings"
+          }
           description={
             schedules.length === 0
               ? "Create standing orders to see your planting schedule"
+              : seededSchedules.length > 0
+              ? `All ${seededSchedules.length} planting${seededSchedules.length === 1 ? '' : 's'} in this period ${seededSchedules.length === 1 ? 'has' : 'have'} been seeded already`
               : `No plantings scheduled in the selected time range`
           }
           actionLabel={schedules.length === 0 ? "Create Standing Order" : undefined}
@@ -1688,60 +1714,80 @@ const PlantingSchedulePage = () => {
             const daysUntil = getDaysUntil(sowDate);
             const isToday = daysUntil === 0;
             const isPast = daysUntil < 0;
+            const visibleSchedules = daySchedules.filter(s => !isScheduleSkipped(s));
+            const allSeeded = visibleSchedules.length > 0 && visibleSchedules.every(s => s.isSeeded);
+            // Don't show amber overdue styling if everything is seeded
+            const showOverdue = isPast && !allSeeded;
 
             return (
               <Card key={dateKey} className={
-                isToday
+                isToday && !allSeeded
                   ? 'border-emerald-500 border-2'
-                  : isPast
+                  : showOverdue
                   ? 'border-amber-500 border-2 bg-amber-50/30'
+                  : allSeeded
+                  ? 'border-emerald-200 bg-emerald-50/20'
                   : ''
               }>
                 <CardHeader className={
-                  isPast
+                  showOverdue
                     ? 'bg-gradient-to-r from-amber-50 to-amber-25 border-b'
+                    : allSeeded
+                    ? 'bg-gradient-to-r from-emerald-50/50 to-white border-b'
                     : 'bg-gradient-to-r from-gray-50 to-white border-b'
                 }>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${
-                        isToday
+                        isToday && !allSeeded
                           ? 'bg-emerald-100'
-                          : isPast
+                          : showOverdue
                           ? 'bg-amber-100'
+                          : allSeeded
+                          ? 'bg-emerald-100'
                           : 'bg-gray-100'
                       }`}>
-                        {isPast ? (
+                        {showOverdue ? (
                           <AlertTriangle className="h-5 w-5 text-amber-600" />
+                        ) : allSeeded ? (
+                          <Check className="h-5 w-5 text-emerald-600" />
                         ) : (
                           <Calendar className={`h-5 w-5 ${isToday ? 'text-emerald-600' : 'text-gray-600'}`} />
                         )}
                       </div>
                       <div>
-                        <CardTitle className={`text-lg font-bold ${isPast ? 'text-amber-800' : 'text-gray-800'}`}>
+                        <CardTitle className={`text-lg font-bold ${showOverdue ? 'text-amber-800' : allSeeded ? 'text-emerald-800' : 'text-gray-800'}`}>
                           {formatDate(sowDate)}
                         </CardTitle>
-                        <CardDescription className={isPast ? 'text-amber-700' : ''}>
+                        <CardDescription className={showOverdue ? 'text-amber-700' : allSeeded ? 'text-emerald-600' : ''}>
                           {isToday
-                            ? 'Today - Plant Now!'
-                            : isPast
+                            ? allSeeded ? 'All seeded for today' : 'Today - Plant Now!'
+                            : showOverdue
                             ? `${Math.abs(daysUntil)} ${Math.abs(daysUntil) === 1 ? 'day' : 'days'} overdue - Seed now or skip`
+                            : allSeeded
+                            ? `All ${visibleSchedules.length} ${visibleSchedules.length === 1 ? 'planting' : 'plantings'} seeded`
                             : daysUntil === 1
                             ? 'Tomorrow'
                             : `${daysUntil} days away`}
                         </CardDescription>
                       </div>
                     </div>
-                    {isToday && (
+                    {isToday && !allSeeded && (
                       <Badge className="bg-emerald-600 text-white">
                         <AlertCircle className="h-3 w-3 mr-1" />
                         Action Required
                       </Badge>
                     )}
-                    {isPast && (
+                    {showOverdue && (
                       <Badge className="bg-amber-500 text-white">
                         <AlertTriangle className="h-3 w-3 mr-1" />
                         OVERDUE
+                      </Badge>
+                    )}
+                    {allSeeded && (
+                      <Badge className="bg-emerald-100 text-emerald-700">
+                        <Check className="h-3 w-3 mr-1" />
+                        Complete
                       </Badge>
                     )}
                   </div>
@@ -1753,6 +1799,7 @@ const PlantingSchedulePage = () => {
                       .map((schedule, index) => {
                         const scheduleKey = getScheduleKey(schedule, index);
                         const isRemoving = removingScheduleKey === scheduleKey;
+                        const isSeeded = schedule.isSeeded;
                         return (
                       <div
                         key={scheduleKey}
@@ -1760,19 +1807,25 @@ const PlantingSchedulePage = () => {
                           isRemoving
                             ? 'opacity-0 -translate-y-2'
                             : 'opacity-100 translate-y-0'
-                        } ${isPast ? 'hover:bg-amber-50' : 'hover:bg-gray-50'}`}
+                        } ${isSeeded ? 'opacity-60 hover:bg-gray-50' : isPast ? 'hover:bg-amber-50' : 'hover:bg-gray-50'}`}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <h3 className={`font-semibold ${isPast ? 'text-amber-900' : 'text-gray-900'}`}>
+                              <h3 className={`font-semibold ${isSeeded ? 'text-gray-500' : isPast ? 'text-amber-900' : 'text-gray-900'}`}>
                                 {schedule.recipe_name}
                               </h3>
-                              <Badge variant="outline" className={`text-xs ${isPast ? 'border-amber-400 text-amber-700' : ''}`}>
+                              <Badge variant="outline" className={`text-xs ${isSeeded ? 'border-gray-300 text-gray-400' : isPast ? 'border-amber-400 text-amber-700' : ''}`}>
                                 {Math.ceil(schedule.quantity)} {Math.ceil(schedule.quantity) === 1 ? 'tray' : 'trays'}
                               </Badge>
+                              {isSeeded && (
+                                <Badge className="bg-emerald-100 text-emerald-700 text-xs">
+                                  <Check className="h-3 w-3 mr-1" />
+                                  Seeded
+                                </Badge>
+                              )}
                             </div>
-                            <div className={`space-y-1 text-sm ${isPast ? 'text-amber-700' : 'text-gray-600'}`}>
+                            <div className={`space-y-1 text-sm ${isSeeded ? 'text-gray-400' : isPast ? 'text-amber-700' : 'text-gray-600'}`}>
                               <div className="flex items-center gap-2">
                                 <Package className="h-4 w-4" />
                                 <span>
@@ -1799,26 +1852,32 @@ const PlantingSchedulePage = () => {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {isPast && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleSkipSchedule(schedule)}
-                                className="text-amber-700 border-amber-400 hover:bg-amber-100"
-                              >
-                                <X className="h-4 w-4 mr-1" />
-                                Skip
-                              </Button>
+                            {isSeeded ? (
+                              <span className="text-xs text-emerald-600 font-medium px-2">Done</span>
+                            ) : (
+                              <>
+                                {isPast && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleSkipSchedule(schedule)}
+                                    className="text-amber-700 border-amber-400 hover:bg-amber-100"
+                                  >
+                                    <X className="h-4 w-4 mr-1" />
+                                    Skip
+                                  </Button>
+                                )}
+                                <Button
+                                  variant={isPast ? "default" : "ghost"}
+                                  size="sm"
+                                  onClick={() => handleCreateTray(schedule, index)}
+                                  className={isPast ? "bg-amber-600 hover:bg-amber-700 text-white" : "flex items-center gap-1"}
+                                >
+                                  {isPast ? 'Seed Now' : 'Create Tray'}
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </>
                             )}
-                            <Button
-                              variant={isPast ? "default" : "ghost"}
-                              size="sm"
-                              onClick={() => handleCreateTray(schedule, index)}
-                              className={isPast ? "bg-amber-600 hover:bg-amber-700 text-white" : "flex items-center gap-1"}
-                            >
-                              {isPast ? 'Seed Now' : 'Create Tray'}
-                              <ChevronRight className="h-4 w-4" />
-                            </Button>
                           </div>
                         </div>
                       </div>

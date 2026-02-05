@@ -535,6 +535,7 @@ export default function DailyFlow() {
   const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
   const [gapMismatchedTraysLoading, setGapMismatchedTraysLoading] = useState<Record<string, boolean>>({});
   const [gapRecipeRequirements, setGapRecipeRequirements] = useState<Record<string, OrderFulfillmentStatus[]>>({});
+  const [gapProductRecipeMap, setGapProductRecipeMap] = useState<Record<number, number[]>>({});
 
   // Check if all gaps are resolvable (have at least one variety that can be filled)
   // If ANY gap has ONLY missing varieties (no trays available), the order cannot be finalized
@@ -989,6 +990,13 @@ export default function DailyFlow() {
       setGapMissingVarietyTrays(newMissingVarietyTrays);
       setGapMismatchedTrays(newMismatchedTrays);
       setGapRecipeRequirements(newRecipeRequirements);
+
+      // Store product-recipe mapping for direct matching in findMatchingGapForTray
+      const productRecipeMapObj: Record<number, number[]> = {};
+      productRecipeMap.forEach((recipeIds, productId) => {
+        productRecipeMapObj[productId] = recipeIds;
+      });
+      setGapProductRecipeMap(productRecipeMapObj);
       
       // Clear all loading states
       const noLoading: Record<string, boolean> = {};
@@ -3325,6 +3333,14 @@ export default function DailyFlow() {
         return gap;
       }
 
+      // Direct match: check if tray's recipe is in the product's recipe list
+      if (recipeId && gap.product_id) {
+        const productRecipes = gapProductRecipeMap[gap.product_id] || [];
+        if (productRecipes.includes(recipeId)) {
+          return gap;
+        }
+      }
+
       // Fallback: check gapMissingVarietyTrays by tray_id
       const matchingTrays = gapMissingVarietyTrays[gapKey] || [];
       if (matchingTrays.some(t => t.tray_id === trayId)) {
@@ -3332,7 +3348,7 @@ export default function DailyFlow() {
       }
     }
     return null;
-  }, [activeOrderGaps, gapRecipeRequirements, gapMissingVarietyTrays]);
+  }, [activeOrderGaps, gapRecipeRequirements, gapProductRecipeMap, gapMissingVarietyTrays]);
 
   const handleLostConfirm = async () => {
     if (!lostTask || !lossReason) return;

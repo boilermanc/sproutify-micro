@@ -30,6 +30,7 @@ import {
   FileText,
   User,
   HelpCircle,
+  CheckCircle2,
   type LucideIcon,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
@@ -80,9 +81,11 @@ import {
   rescheduleSeedingRequest,
   fetchPassiveTrayStatus,
   fetchOrderGapStatus,
+  fetchCompletedDeliveries,
   fetchOverdueSeedingTasks,
   type PassiveTrayStatusItem,
-  type OrderGapStatus
+  type OrderGapStatus,
+  type CompletedDelivery
 } from '../services/dailyFlowService';
 import { recordFulfillmentAction } from '../services/orderFulfillmentActions';
 import type { FulfillmentActionType } from '../services/orderFulfillmentActions';
@@ -530,6 +533,7 @@ export default function DailyFlow() {
   const [selectedSubstitute, setSelectedSubstitute] = useState<number | null>(null);
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
   const [orderGapStatus, setOrderGapStatus] = useState<OrderGapStatus[]>([]);
+  const [completedDeliveries, setCompletedDeliveries] = useState<CompletedDelivery[]>([]);
   const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
   const [gapMissingVarietyTrays, setGapMissingVarietyTrays] = useState<Record<string, AssignableTray[]>>({});
   const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
@@ -1196,6 +1200,16 @@ export default function DailyFlow() {
           })
         : Promise.resolve<OrderGapStatus[]>([]);
 
+      const completedDeliveriesPromise = farmUuid
+        ? fetchCompletedDeliveries(farmUuid, selectedDate, signal).catch((error) => {
+            if (error.name === 'AbortError') {
+              throw error;
+            }
+            console.error('[loadTasks] Error fetching completed deliveries:', error);
+            return [];
+          })
+        : Promise.resolve<CompletedDelivery[]>([]);
+
       // Force refresh to bypass any caching - pass Date and forceRefresh flag
       // Add timeout to each promise to prevent hanging, but propagate AbortError
       const timeoutPromise = <T,>(promise: Promise<T>, timeoutMs: number, defaultValue: T): Promise<T> => {
@@ -1235,12 +1249,13 @@ export default function DailyFlow() {
       };
 
       // Timeouts to prevent hanging — AbortError propagates immediately
-      const [tasksData, count, passiveStatus, orderGaps, overdueTasks] = await Promise.all([
+      const [tasksData, count, passiveStatus, orderGaps, overdueTasks, completedDeliveriesData] = await Promise.all([
         timeoutPromise(fetchDailyTasks(selectedDate, true, signal), 30000, []),
         timeoutPromise(getActiveTraysCount(signal), 20000, 0),
         timeoutPromise(fetchPassiveTrayStatus(signal), 20000, []),
         gapPromise,
         timeoutPromise(fetchOverdueSeedingTasks(7, signal), 20000, []),
+        timeoutPromise(completedDeliveriesPromise, 20000, []),
       ]);
 
       // Note: Even if signal was aborted after fetch completed, we should still use
@@ -1248,6 +1263,7 @@ export default function DailyFlow() {
 
       // Update passive tray status
       setPassiveTrayStatus(passiveStatus);
+      setCompletedDeliveries(completedDeliveriesData);
 
       // Filter out gaps that have been removed by user action (prevents race condition)
       const filteredGaps = orderGaps.filter((g: OrderGapStatus) => !removedGapsRef.current.has(formatGapKey(g)));
@@ -4253,6 +4269,54 @@ export default function DailyFlow() {
           </section>
         )}
 
+        {/* COMPLETED DELIVERIES */}
+        {completedDeliveries.length > 0 && (
+          <section>
+            <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm overflow-hidden p-4 md:p-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-700" />
+                <h3 className="text-lg font-semibold uppercase tracking-wide text-emerald-900">Completed Deliveries</h3>
+                <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs uppercase tracking-[0.2em]">
+                  {completedDeliveries.length} delivered
+                </Badge>
+              </div>
+              <div className="mt-4 space-y-3">
+                {completedDeliveries.map((delivery) => (
+                  <div
+                    key={`${delivery.standing_order_id}-${delivery.recipe_id}`}
+                    className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-emerald-900">
+                        {delivery.customer_name} — {delivery.recipe_name}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[0.65rem] text-emerald-700/70">
+                          {formatLocalDate(delivery.delivery_date)}
+                        </span>
+                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 text-[0.6rem] uppercase tracking-[0.25em]">
+                          Delivered
+                        </Badge>
+                      </div>
+                    </div>
+                    {delivery.trays.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {delivery.trays.map((tray) => (
+                          <span
+                            key={tray.tray_id}
+                            className="text-[0.65rem] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full"
+                          >
+                            #{tray.tray_id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+        )}
 
         {/* SECTION 0: MISSED STEPS CATCH-UP */}
         {tasksWithMissedSteps.length > 0 && (

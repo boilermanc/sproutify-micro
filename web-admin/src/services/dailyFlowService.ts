@@ -224,6 +224,90 @@ export async function fetchOrderGapStatus(farmUuid: string, targetDate: Date, si
   return (data ?? []) as OrderGapStatus[];
 }
 
+export interface CompletedDelivery {
+  standing_order_id: number;
+  customer_id: number;
+  customer_name: string;
+  recipe_name: string;
+  recipe_id: number;
+  delivery_date: string;
+  trays: Array<{
+    tray_id: number;
+    tray_unique_id: string;
+    harvest_date: string | null;
+  }>;
+}
+
+export async function fetchCompletedDeliveries(farmUuid: string, targetDate: Date, signal?: AbortSignal): Promise<CompletedDelivery[]> {
+  const targetDateStr = formatDateString(targetDate);
+
+  const { data, error } = await getSupabaseClient()
+    .from('order_schedules')
+    .select(`
+      schedule_id,
+      standing_order_id,
+      recipe_id,
+      scheduled_delivery_date,
+      standing_orders!inner (
+        customer_id,
+        customers!inner ( name )
+      ),
+      recipes ( recipe_name ),
+      trays ( tray_id, tray_unique_id, harvest_date )
+    `)
+    .eq('farm_uuid', farmUuid)
+    .eq('scheduled_delivery_date', targetDateStr)
+    .eq('status', 'completed');
+
+  if (error) {
+    if (error.name === 'AbortError' || signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError');
+    }
+    console.error('[fetchCompletedDeliveries] error', error);
+    return [];
+  }
+
+  if (!data || data.length === 0) return [];
+
+  // Group by standing_order_id + recipe_id to aggregate trays
+  const groupMap = new Map<string, CompletedDelivery>();
+
+  for (const row of data as any[]) {
+    const so = row.standing_orders;
+    const customerId = so?.customer_id;
+    const customerName = so?.customers?.name || 'Unknown';
+    const recipeName = row.recipes?.recipe_name || 'Unknown';
+    const key = `${row.standing_order_id}-${row.recipe_id}`;
+
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        standing_order_id: row.standing_order_id,
+        customer_id: customerId,
+        customer_name: customerName,
+        recipe_name: recipeName,
+        recipe_id: row.recipe_id,
+        delivery_date: row.scheduled_delivery_date,
+        trays: [],
+      });
+    }
+
+    const group = groupMap.get(key)!;
+    const trayRows = Array.isArray(row.trays) ? row.trays : row.trays ? [row.trays] : [];
+    for (const t of trayRows) {
+      // Avoid duplicates
+      if (!group.trays.some(existing => existing.tray_id === t.tray_id)) {
+        group.trays.push({
+          tray_id: t.tray_id,
+          tray_unique_id: t.tray_unique_id,
+          harvest_date: t.harvest_date,
+        });
+      }
+    }
+  }
+
+  return Array.from(groupMap.values());
+}
+
 /**
  * Fetch maintenance tasks for a specific date
  * Handles daily, weekly, monthly, and one-time frequencies

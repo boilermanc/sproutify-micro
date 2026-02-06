@@ -131,8 +131,9 @@ const PlantingSchedulePage = () => {
   const [farmName, setFarmName] = useState<string>('');
   const [seedingDays, setSeedingDays] = useState<string[]>([...ALL_WEEK_SEEDING_DAYS]);
 
-  // Skipped schedules state (persisted for this session)
+  // Skipped schedules state (in-memory for immediate UI + DB-sourced for persistence)
   const [skippedSchedules, setSkippedSchedules] = useState<Set<string>>(new Set());
+  const [dbSkippedKeys, setDbSkippedKeys] = useState<Set<string>>(new Set());
   const [skipDialog, setSkipDialog] = useState<PlantingSchedule | null>(null);
   const [toastNotification, setToastNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -287,10 +288,9 @@ const PlantingSchedulePage = () => {
           }
         }
       }
-      // DEBUG: Log lookup map contents
-      console.log('[PlantingSchedule] DEBUG - scheduleIdLookup entries:', Array.from(scheduleIdLookup.entries()).slice(0, 10));
-      console.log('[PlantingSchedule] skippedOrCompletedKeys:', [...skippedOrCompletedKeys]);
-      console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries');
+      // Store DB skipped keys in state for render-time overdue filtering
+      setDbSkippedKeys(skippedOrCompletedKeys);
+      console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries,', skippedOrCompletedKeys.size, 'skipped/completed');
 
       // 2.6. Fetch trays that already have order_schedule_id assigned
       // These deliveries have already been seeded and should be excluded from counts
@@ -515,7 +515,6 @@ const PlantingSchedulePage = () => {
         const scheduleLookupKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${deliveryDateKey}`;
 
         // Skip deliveries whose order_schedule is skipped or completed in the DB
-        if (schedule.recipe_id === 21) console.log('[PlantingSchedule] Pea scheduleLookupKey:', scheduleLookupKey, 'inSkipped:', skippedOrCompletedKeys.has(scheduleLookupKey));
         if (skippedOrCompletedKeys.has(scheduleLookupKey)) {
           skippedByStatusCount++;
           continue;
@@ -966,11 +965,44 @@ const PlantingSchedulePage = () => {
     setSkipDialog(schedule);
   };
 
-  const confirmSkipSchedule = () => {
+  const confirmSkipSchedule = async () => {
     if (!skipDialog) return;
     const scheduleKey = `${skipDialog.standing_order_id}-${skipDialog.recipe_id}-${getLocalDateKey(new Date(skipDialog.sow_date))}`;
     setSkippedSchedules(prev => new Set([...prev, scheduleKey]));
     setSkipDialog(null);
+
+    // Persist to DB — update all delivery schedule_ids to 'skipped'
+    const scheduleIds = (skipDialog.deliveries || [])
+      .map(d => d.schedule_id)
+      .filter((id): id is number => id !== null);
+
+    if (scheduleIds.length > 0) {
+      const sessionData = localStorage.getItem('sproutify_session');
+      const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
+      if (farmUuid) {
+        const { error } = await getSupabaseClient()
+          .from('order_schedules')
+          .update({ status: 'skipped', notes: 'Skipped from Planting Schedule' })
+          .in('schedule_id', scheduleIds);
+
+        if (error) {
+          console.error('[PlantingSchedule] Error persisting skip to DB:', error);
+        } else {
+          // Update dbSkippedKeys so render-time filter catches it immediately
+          setDbSkippedKeys(prev => {
+            const next = new Set(prev);
+            (skipDialog.deliveries || []).forEach(d => {
+              if (d.schedule_id !== null) {
+                const dd = new Date(d.delivery_date);
+                const key = `${d.standing_order_id}-${skipDialog.recipe_id}-${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
+                next.add(key);
+              }
+            });
+            return next;
+          });
+        }
+      }
+    }
   };
 
   // Check if a schedule has been skipped
@@ -1470,7 +1502,15 @@ const PlantingSchedulePage = () => {
   // Separate overdue from upcoming schedules
   // Seeded overdue schedules go into the upcoming/grouped section (not urgent)
   const { overdue: overdueSchedules, upcoming: upcomingSchedules } = separateSchedules(filteredSchedules);
-  const filteredOverdue = overdueSchedules.filter(s => !isScheduleSkipped(s) && !s.isSeeded);
+  const isDbSkipped = (s: PlantingSchedule) => {
+    if (!s.deliveries || s.deliveries.length === 0) return false;
+    return s.deliveries.every(d => {
+      const dd = new Date(d.delivery_date);
+      const key = `${d.standing_order_id}-${s.recipe_id}-${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
+      return dbSkippedKeys.has(key);
+    });
+  };
+  const filteredOverdue = overdueSchedules.filter(s => !isScheduleSkipped(s) && !s.isSeeded && !isDbSkipped(s));
   const allGrouped = [...upcomingSchedules, ...overdueSchedules.filter(s => s.isSeeded)];
   const groupedSchedules = groupSchedulesByDate(allGrouped);
   const dateKeys = Object.keys(groupedSchedules).sort();
@@ -2452,7 +2492,7 @@ const PlantingSchedulePage = () => {
           <DialogHeader>
             <DialogTitle>Skip Overdue Seeding?</DialogTitle>
             <DialogDescription>
-              This will remove it from your view for this session.
+              This will mark the delivery as skipped and remove it from your schedule.
             </DialogDescription>
           </DialogHeader>
           {skipDialog && (

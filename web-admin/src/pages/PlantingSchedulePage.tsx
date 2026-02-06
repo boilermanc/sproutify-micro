@@ -248,7 +248,7 @@ const PlantingSchedulePage = () => {
         .from('order_schedules')
         .select('schedule_id, standing_order_id, recipe_id, scheduled_delivery_date, status')
         .in('standing_order_id', standingOrderIds)
-        .in('status', ['pending', 'generated'])
+        .in('status', ['pending', 'generated', 'skipped', 'completed'])
         .limit(1000);
 
       // DEBUG: Explicit logging of actual array length (NOT sliced)
@@ -263,19 +263,26 @@ const PlantingSchedulePage = () => {
       // Key must be unique per (standing_order, recipe, delivery_date) combination
       // scheduled_delivery_date comes from DB as string like '2025-12-10' or '2025-12-10T00:00:00'
       const scheduleIdLookup = new Map<string, number>();
+      const skippedOrCompletedKeys = new Set<string>();
       if (orderSchedulesData) {
         for (const schedule of orderSchedulesData) {
           // DB returns date as string, split on T to get YYYY-MM-DD
           const dateKey = String(schedule.scheduled_delivery_date).split('T')[0];
           const key = `${schedule.standing_order_id}-${schedule.recipe_id}-${dateKey}`;
-          scheduleIdLookup.set(key, schedule.schedule_id);
+          // Track skipped/completed schedules separately so we can exclude them during dedup
+          if (schedule.status === 'skipped' || schedule.status === 'completed') {
+            skippedOrCompletedKeys.add(key);
+          } else {
+            scheduleIdLookup.set(key, schedule.schedule_id);
+          }
           // DEBUG: Log first few entries
-          if (scheduleIdLookup.size <= 3) {
+          if (scheduleIdLookup.size + skippedOrCompletedKeys.size <= 3) {
             console.log('[PlantingSchedule] DEBUG - Building lookup:', {
               raw: schedule.scheduled_delivery_date,
               dateKey,
               key,
               recipe_id: schedule.recipe_id,
+              status: schedule.status,
             });
           }
         }
@@ -492,6 +499,7 @@ const PlantingSchedulePage = () => {
       // Skip deliveries that already have trays (order_schedule_id in seededScheduleIds)
       const dedupeMap = new Map<string, PlantingSchedule>();
       let skippedSeededCount = 0;
+      let skippedByStatusCount = 0;
 
       for (const schedule of allSchedules) {
         const sowDateKey = getLocalDateKey(schedule.sow_date);
@@ -504,6 +512,13 @@ const PlantingSchedulePage = () => {
         const deliveryDate = new Date(schedule.delivery_date);
         const deliveryDateKey = `${deliveryDate.getFullYear()}-${String(deliveryDate.getMonth() + 1).padStart(2, '0')}-${String(deliveryDate.getDate()).padStart(2, '0')}`;
         const scheduleLookupKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${deliveryDateKey}`;
+
+        // Skip deliveries whose order_schedule is skipped or completed in the DB
+        if (skippedOrCompletedKeys.has(scheduleLookupKey)) {
+          skippedByStatusCount++;
+          continue;
+        }
+
         const scheduleId = scheduleIdLookup.get(scheduleLookupKey) || null;
 
         // Check if this delivery has already been seeded (any tray exists with this order_schedule_id)
@@ -561,7 +576,7 @@ const PlantingSchedulePage = () => {
       const deduplicatedSchedules = Array.from(dedupeMap.values());
       deduplicatedSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
 
-      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded deliveries)`);
+      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded, ${skippedByStatusCount} skipped/completed deliveries)`);
 
       // DEBUG: Log all schedules with sow_date < today BEFORE tray-check filtering
       const todayForDebug = new Date();

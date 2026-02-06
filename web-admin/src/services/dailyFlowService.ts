@@ -242,22 +242,10 @@ export async function fetchCompletedDeliveries(farmUuid: string, targetDate: Dat
   const targetDateStr = formatDateString(targetDate);
 
   const { data, error } = await getSupabaseClient()
-    .from('order_schedules')
-    .select(`
-      schedule_id,
-      standing_order_id,
-      recipe_id,
-      scheduled_delivery_date,
-      standing_orders!inner (
-        customer_id,
-        customers!inner ( name )
-      ),
-      recipes ( recipe_name ),
-      trays ( tray_id, tray_unique_id, harvest_date )
-    `)
-    .eq('farm_uuid', farmUuid)
-    .eq('scheduled_delivery_date', targetDateStr)
-    .eq('status', 'completed');
+    .rpc('get_completed_deliveries', {
+      target_date: targetDateStr,
+      p_farm_uuid: farmUuid,
+    });
 
   if (error) {
     if (error.name === 'AbortError' || signal?.aborted) {
@@ -269,37 +257,32 @@ export async function fetchCompletedDeliveries(farmUuid: string, targetDate: Dat
 
   if (!data || data.length === 0) return [];
 
-  // Group by standing_order_id + recipe_id to aggregate trays
+  // Group flat rows by standing_order_id + recipe_id to aggregate trays
   const groupMap = new Map<string, CompletedDelivery>();
 
   for (const row of data as any[]) {
-    const so = row.standing_orders;
-    const customerId = so?.customer_id;
-    const customerName = so?.customers?.name || 'Unknown';
-    const recipeName = row.recipes?.recipe_name || 'Unknown';
     const key = `${row.standing_order_id}-${row.recipe_id}`;
 
     if (!groupMap.has(key)) {
       groupMap.set(key, {
         standing_order_id: row.standing_order_id,
-        customer_id: customerId,
-        customer_name: customerName,
-        recipe_name: recipeName,
+        customer_id: row.customer_id,
+        customer_name: row.customer_name,
+        recipe_name: row.recipe_name,
         recipe_id: row.recipe_id,
-        delivery_date: row.scheduled_delivery_date,
+        delivery_date: row.delivery_date,
         trays: [],
       });
     }
 
-    const group = groupMap.get(key)!;
-    const trayRows = Array.isArray(row.trays) ? row.trays : row.trays ? [row.trays] : [];
-    for (const t of trayRows) {
-      // Avoid duplicates
-      if (!group.trays.some(existing => existing.tray_id === t.tray_id)) {
+    // Add tray if present (LEFT JOIN means tray_id can be null)
+    if (row.tray_id) {
+      const group = groupMap.get(key)!;
+      if (!group.trays.some(existing => existing.tray_id === row.tray_id)) {
         group.trays.push({
-          tray_id: t.tray_id,
-          tray_unique_id: t.tray_unique_id,
-          harvest_date: t.harvest_date,
+          tray_id: row.tray_id,
+          tray_unique_id: row.tray_unique_id,
+          harvest_date: row.harvest_date,
         });
       }
     }

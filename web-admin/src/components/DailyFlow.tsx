@@ -2047,10 +2047,54 @@ export default function DailyFlow() {
         // Start exit animation
         animatingOutRef.current.add(task.id);
         setAnimatingOut(prev => new Set(prev).add(task.id));
-        
+
         // Show formatted success notification
         const yieldText = yieldValue ? ` - ${yieldValue}g yield` : '';
         showNotification('success', `${task.action} completed for ${task.trays} ${task.trays === 1 ? 'tray' : 'trays'} (${task.batchId})${yieldText}`);
+
+        // Optimistic UI: on harvest, immediately remove matching order gaps
+        // and add a completed delivery card (background reload will reconcile)
+        if (task.action === 'Harvest' && task.customerId) {
+          // Animate out matching gap cards for this customer
+          setOrderGapStatus(prev => {
+            const matchingGaps = prev.filter(g => g.customer_id === task.customerId);
+            matchingGaps.forEach(g => {
+              const gapKey = formatGapKey(g);
+              setAnimatingOutGaps(p => new Set(p).add(gapKey));
+            });
+            // Remove after a short delay for animation
+            setTimeout(() => {
+              setOrderGapStatus(current =>
+                current.filter(g => g.customer_id !== task.customerId)
+              );
+              setAnimatingOutGaps(new Set());
+            }, 300);
+            return prev;
+          });
+
+          // Optimistically add a completed delivery card
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+          setCompletedDeliveries(prev => {
+            const key = `${task.standingOrderId || 0}-${task.recipeId}`;
+            // Don't add if already exists
+            if (prev.some(d => `${d.standing_order_id}-${d.recipe_id}` === key)) return prev;
+            return [...prev, {
+              standing_order_id: task.standingOrderId || 0,
+              customer_id: task.customerId!,
+              customer_name: task.customerName || 'Customer',
+              recipe_name: task.crop || 'Unknown',
+              recipe_id: task.recipeId,
+              delivery_date: todayStr,
+              trays: task.trayIds.map(id => ({
+                tray_id: id,
+                tray_unique_id: `#${id}`,
+                harvest_date: todayStr,
+              })),
+            }];
+          });
+        }
 
         // Wait for animation to complete, then remove task
         setTimeout(() => {
@@ -2061,7 +2105,7 @@ export default function DailyFlow() {
             next.delete(task.id);
             return next;
           });
-          
+
           // Only reload for tasks that might affect other tasks or counts
           // (Harvest changes active tray count, Seed creates new trays)
           // For simple tasks like Water, just remove from state

@@ -534,6 +534,8 @@ export default function DailyFlow() {
   const [passiveTrayStatus, setPassiveTrayStatus] = useState<PassiveTrayStatusItem[]>([]);
   const [orderGapStatus, setOrderGapStatus] = useState<OrderGapStatus[]>([]);
   const [completedDeliveries, setCompletedDeliveries] = useState<CompletedDelivery[]>([]);
+  const [isCompletedDeliveriesExpanded, setIsCompletedDeliveriesExpanded] = useState(false);
+  const [isHarvestExpanded, setIsHarvestExpanded] = useState(false);
   const activeOrderGaps = useMemo(() => orderGapStatus.filter((gap) => gap.gap > 0), [orderGapStatus]);
   const [gapMissingVarietyTrays, setGapMissingVarietyTrays] = useState<Record<string, AssignableTray[]>>({});
   const [gapMismatchedTrays, setGapMismatchedTrays] = useState<Record<string, MismatchedAssignedTray[]>>({});
@@ -4317,47 +4319,56 @@ export default function DailyFlow() {
         {completedDeliveries.length > 0 && (
           <section>
             <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm overflow-hidden p-4 md:p-6">
-              <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="flex flex-wrap items-center gap-2 w-full text-left"
+                onClick={() => setIsCompletedDeliveriesExpanded(prev => !prev)}
+              >
                 <CheckCircle2 className="h-5 w-5 text-emerald-700" />
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-emerald-900">Completed Deliveries</h3>
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs uppercase tracking-[0.2em]">
                   {completedDeliveries.length} delivered
                 </Badge>
-              </div>
-              <div className="mt-4 space-y-3">
-                {completedDeliveries.map((delivery) => (
-                  <div
-                    key={`${delivery.standing_order_id}-${delivery.recipe_id}`}
-                    className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 space-y-2"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-emerald-900">
-                        {delivery.customer_name} — {delivery.recipe_name}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[0.65rem] text-emerald-700/70">
-                          {formatLocalDate(delivery.delivery_date)}
-                        </span>
-                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 text-[0.6rem] uppercase tracking-[0.25em]">
-                          Delivered
-                        </Badge>
-                      </div>
-                    </div>
-                    {delivery.trays.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {delivery.trays.map((tray) => (
-                          <span
-                            key={tray.tray_id}
-                            className="text-[0.65rem] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full"
-                          >
-                            #{tray.tray_id}
+                {isCompletedDeliveriesExpanded
+                  ? <ChevronUp className="h-4 w-4 text-emerald-600 ml-auto" />
+                  : <ChevronDown className="h-4 w-4 text-emerald-600 ml-auto" />
+                }
+              </button>
+              {isCompletedDeliveriesExpanded && (
+                <div className="mt-4 space-y-3">
+                  {completedDeliveries.map((delivery) => (
+                    <div
+                      key={`${delivery.standing_order_id}-${delivery.recipe_id}`}
+                      className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-emerald-900">
+                          {delivery.customer_name} — {delivery.recipe_name}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[0.65rem] text-emerald-700/70">
+                            {formatLocalDate(delivery.delivery_date)}
                           </span>
-                        ))}
+                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 text-[0.6rem] uppercase tracking-[0.25em]">
+                            Delivered
+                          </Badge>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      {delivery.trays.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {delivery.trays.map((tray) => (
+                            <span
+                              key={tray.tray_id}
+                              className="text-[0.65rem] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full"
+                            >
+                              #{tray.tray_id}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           </section>
         )}
@@ -4401,8 +4412,12 @@ export default function DailyFlow() {
         {/* SECTION 1: THE HARVEST (Priority #1) */}
         {harvestTasks.length > 0 && (
           <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="h-8 w-1 bg-emerald-500 rounded-full"></span>
+            <button
+              className="flex items-center gap-2 mb-4 w-full text-left"
+              onClick={() => setIsHarvestExpanded(prev => !prev)}
+            >
+              <span className="h-8 w-1 bg-sky-500 rounded-full"></span>
+              <Scissors className="h-5 w-5 text-sky-600" />
               <h3 className="text-xl font-semibold text-slate-900">Ready for Harvest</h3>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -4413,9 +4428,16 @@ export default function DailyFlow() {
                   <p>These trays have completed their growing cycle and are ready to be cut. Customer orders are grouped at the top. Click on individual trays to record harvest details.</p>
                 </TooltipContent>
               </Tooltip>
-            </div>
-            
-            <div className="space-y-6">
+              <Badge variant="secondary" className="bg-sky-100 text-sky-700 text-xs">
+                {harvestTasks.length} {harvestTasks.length === 1 ? 'tray' : 'trays'}
+              </Badge>
+              {isHarvestExpanded
+                ? <ChevronUp className="h-4 w-4 text-sky-600 ml-auto" />
+                : <ChevronDown className="h-4 w-4 text-sky-600 ml-auto" />
+              }
+            </button>
+
+            {isHarvestExpanded && <div className="space-y-6">
             {harvestGroups.map((group) => {
               // For unassigned groups: check if ALL tasks match order gaps (if so, hide the entire group)
               if (!group.customerName) {
@@ -4449,7 +4471,7 @@ export default function DailyFlow() {
                     key={group.key}
                     className={cn(
                       "rounded-2xl border p-4 space-y-4 transition-shadow duration-200",
-                      group.customerName ? "border-emerald-200 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white"
+                      group.customerName ? "border-sky-200 bg-sky-50 shadow-sm" : "border-slate-200 bg-white"
                     )}
                   >
                     <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
@@ -4458,7 +4480,7 @@ export default function DailyFlow() {
                         {deliveryLabel && (
                           <p className="text-xs text-slate-500">Delivery {deliveryLabel}</p>
                         )}
-                        <p className="text-xs font-semibold text-emerald-700">
+                        <p className="text-xs font-semibold text-sky-700">
                           {group.customerName
                             ? `${group.customerName}: ${group.tasks.length} ${group.tasks.length === 1 ? 'variety' : 'varieties'} ready`
                             : `${traysReady} ${traysReady === 1 ? 'tray' : 'trays'} ready`}
@@ -4559,7 +4581,7 @@ export default function DailyFlow() {
                   </div>
                 );
               })}
-            </div>
+            </div>}
           </section>
         )}
 

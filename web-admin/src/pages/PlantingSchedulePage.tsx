@@ -289,6 +289,7 @@ const PlantingSchedulePage = () => {
       }
       // DEBUG: Log lookup map contents
       console.log('[PlantingSchedule] DEBUG - scheduleIdLookup entries:', Array.from(scheduleIdLookup.entries()).slice(0, 10));
+      console.log('[PlantingSchedule] skippedOrCompletedKeys:', [...skippedOrCompletedKeys]);
       console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries');
 
       // 2.6. Fetch trays that already have order_schedule_id assigned
@@ -514,6 +515,7 @@ const PlantingSchedulePage = () => {
         const scheduleLookupKey = `${schedule.standing_order_id}-${schedule.recipe_id}-${deliveryDateKey}`;
 
         // Skip deliveries whose order_schedule is skipped or completed in the DB
+        if (schedule.recipe_id === 21) console.log('[PlantingSchedule] Pea scheduleLookupKey:', scheduleLookupKey, 'inSkipped:', skippedOrCompletedKeys.has(scheduleLookupKey));
         if (skippedOrCompletedKeys.has(scheduleLookupKey)) {
           skippedByStatusCount++;
           continue;

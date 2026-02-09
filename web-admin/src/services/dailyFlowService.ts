@@ -626,23 +626,17 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
                   const isSeedingStep = stepNameLower.includes('seed') && 
                                        (stepNameLower.includes('tray') || stepNameLower === 'seed' || stepNameLower === 'seeding');
                   const isSoakingStep = stepNameLower.includes('soak');
-                  const isHarvestStep = stepNameLower.includes('harvest'); // ✅ FIX: Exclude harvest steps - handled by dedicated harvest logic
-                  
-                  if (isHarvestStep) {
-                    console.log('[fetchDailyTasks] Filtering out harvest step from supplemental tray_step tasks:', {
-                      tray_id: tray.tray_id,
-                      step_name: stepName,
-                      recipe_id: recipeId,
-                      reason: 'Harvest tasks are handled by dedicated harvest logic'
-                    });
-                  }
-                  
-                  if (stepName && 
-                      stepNameLower !== 'water' && 
-                      !stepNameLower.includes('mist') && 
+                  const isHarvestStep = stepNameLower.includes('harvest');
+                  const passiveStepNames = ['germination', 'blackout', 'growing'];
+                  const isPassiveStep = passiveStepNames.includes(stepNameLower);
+
+                  if (stepName &&
+                      stepNameLower !== 'water' &&
+                      !stepNameLower.includes('mist') &&
                       !isSeedingStep &&
                       !isSoakingStep &&
-                      !isHarvestStep) { // ✅ FIX: Don't create harvest tasks - those are handled separately
+                      !isHarvestStep &&
+                      !isPassiveStep) {
                     // Check if this task already exists in tasksData
                     // The view aggregates tasks by recipe+step (no individual tray_ids), so we check if
                     // ANY task exists for this recipe+step combination

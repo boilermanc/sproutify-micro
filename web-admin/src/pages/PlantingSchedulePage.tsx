@@ -987,6 +987,7 @@ const PlantingSchedulePage = () => {
 
         if (error) {
           console.error('[PlantingSchedule] Error persisting skip to DB:', error);
+          setToastNotification({ type: 'error', message: 'Failed to save skip — it will reappear on reload' });
         } else {
           // Update dbSkippedKeys so render-time filter catches it immediately
           setDbSkippedKeys(prev => {

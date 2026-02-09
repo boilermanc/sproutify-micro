@@ -938,8 +938,7 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         const { data: existingRequests, error: requestsError } = await getSupabaseClient()
           .from('tray_creation_requests')
           .select('recipe_id, seed_date, requested_at, farm_uuid')
-          .eq('farm_uuid', farmUuid)
-          .in('status', ['pending', 'approved']); // Only check active requests
+          .eq('farm_uuid', farmUuid); // Any status — if a request exists, seeding was already handled
         
         // Create a set of existing request keys: "recipe_id-sow_date"
         // Check both seed_date (planned seeding date) and requested_at (which becomes sow_date)

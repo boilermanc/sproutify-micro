@@ -90,7 +90,6 @@ const determineBatchStockStatus = (
   threshold: number | string | null | undefined,
   varietyId?: number | string | null | undefined,
   minSeedMap?: Record<string, number>,
-  context?: { batchId?: string | number; varietyName?: string }
 ) => {
   const qty = parseNumericValue(quantity);
   const thresh = parseNumericValue(threshold);
@@ -400,10 +399,6 @@ const BatchesPage = () => {
             thresholdValue,
             varietyId,
             recipeMinSeedMap,
-            {
-              batchId,
-              varietyName: variety?.variety_name || variety?.name || '',
-            }
           ),
           vendors: vendor ? {
             vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string

@@ -417,6 +417,21 @@ type HarvestGroup = {
   tasks: DailyTask[];
 };
 
+type SeedGroup = {
+  key: string;
+  crop: string;
+  customerName: string | null;
+  recipeId: number;
+  totalTrays: number;
+  totalTraysCompleted: number;
+  tasks: DailyTask[];
+  requiresWeight: boolean;
+  weightLbs?: number;
+  deliveryDate?: string | null;
+  isOverdue?: boolean;
+  daysOverdue?: number;
+};
+
 type BatchHarvestRow = {
   trayId: number;
   crop: string;
@@ -476,6 +491,7 @@ export default function DailyFlow() {
   const [harvestYield, setHarvestYield] = useState<string>('');
   const [harvestSelectedTrayIds, setHarvestSelectedTrayIds] = useState<number[]>([]);
   const [seedingTask, setSeedingTask] = useState<DailyTask | null>(null);
+  const [seedingGroup, setSeedingGroup] = useState<SeedGroup | null>(null);
   const [seedingDialogReady, setSeedingDialogReady] = useState(false); // Prevents button clicks during dialog transition
   const [soakTask, setSoakTask] = useState<DailyTask | null>(null);
   const [soakDate, setSoakDate] = useState<string>(() => new Date().toISOString().split('T')[0]); // Default to today
@@ -1871,6 +1887,63 @@ export default function DailyFlow() {
     }
   };
 
+  const handleSeedGroupComplete = async (group: SeedGroup) => {
+    setSeedingGroup(group);
+
+    const syntheticTask = seedGroupSyntheticTasks.get(group.key)!;
+
+    // Reset dialog state before opening
+    setSeedingDialogReady(false);
+    setIsSoakVariety(false);
+    setAvailableSoakedSeed(null);
+    setSelectedBatchId(null);
+    setAvailableBatches([]);
+    setSeedQuantityCompleted('');
+    setMissedStepForSeeding(null);
+    setSeedingTask(syntheticTask);
+
+    // Fetch batches using the shared recipeId (all tasks in group have same recipe)
+    const recipeId = group.recipeId;
+    if (recipeId) {
+      const { data: hasSoakData } = await getSupabaseClient().rpc('recipe_has_soak', {
+        p_recipe_id: recipeId
+      });
+
+      const hasSoak = hasSoakData && hasSoakData[0]?.has_soak;
+      setIsSoakVariety(hasSoak || false);
+
+      if (hasSoak) {
+        const { data: recipeData } = await getSupabaseClient()
+          .from('recipes')
+          .select('variety_id, variety_name')
+          .eq('recipe_id', recipeId)
+          .single();
+
+        if (recipeData?.variety_id) {
+          const sessionData = localStorage.getItem('sproutify_session');
+          if (sessionData) {
+            const { farmUuid } = JSON.parse(sessionData);
+            const { data: soakedSeedData } = await getSupabaseClient()
+              .from('available_soaked_seed')
+              .select('*')
+              .eq('farm_uuid', farmUuid)
+              .eq('variety_id', recipeData.variety_id)
+              .gt('quantity_remaining', 0)
+              .order('soak_date', { ascending: true })
+              .limit(1);
+
+            if (soakedSeedData && soakedSeedData.length > 0) {
+              setAvailableSoakedSeed(soakedSeedData[0]);
+            }
+          }
+        }
+      } else {
+        await fetchAvailableBatchesForRecipe(syntheticTask);
+      }
+    }
+    setSeedingDialogReady(true);
+  };
+
   const handleComplete = async (task: DailyTask, yieldValue?: number, batchId?: number, taskDate?: string) => {
     // Prevent at-risk tasks from being marked as done - they must use Manage Order
     if (task.action.toLowerCase().includes('at risk')) {
@@ -3230,16 +3303,43 @@ export default function DailyFlow() {
     }
     try {
       let traysCreated = 0;
-      
-      if (seedingTask.taskSource === 'planting_schedule') {
+
+      if (seedingGroup && seedingGroup.tasks.length > 0) {
+        // Grouped seed tasks: complete underlying requests sequentially
+        let remaining = quantityToComplete;
+
+        for (const underlyingTask of seedingGroup.tasks) {
+          if (remaining <= 0) break;
+          const taskRemaining = Math.max(0, (underlyingTask.quantity || 1) - (underlyingTask.quantityCompleted || 0));
+          if (taskRemaining <= 0) continue;
+          const toComplete = Math.min(remaining, taskRemaining);
+
+          if (underlyingTask.taskSource === 'planting_schedule') {
+            const success = await completeTask({ ...underlyingTask, trays: toComplete }, undefined, batchIdForTask, taskDateStr);
+            if (success) traysCreated += toComplete;
+            else throw new Error('Failed to complete seeding task');
+          } else if (underlyingTask.requestId) {
+            traysCreated += await completeSeedTask(
+              underlyingTask.requestId,
+              toComplete,
+              batchIdToUse,
+              undefined,
+              underlyingTask.recipeId,
+              taskDateStr,
+              underlyingTask.trayIds
+            );
+          }
+          remaining -= toComplete;
+        }
+      } else if (seedingTask.taskSource === 'planting_schedule') {
         // For planting_schedule tasks, use completeTask which creates trays directly
         // Create a modified task with the quantity to complete
         const taskToComplete: DailyTask = {
           ...seedingTask,
           trays: quantityToComplete,
         };
-        
-        
+
+
         console.log('[DailyFlow] Calling completeTask with batchId:', batchIdForTask);
         const success = await completeTask(taskToComplete, undefined, batchIdForTask, taskDateStr);
         if (success) {
@@ -3261,9 +3361,10 @@ export default function DailyFlow() {
       }
 
       showNotification('success', `Seeding completed! Created ${traysCreated} ${traysCreated === 1 ? 'tray' : 'trays'}`);
-      
+
       // Close dialog and clear state on success
       setSeedingTask(null);
+      setSeedingGroup(null);
       setMissedStepForSeeding(null);
       setSelectedBatchId(null);
       setAvailableBatches([]);
@@ -3277,60 +3378,66 @@ export default function DailyFlow() {
         }
       }
 
-      // Animate out the completed seeding task immediately
+      // Animate out the completed seeding task(s) immediately
       if (seedingTask) {
-        // Store the task ID and details for checking after animation
-        const completedTaskId = seedingTask.id;
-        const completedRequestId = seedingTask.requestId;
+        // NOTE: seedingGroup/seedingTask are captured by closure at function entry,
+        // so they still hold their original values even though setSeedingGroup(null)
+        // was called above (React state setters are batched, not synchronous).
+        const completedGroupRef = seedingGroup;
+        const completedTaskIds = completedGroupRef
+          ? completedGroupRef.tasks.map(t => t.id)
+          : [seedingTask.id];
         const completedRecipeId = seedingTask.recipeId;
-        const completedTaskSource = seedingTask.taskSource;
+        const completedCustomer = completedGroupRef?.customerName ?? seedingTask.customerName;
         const wasOverdue = seedingTask.isOverdue;
-        
-        // Start exit animation immediately - this must happen before any async operations
-        // to ensure the animation starts right away
-        animatingOutRef.current.add(completedTaskId);
-        setAnimatingOut(prev => new Set(prev).add(completedTaskId));
-        
+
+        // Start exit animation immediately
+        completedTaskIds.forEach(id => animatingOutRef.current.add(id));
+        setAnimatingOut(prev => {
+          const next = new Set(prev);
+          completedTaskIds.forEach(id => next.add(id));
+          return next;
+        });
+
         // Wait for animation to complete, then remove and sync with backend
         setTimeout(async () => {
-          // Remove task from array after animation
-          setTasks(prev => prev.filter(t => t.id !== completedTaskId));
+          // Remove completed tasks from array
+          const idsToRemove = new Set(completedTaskIds);
+          setTasks(prev => prev.filter(t => !idsToRemove.has(t.id)));
 
-          // Also remove from overdue seeding tasks if this was an overdue task
+          // Also remove from overdue seeding tasks if applicable
           if (wasOverdue) {
-            setOverdueSeedingTasks(prev => prev.filter(t => t.id !== completedTaskId));
+            setOverdueSeedingTasks(prev => prev.filter(t => !idsToRemove.has(t.id)));
           }
-          
+
           // Remove from animating set and ref
-          animatingOutRef.current.delete(completedTaskId);
+          completedTaskIds.forEach(id => animatingOutRef.current.delete(id));
           setAnimatingOut(prev => {
             const next = new Set(prev);
-            next.delete(completedTaskId);
+            completedTaskIds.forEach(id => next.delete(id));
             return next;
           });
-          
+
           // Update active tray count since seeding creates new trays
           await getActiveTraysCount().then(count => {
             setActiveTraysCount(count);
           }).catch(error => {
             console.error('[DailyFlow] Error updating active tray count:', error);
           });
-          
-          // Reload only seeding tasks to check if task is fully completed or partially completed
-          // This ensures we sync with backend state without full page reload
+
+          // Reload seeding tasks to check for partial completion
           const sessionData = localStorage.getItem('sproutify_session');
           const farmUuid = sessionData ? JSON.parse(sessionData).farmUuid : null;
           if (farmUuid) {
             try {
               const allTasks = await fetchDailyTasks(selectedDate, true);
-              const seedTasks = allTasks.filter(t => 
-                t.action === 'Seed' && 
-                ((completedTaskSource === 'seed_request' && t.requestId === completedRequestId) ||
-                 (completedTaskSource === 'planting_schedule' && t.recipeId === completedRecipeId))
+              const seedTasks = allTasks.filter(t =>
+                t.action === 'Seed' &&
+                t.recipeId === completedRecipeId &&
+                (t.customerName?.trim() || 'unassigned') === (completedCustomer?.trim() || 'unassigned')
               );
-              
-              // If there's a matching task from the reload (partial completion), add it back
-              // Otherwise, the task is fully completed and should stay gone
+
+              // If there are remaining tasks (partial completion), add them back
               if (seedTasks.length > 0) {
                 setTasks(prev => {
                   const existingIds = new Set(prev.map(t => t.id));
@@ -3340,7 +3447,6 @@ export default function DailyFlow() {
               }
             } catch (error) {
               console.error('[DailyFlow] Error syncing seeding tasks:', error);
-              // Task already removed, so no action needed
             }
           }
         }, 500); // Match animation duration
@@ -3357,6 +3463,10 @@ export default function DailyFlow() {
       setCompletingIds(prev => {
         const next = new Set(prev);
         next.delete(seedingTask?.id || '');
+        // Also clear underlying task IDs for grouped tasks
+        if (seedingGroup) {
+          seedingGroup.tasks.forEach(t => next.delete(t.id));
+        }
         return next;
       });
     }
@@ -3828,6 +3938,60 @@ export default function DailyFlow() {
   const harvestTasks = tasks.filter(t => t.action.toLowerCase().startsWith('harvest') && !t.action.toLowerCase().includes('at risk'));
   const atRiskTasks = tasks.filter(t => t.action.toLowerCase().includes('at risk'));
   const prepTasks = tasks.filter(t => t.action === 'Soak' || t.action === 'Seed');
+  const soakTasks = useMemo(() => tasks.filter(t => t.action === 'Soak'), [tasks]);
+
+  const seedGroups = useMemo<SeedGroup[]>(() => {
+    const rawSeedTasks = tasks.filter(t => t.action === 'Seed');
+    const groupMap = new Map<string, SeedGroup>();
+
+    rawSeedTasks.forEach(task => {
+      const customerKey = task.customerName?.trim() || 'unassigned';
+      const key = `${task.recipeId}||${customerKey}`;
+
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          key,
+          crop: task.crop,
+          customerName: task.customerName || null,
+          recipeId: task.recipeId,
+          totalTrays: 0,
+          totalTraysCompleted: 0,
+          tasks: [],
+          requiresWeight: task.requiresWeight || false,
+          weightLbs: task.weightLbs,
+          deliveryDate: task.deliveryDate,
+        });
+      }
+      const group = groupMap.get(key)!;
+      group.tasks.push(task);
+      group.totalTrays += (task.quantity || task.trays || 1);
+      group.totalTraysCompleted += (task.quantityCompleted || 0);
+      if (task.isOverdue) {
+        group.isOverdue = true;
+        group.daysOverdue = Math.max(group.daysOverdue || 0, task.daysOverdue || 0);
+      }
+    });
+
+    return Array.from(groupMap.values());
+  }, [tasks]);
+
+  // Memoize synthetic tasks for seed groups to avoid creating new objects every render
+  const seedGroupSyntheticTasks = useMemo(() => {
+    const map = new Map<string, DailyTask>();
+    seedGroups.forEach(group => {
+      const remaining = group.totalTrays - group.totalTraysCompleted;
+      map.set(group.key, {
+        ...group.tasks[0],
+        id: `seed-group-${group.key}`,
+        trays: remaining,
+        traysRemaining: remaining,
+        quantity: group.totalTrays,
+        quantityCompleted: group.totalTraysCompleted,
+      });
+    });
+    return map;
+  }, [seedGroups]);
+
   const harvestGroups = useMemo<HarvestGroup[]>(() => {
     const groupMap = new Map<string, HarvestGroup>();
     harvestTasks.forEach((task) => {
@@ -4953,7 +5117,7 @@ export default function DailyFlow() {
         )}
 
         {/* SECTION 1.5: PREP TASKS (Soak & Seed) */}
-        {prepTasks.length > 0 && (
+        {(soakTasks.length > 0 || seedGroups.length > 0) && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <span className="h-8 w-1 bg-purple-500 rounded-full"></span>
@@ -4971,11 +5135,11 @@ export default function DailyFlow() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {prepTasks.map(task => (
+              {soakTasks.map(task => (
                 <TaskCard
                   key={task.id}
                   task={task}
-                  variant={task.action === 'Soak' ? 'prep' : 'seed'}
+                  variant="prep"
                   onComplete={handleComplete}
                   isCompleting={completingIds.has(task.id)}
                   isAnimatingOut={animatingOut.has(task.id)}
@@ -4983,6 +5147,21 @@ export default function DailyFlow() {
                   navigate={navigate}
                 />
               ))}
+              {seedGroups.map(group => {
+                const syntheticTask = seedGroupSyntheticTasks.get(group.key)!;
+                return (
+                  <TaskCard
+                    key={group.key}
+                    task={syntheticTask}
+                    variant="seed"
+                    onComplete={() => handleSeedGroupComplete(group)}
+                    isCompleting={group.tasks.some(t => completingIds.has(t.id))}
+                    isAnimatingOut={group.tasks.some(t => animatingOut.has(t.id))}
+                    onViewDetails={() => handleViewDetails(syntheticTask)}
+                    navigate={navigate}
+                  />
+                );
+              })}
             </div>
           </section>
         )}
@@ -5788,6 +5967,7 @@ export default function DailyFlow() {
       <Dialog open={!!seedingTask} onOpenChange={(open) => {
         if (!open) {
           setSeedingTask(null);
+          setSeedingGroup(null);
           setSelectedBatchId(null);
           setAvailableBatches([]);
           setSeedQuantityCompleted('');
@@ -6120,6 +6300,7 @@ export default function DailyFlow() {
               variant="outline"
               onClick={() => {
                 setSeedingTask(null);
+                setSeedingGroup(null);
                 setSelectedBatchId(null);
                 setAvailableBatches([]);
                 setSeedQuantityCompleted('');

@@ -984,7 +984,8 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             if (!sowDate) continue;
 
             const sowDateStr = formatDateString(sowDate);
-            const key = `${schedule.recipe_id}-${sowDateStr}`;
+            const customerKey = schedule.customer_name?.trim() || 'unassigned';
+            const key = `${schedule.recipe_id}-${sowDateStr}-${customerKey}`;
             const traysNeeded = Math.max(1, Number(schedule.trays_needed ?? 0) || 1);
             const existing = aggregatedSchedules.get(key);
 

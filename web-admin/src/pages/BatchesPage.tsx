@@ -105,13 +105,6 @@ const determineBatchStockStatus = (
   const quantityInGrams = Number.isFinite(qty) ? qty * GRAMS_PER_POUND : undefined;
 
   if (qty <= 0) {
-    console.log('Batch stock status', {
-      batchId: context?.batchId,
-      varietyName: context?.varietyName,
-      quantityInGrams,
-      minSeedPerTray: minSeedRequirement,
-      status: 'Out of Stock',
-    });
     return 'Out of Stock';
   }
 
@@ -128,14 +121,6 @@ const determineBatchStockStatus = (
   } else if (thresh > 0 && qty <= thresh) {
     computedStatus = 'Low Stock';
   }
-
-  console.log('Batch stock status', {
-    batchId: context?.batchId,
-    varietyName: context?.varietyName,
-    quantityInGrams,
-    minSeedPerTray: minSeedRequirement,
-    status: computedStatus,
-  });
 
   return computedStatus;
 };
@@ -235,36 +220,57 @@ const BatchesPage = () => {
   const fetchBatches = async (seedRequirements?: Record<string, number>) => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        console.warn('[fetchBatches] No session data found, skipping fetch');
+        return;
+      }
 
       const { farmUuid } = JSON.parse(sessionData);
       const recipeMinSeedMap = seedRequirements ?? minSeedPerVariety;
 
+      // Timeout helper to prevent stale connections from hanging the page
+      const withTimeout = <T,>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> => {
+        return Promise.race([
+          Promise.resolve(promise),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Query timeout: ${label} took longer than ${ms}ms`)), ms)
+          ),
+        ]);
+      };
+
       // Fetch vendors first if not already loaded
       let vendorsList = vendors;
       if (vendorsList.length === 0) {
-      const { data: vendorsData } = await getSupabaseClient()
-        .from('vendors')
-        .select('*')
-        .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`);
-      vendorsList = vendorsData || [];
-      console.log('Loaded vendors:', vendorsList);
-      setVendors(vendorsList);
+        const { data: vendorsData } = await withTimeout(
+          getSupabaseClient()
+            .from('vendors')
+            .select('*')
+            .or(`farm_uuid.eq.${farmUuid},farm_uuid.is.null`),
+          10000, 'vendors'
+        );
+        vendorsList = vendorsData || [];
+        setVendors(vendorsList);
       }
 
-      const { data, error } = await getSupabaseClient()
-        .from('seedbatches')
-        .select('*')
-        .eq('farm_uuid', farmUuid);
+      const { data, error } = await withTimeout(
+        getSupabaseClient()
+          .from('seedbatches')
+          .select('*')
+          .eq('farm_uuid', farmUuid),
+        10000, 'seedbatches'
+      );
 
       if (error) throw error;
 
       // Fetch seed_transactions aggregated by batch_id to calculate remaining inventory
       // Transactions store negative values for seed usage (deductions)
-      const { data: transactionsData, error: transError } = await getSupabaseClient()
-        .from('seed_transactions')
-        .select('batch_id, quantity_grams')
-        .eq('farm_uuid', farmUuid);
+      const { data: transactionsData, error: transError } = await withTimeout(
+        getSupabaseClient()
+          .from('seed_transactions')
+          .select('batch_id, quantity_grams')
+          .eq('farm_uuid', farmUuid),
+        10000, 'seed_transactions'
+      );
 
       if (transError) {
         console.error('Error fetching seed_transactions:', transError);
@@ -281,8 +287,30 @@ const BatchesPage = () => {
         }
       }
 
+      // Fetch all tray batch_ids in one query to count per-batch (avoids N+1 queries)
+      const { data: traysData, error: traysError } = await withTimeout(
+        getSupabaseClient()
+          .from('trays')
+          .select('batch_id')
+          .eq('farm_uuid', farmUuid),
+        10000, 'trays'
+      );
+
+      if (traysError) {
+        console.error('Error fetching trays:', traysError);
+      }
+
+      const trayCountsByBatch = new Map<number, number>();
+      if (traysData) {
+        for (const tray of traysData) {
+          if (tray.batch_id != null) {
+            const current = trayCountsByBatch.get(tray.batch_id) || 0;
+            trayCountsByBatch.set(tray.batch_id, current + 1);
+          }
+        }
+      }
+
       // Sort batches by purchase date (most recent first) in JavaScript
-      // Actual DB column: purchasedate
       const sortedBatches = (data || []).sort((a: any, b: any) => {
         const dateA = a.purchasedate || a.purchase_date || '';
         const dateB = b.purchasedate || b.purchase_date || '';
@@ -295,9 +323,12 @@ const BatchesPage = () => {
       // Fetch varieties if not already loaded (needed for batch normalization)
       let varietiesList = varieties;
       if (varietiesList.length === 0) {
-        const { data: varietiesData } = await getSupabaseClient()
-          .from('varieties')
-          .select('*');
+        const { data: varietiesData } = await withTimeout(
+          getSupabaseClient()
+            .from('varieties')
+            .select('*'),
+          10000, 'varieties'
+        );
         varietiesList = (varietiesData || []).map((v: any) => ({
           ...v,
           variety_id: v.varietyid ?? v.variety_id,
@@ -305,88 +336,80 @@ const BatchesPage = () => {
         }));
       }
 
-      // Get tray counts for each batch and join vendor/variety data
-      // Actual DB columns: batchid, vendorid, varietyid
-      const batchesWithTrayCounts = await Promise.all(
-        sortedBatches.map(async (batch) => {
-          const batchId = batch.batchid || batch.batch_id;
-          const { count } = await getSupabaseClient()
-            .from('trays')
-            .select('*', { count: 'exact', head: true })
-            .eq('batch_id', batchId)
-            .eq('farm_uuid', farmUuid);
+      // Join vendor/variety data and tray counts (all lookups are synchronous now)
+      const batchesWithTrayCounts = sortedBatches.map((batch: any) => {
+        const batchId = batch.batchid || batch.batch_id;
 
-          // Find vendor name if vendorid exists (actual DB column)
-          const vendorId = batch.vendorid || batch.vendor_id;
-          const vendor = vendorId ? vendorsList.find(v => 
-            (v.vendor_id || (v as any).vendorid) === vendorId
-          ) : null;
-          console.log(`Batch ${batch.batchid || batch.batch_id}: vendorId=${vendorId}, found vendor:`, vendor);
+        // Look up tray count from pre-fetched map
+        const trayCount = trayCountsByBatch.get(batchId) || 0;
 
-          // Find variety name if varietyid exists (actual DB column)
-          const varietyId = batch.varietyid || batch.variety_id;
-          const variety = varietyId ? varietiesList.find((v: any) => 
-            (v.variety_id || v.varietyid) === varietyId
-          ) : null;
+        // Find vendor name if vendorid exists (actual DB column)
+        const vendorId = batch.vendorid || batch.vendor_id;
+        const vendor = vendorId ? vendorsList.find(v =>
+          (v.vendor_id || (v as any).vendorid) === vendorId
+        ) : null;
 
-          // Normalize field names - map actual DB columns to expected names
-          const thresholdValue = parseNumericValue(
-            batch.low_stock_threshold ?? batch.reorderlevel ?? batch.reorder_level
-          );
-          const originalQuantityValue = parseNumericValue(batch.quantity);
-          const batchUnit = batch.unit || 'lbs';
+        // Find variety name if varietyid exists (actual DB column)
+        const varietyId = batch.varietyid || batch.variety_id;
+        const variety = varietyId ? varietiesList.find((v: any) =>
+          (v.variety_id || v.varietyid) === varietyId
+        ) : null;
 
-          // Convert original quantity to grams
-          let originalQuantityGrams = originalQuantityValue;
-          if (batchUnit === 'lbs') {
-            originalQuantityGrams = originalQuantityValue * GRAMS_PER_POUND;
-          } else if (batchUnit === 'oz') {
-            originalQuantityGrams = originalQuantityValue * 28.3495;
-          } else if (batchUnit === 'kg') {
-            originalQuantityGrams = originalQuantityValue * 1000;
-          }
-          // else assume already in grams
+        // Normalize field names - map actual DB columns to expected names
+        const thresholdValue = parseNumericValue(
+          batch.low_stock_threshold ?? batch.reorderlevel ?? batch.reorder_level
+        );
+        const originalQuantityValue = parseNumericValue(batch.quantity);
+        const batchUnit = batch.unit || 'lbs';
 
-          // Get transaction total for this batch (negative values = seed usage)
-          const transactionTotal = transactionTotalsByBatch.get(batchId) || 0;
+        // Convert original quantity to grams
+        let originalQuantityGrams = originalQuantityValue;
+        if (batchUnit === 'lbs') {
+          originalQuantityGrams = originalQuantityValue * GRAMS_PER_POUND;
+        } else if (batchUnit === 'oz') {
+          originalQuantityGrams = originalQuantityValue * 28.3495;
+        } else if (batchUnit === 'kg') {
+          originalQuantityGrams = originalQuantityValue * 1000;
+        }
+        // else assume already in grams
 
-          // Calculate remaining quantity in grams
-          const remainingQuantityGrams = originalQuantityGrams + transactionTotal;
+        // Get transaction total for this batch (negative values = seed usage)
+        const transactionTotal = transactionTotalsByBatch.get(batchId) || 0;
 
-          // Convert remaining quantity back to lbs for stock status calculation
-          // (determineBatchStockStatus expects quantity in lbs and converts to grams internally)
-          const remainingQuantityLbs = remainingQuantityGrams / GRAMS_PER_POUND;
+        // Calculate remaining quantity in grams
+        const remainingQuantityGrams = originalQuantityGrams + transactionTotal;
 
-          const normalizedBatch = {
-            ...batch,
-            batch_id: batch.batchid || batch.batch_id, // Map batchid to batch_id
-            variety_id: varietyId,
-            variety_name: variety?.variety_name || variety?.name || '',
-            purchase_date: batch.purchasedate || batch.purchase_date || null,
-            lot_number: batch.lot_number || batch.lotnumber || null,
-            vendor_id: vendorId,
-            trayCount: count || 0,
-            low_stock_threshold: thresholdValue,
-            stock_quantity: remainingQuantityLbs, // Use remaining quantity, not original
-            original_quantity: originalQuantityValue, // Keep original for reference
-            remaining_quantity_grams: remainingQuantityGrams, // Store for debugging
-            stockStatus: determineBatchStockStatus(
-              remainingQuantityLbs,
-              thresholdValue,
-              varietyId,
-              recipeMinSeedMap,
-              {
-                batchId,
-                varietyName: variety?.variety_name || variety?.name || '',
-              }
-            ),
-            vendors: vendor ? {
-              vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string
-            } : null,
-          };
-          return normalizedBatch;
-        })
-      );
+        // Convert remaining quantity back to lbs for stock status calculation
+        const remainingQuantityLbs = remainingQuantityGrams / GRAMS_PER_POUND;
+
+        return {
+          ...batch,
+          batch_id: batchId,
+          variety_id: varietyId,
+          variety_name: variety?.variety_name || variety?.name || '',
+          purchase_date: batch.purchasedate || batch.purchase_date || null,
+          lot_number: batch.lot_number || batch.lotnumber || null,
+          vendor_id: vendorId,
+          trayCount,
+          low_stock_threshold: thresholdValue,
+          stock_quantity: remainingQuantityLbs,
+          original_quantity: originalQuantityValue,
+          remaining_quantity_grams: remainingQuantityGrams,
+          stockStatus: determineBatchStockStatus(
+            remainingQuantityLbs,
+            thresholdValue,
+            varietyId,
+            recipeMinSeedMap,
+            {
+              batchId,
+              varietyName: variety?.variety_name || variety?.name || '',
+            }
+          ),
+          vendors: vendor ? {
+            vendor_name: (vendor.name || (vendor as any).vendor_name || (vendor as any).vendorname || '') as string
+          } : null,
+        };
+      });
 
       setBatches(batchesWithTrayCounts);
     } catch (error) {
@@ -395,44 +418,6 @@ const BatchesPage = () => {
       setLoading(false);
     }
   };
-
-  // Utility function to check actual column names - can be called from browser console
-  // Usage: window.checkVarietiesColumns()
-  const checkVarietiesColumns = async () => {
-    try {
-      // Fetch one row without any filters to see actual column names
-      const { data, error } = await getSupabaseClient()
-        .from('varieties')
-        .select('*')
-        .limit(1);
-      
-      if (error) {
-        console.error('Error fetching varieties:', error);
-        return;
-      }
-      
-      if (data && data.length > 0) {
-        console.log('Actual column names in varieties table:');
-        console.log(Object.keys(data[0]));
-        console.log('Sample row:', data[0]);
-        
-        // Check for farm-related columns
-        const farmColumns = Object.keys(data[0]).filter(key => 
-          key.toLowerCase().includes('farm')
-        );
-        console.log('Farm-related columns found:', farmColumns);
-      } else {
-        console.log('No data in varieties table to inspect');
-      }
-    } catch (err) {
-      console.error('Error checking columns:', err);
-    }
-  };
-  
-  // Expose to window for console debugging
-  if (typeof window !== 'undefined') {
-    (window as any).checkVarietiesColumns = checkVarietiesColumns;
-  }
 
   const fetchFormData = async () => {
     try {
@@ -637,7 +622,10 @@ const BatchesPage = () => {
 
     try {
       const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      if (!sessionData) {
+        console.warn('[handleViewHistory] No session data found, skipping fetch');
+        return;
+      }
       const { farmUuid } = JSON.parse(sessionData);
 
       const { data, error } = await getSupabaseClient()
@@ -681,7 +669,6 @@ const BatchesPage = () => {
       }
       const session = JSON.parse(sessionData);
       const { farmUuid, userId } = session;
-      console.log('[handleUpdateBatch] Starting update for batch:', editingBatch.batch_id);
 
       const batchId = editingBatch.batch_id;
 
@@ -720,7 +707,6 @@ const BatchesPage = () => {
           adjustmentNotes = reasonLabel;
         }
 
-        console.log('[handleUpdateBatch] Inserting adjustment transaction:', { adjustmentGrams, adjustmentNotes, batchId });
         const { error: txError } = await getSupabaseClient()
           .from('seed_transactions')
           .insert([
@@ -733,11 +719,7 @@ const BatchesPage = () => {
               created_by: userId || null,
             },
           ]);
-        if (txError) {
-          console.error('[handleUpdateBatch] Transaction insert error:', txError);
-          throw txError;
-        }
-        console.log('[handleUpdateBatch] Transaction inserted successfully');
+        if (txError) throw txError;
       }
 
       // Update batch metadata (NOT the original quantity - that stays as the purchase record)
@@ -758,27 +740,21 @@ const BatchesPage = () => {
         payload.totalprice = parseFloat(editingBatch.cost);
       }
 
-      console.log('[handleUpdateBatch] Updating batch metadata:', payload);
       const { error } = await getSupabaseClient()
         .from('seedbatches')
         .update(payload)
         .eq('batchid', batchId)
         .eq('farm_uuid', farmUuid);
 
-      if (error) {
-        console.error('[handleUpdateBatch] Batch update error:', error);
-        throw error;
-      }
-      console.log('[handleUpdateBatch] Batch updated successfully, closing dialog');
+      if (error) throw error;
 
       setIsEditDialogOpen(false);
       setEditingBatch(null);
       fetchBatches();
     } catch (error) {
-      console.error('[handleUpdateBatch] Error updating batch:', error);
+      console.error('Error updating batch:', error);
       alert('Failed to update batch');
     } finally {
-      console.log('[handleUpdateBatch] Finally block - resetting updating state');
       setUpdating(false);
     }
   };

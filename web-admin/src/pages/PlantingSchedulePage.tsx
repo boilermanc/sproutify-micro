@@ -243,7 +243,7 @@ const PlantingSchedulePage = () => {
       const standingOrderIds = ordersWithItems.map(o => o.standing_order_id);
       // Fetch order_schedules with pending/generated status
       // IMPORTANT: .limit(1000) overrides Supabase default of 10
-      const { data: orderSchedulesData, error: orderSchedulesError } = await getSupabaseClient()
+      const { data: orderSchedulesData } = await getSupabaseClient()
         .from('order_schedules')
         .select('schedule_id, standing_order_id, recipe_id, scheduled_delivery_date, status')
         .in('standing_order_id', standingOrderIds)
@@ -946,10 +946,6 @@ const PlantingSchedulePage = () => {
       // Store for use in tray creation and UI
       setSeedQuantityPerTray(seedPerTray);
 
-      const numberOfTrays = Math.max(1, Math.ceil(schedule.quantity));
-      // traysToCreate is set synchronously in handleCreateTray (single source of truth)
-      const totalSeedNeeded = seedPerTray * numberOfTrays;
-
       if (!recipeData.variety_id) {
         console.error('[PlantingSchedule] Recipe has no variety_id - returning early');
         return;
@@ -1171,7 +1167,7 @@ const PlantingSchedulePage = () => {
       // If we have delivery info, create one request per delivery (with order_schedule_id)
       // Otherwise fall back to creating identical requests
       const requests = deliveriesToUse.length > 0
-        ? deliveriesToUse.map((delivery, index) => {
+        ? deliveriesToUse.map((delivery) => {
             const request = {
               customer_name: delivery.customer_name || null,
               variety_name: varietyName,

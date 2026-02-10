@@ -241,8 +241,6 @@ const PlantingSchedulePage = () => {
       // 2.5. Fetch order_schedules to get schedule_id for each delivery
       // This allows us to link each tray to its specific order schedule
       const standingOrderIds = ordersWithItems.map(o => o.standing_order_id);
-      console.log('[PlantingSchedule] DEBUG - Fetching order_schedules for standing_order_ids:', standingOrderIds);
-
       // Fetch order_schedules with pending/generated status
       // IMPORTANT: .limit(1000) overrides Supabase default of 10
       const { data: orderSchedulesData, error: orderSchedulesError } = await getSupabaseClient()
@@ -251,14 +249,6 @@ const PlantingSchedulePage = () => {
         .in('standing_order_id', standingOrderIds)
         .in('status', ['pending', 'generated', 'skipped', 'completed'])
         .limit(1000);
-
-      // DEBUG: Explicit logging of actual array length (NOT sliced)
-      console.log('[PlantingSchedule] order_schedules query result:', {
-        actualLength: orderSchedulesData?.length,
-        errorMsg: orderSchedulesError?.message || null,
-        first3: orderSchedulesData?.slice(0, 3),
-        last3: orderSchedulesData?.slice(-3),
-      });
 
       // Create lookup map: "standing_order_id-recipe_id-YYYY-MM-DD" → schedule_id
       // Key must be unique per (standing_order, recipe, delivery_date) combination
@@ -276,22 +266,10 @@ const PlantingSchedulePage = () => {
           } else {
             scheduleIdLookup.set(key, schedule.schedule_id);
           }
-          // DEBUG: Log first few entries
-          if (scheduleIdLookup.size + skippedOrCompletedKeys.size <= 3) {
-            console.log('[PlantingSchedule] DEBUG - Building lookup:', {
-              raw: schedule.scheduled_delivery_date,
-              dateKey,
-              key,
-              recipe_id: schedule.recipe_id,
-              status: schedule.status,
-            });
-          }
         }
       }
       // Store DB skipped keys in state for render-time overdue filtering
       setDbSkippedKeys(skippedOrCompletedKeys);
-      console.log('[PlantingSchedule] Loaded order_schedules lookup:', scheduleIdLookup.size, 'entries,', skippedOrCompletedKeys.size, 'skipped/completed');
-
       // 2.6. Fetch trays that already have order_schedule_id assigned
       // These deliveries have already been seeded and should be excluded from counts
       // Each delivery date gets its own unique order_schedule_id, so we only check if ANY tray exists
@@ -304,11 +282,6 @@ const PlantingSchedulePage = () => {
       const seededScheduleIds = new Set<number>(
         seededTraysData?.map(t => t.order_schedule_id).filter((id): id is number => id !== null) || []
       );
-      console.log('[PlantingSchedule] DEBUG - Seeded schedule IDs:', {
-        count: seededScheduleIds.size,
-        ids: Array.from(seededScheduleIds).slice(0, 20),
-      });
-
       // 3. Fetch all recipes with their total days and seed quantities
       const { data: recipesData, error: recipesError } = await getSupabaseClient()
         .from('recipes')
@@ -507,21 +480,6 @@ const PlantingSchedulePage = () => {
         const key = `${schedule.recipe_id}-${sowDateKey}`;
         const existing = dedupeMap.get(key);
 
-        // DEBUG: Trace Kohlrabi dedup to diagnose delivery grouping
-        if (schedule.recipe_id === 20) {
-          console.log('[PlantingSchedule] DEBUG - Dedup Kohlrabi:', {
-            recipe_id: schedule.recipe_id,
-            sow_date: sowDateKey,
-            delivery_date: schedule.delivery_date,
-            standing_order_id: schedule.standing_order_id,
-            quantity: schedule.quantity,
-            group_key: key,
-            merging_into_existing: !!existing,
-            existing_quantity: existing?.quantity,
-            existing_deliveries_count: existing?.deliveries?.length,
-          });
-        }
-
         // Look up the actual schedule_id from order_schedules
         // delivery_date is a Date object - use LOCAL date components (not UTC which shifts the date)
         // Key format: "standing_order_id-recipe_id-YYYY-MM-DD"
@@ -540,19 +498,6 @@ const PlantingSchedulePage = () => {
         // Check if this delivery has already been seeded (any tray exists with this order_schedule_id)
         // Each delivery date gets its own unique order_schedule_id, so no sow_date check needed
         const isAlreadySeeded = scheduleId !== null && seededScheduleIds.has(scheduleId);
-
-        // DEBUG: Log schedule_id lookup (only for first few)
-        if (dedupeMap.size < 3) {
-          console.log('[PlantingSchedule] DEBUG - schedule_id lookup:', {
-            raw_delivery_date: schedule.delivery_date,
-            deliveryDateKey,
-            scheduleLookupKey,
-            recipe_id: schedule.recipe_id,
-            found: scheduleIdLookup.has(scheduleLookupKey),
-            scheduleId,
-            isAlreadySeeded,
-          });
-        }
 
         // Track if this delivery is already seeded (but don't skip it)
         if (isAlreadySeeded) {
@@ -591,44 +536,6 @@ const PlantingSchedulePage = () => {
       }
       const deduplicatedSchedules = Array.from(dedupeMap.values());
       deduplicatedSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
-
-      console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded, ${skippedByStatusCount} skipped/completed deliveries)`);
-
-      // DEBUG: Kohlrabi dedup summary
-      const kohlrabiGroups = deduplicatedSchedules.filter(s => s.recipe_id === 20);
-      if (kohlrabiGroups.length > 0) {
-        console.log('[PlantingSchedule] DEBUG - Kohlrabi dedup summary:', kohlrabiGroups.map(s => ({
-          group_key: `${s.recipe_id}-${getLocalDateKey(s.sow_date)}`,
-          sow_date: getLocalDateKey(s.sow_date),
-          total_quantity: s.quantity,
-          deliveries_count: s.deliveries?.length,
-          deliveries: s.deliveries?.map(d => ({
-            delivery_date: d.delivery_date,
-            schedule_id: d.schedule_id,
-            standing_order_id: d.standing_order_id,
-            customer_name: d.customer_name,
-          })),
-        })));
-      }
-
-      // DEBUG: Log all schedules with sow_date < today BEFORE tray-check filtering
-      const todayForDebug = new Date();
-      todayForDebug.setHours(0, 0, 0, 0);
-      const overdueBeforeFilter = deduplicatedSchedules.filter(s => {
-        const sowDate = new Date(s.sow_date);
-        sowDate.setHours(0, 0, 0, 0);
-        return sowDate < todayForDebug;
-      });
-      console.log('[PlantingSchedule] DEBUG - Overdue schedules BEFORE tray-check filter:', {
-        count: overdueBeforeFilter.length,
-        schedules: overdueBeforeFilter.map(s => ({
-          recipe_name: s.recipe_name,
-          sow_date: getLocalDateKey(s.sow_date),
-          quantity_needed: Math.ceil(s.quantity),
-          recipe_id: s.recipe_id,
-          deliveries_count: s.deliveries?.length || 0,
-        })),
-      });
 
       // 7. Filter out schedules where trays have already been created
       // Check for existing trays or task_completions for each schedule
@@ -692,26 +599,14 @@ const PlantingSchedulePage = () => {
       const candidateOffsets = [0];
       let filteredCount = 0;
 
-      // DEBUG: Log seeded trays map before filtering
-      console.log('[PlantingSchedule] DEBUG - Seeded trays by recipe/date:',
-        Array.from(seededTraysByRecipeDate.entries()).map(([recipeId, dateMap]) => ({
-          recipe_id: recipeId,
-          dates: Array.from(dateMap.entries()),
-        }))
-      );
-
       for (const schedule of deduplicatedSchedules) {
         const scheduleDate = new Date(schedule.sow_date);
         scheduleDate.setHours(0, 0, 0, 0);
         const scheduledTrays = Math.max(1, Math.ceil(schedule.quantity || 0));
         const recipeSeedMap = seededTraysByRecipeDate.get(schedule.recipe_id);
 
-        // DEBUG: Check if this is an overdue schedule
-        const isOverdueSchedule = scheduleDate < todayForDebug;
-
         if (recipeSeedMap && recipeSeedMap.size > 0) {
           let remainingToCover = scheduledTrays;
-          const debugOffsets: { offset: number; dateKey: string; available: number; used: number }[] = [];
 
           for (const offset of candidateOffsets) {
             if (remainingToCover <= 0) {
@@ -723,26 +618,11 @@ const PlantingSchedulePage = () => {
             const available = recipeSeedMap.get(candidateKey) || 0;
 
             if (available <= 0) {
-              debugOffsets.push({ offset, dateKey: candidateKey, available: 0, used: 0 });
               continue;
             }
             const used = Math.min(available, remainingToCover);
             recipeSeedMap.set(candidateKey, available - used);
             remainingToCover -= used;
-            debugOffsets.push({ offset, dateKey: candidateKey, available, used });
-          }
-
-          // DEBUG: Log filtering decision for overdue schedules
-          if (isOverdueSchedule) {
-            console.log('[PlantingSchedule] DEBUG - Tray check for OVERDUE schedule:', {
-              recipe_name: schedule.recipe_name,
-              recipe_id: schedule.recipe_id,
-              sow_date: getLocalDateKey(scheduleDate),
-              trays_needed: scheduledTrays,
-              remaining_after_check: remainingToCover,
-              will_be_filtered: remainingToCover <= 0,
-              offset_checks: debugOffsets,
-            });
           }
 
           if (remainingToCover <= 0) {
@@ -751,22 +631,10 @@ const PlantingSchedulePage = () => {
             filteredSchedules.push({ ...schedule, isSeeded: true });
             continue;
           }
-        } else if (isOverdueSchedule) {
-          // DEBUG: Log overdue schedules that have no seeded trays at all
-          console.log('[PlantingSchedule] DEBUG - OVERDUE schedule with NO seeded trays:', {
-            recipe_name: schedule.recipe_name,
-            recipe_id: schedule.recipe_id,
-            sow_date: getLocalDateKey(scheduleDate),
-            trays_needed: scheduledTrays,
-            will_be_kept: true,
-          });
         }
 
         filteredSchedules.push(schedule);
       }
-
-      console.log(`[PlantingSchedule] Filtered out ${filteredCount} already-seeded schedules`);
-      console.log(`[PlantingSchedule] Total schedules after filtering: ${filteredSchedules.length}`);
       
       setSchedules(filteredSchedules);
     } catch (error) {
@@ -807,25 +675,6 @@ const PlantingSchedulePage = () => {
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // DEBUG: Count overdue in schedules state before filtering
-    const overdueInState = schedules.filter(s => {
-      const d = new Date(s.sow_date);
-      d.setHours(0, 0, 0, 0);
-      return d < now;
-    });
-    console.log('[PlantingSchedule] DEBUG - filterSchedules() called:', {
-      schedules_total: schedules.length,
-      overdue_in_schedules_state: overdueInState.length,
-      overdue_details: overdueInState.map(s => ({
-        recipe_name: s.recipe_name,
-        sow_date: s.sow_date,
-        quantity: Math.ceil(s.quantity),
-      })),
-      dateRange,
-      sevenDaysAgo: sevenDaysAgo.toISOString(),
-      now: now.toISOString(),
-    });
-
     const filtered = schedules.filter(schedule => {
       const sowDate = new Date(schedule.sow_date);
       sowDate.setHours(0, 0, 0, 0);
@@ -833,17 +682,6 @@ const PlantingSchedulePage = () => {
       const isOverdue = sowDate >= sevenDaysAgo && sowDate < now;
       const isInRange = sowDate >= now && sowDate <= endDate;
       return isOverdue || isInRange;
-    });
-
-    // DEBUG: Log filtered results
-    const overdueInFiltered = filtered.filter(s => {
-      const d = new Date(s.sow_date);
-      d.setHours(0, 0, 0, 0);
-      return d < now;
-    });
-    console.log('[PlantingSchedule] DEBUG - filterSchedules() result:', {
-      filtered_total: filtered.length,
-      overdue_in_filtered: overdueInFiltered.length,
     });
 
     setFilteredSchedules(filtered);
@@ -1060,11 +898,6 @@ const PlantingSchedulePage = () => {
   };
 
   const fetchAvailableBatchesForRecipe = async (schedule: PlantingSchedule) => {
-    console.log('[PlantingSchedule] fetchAvailableBatchesForRecipe CALLED', {
-      recipe_id: schedule.recipe_id,
-      recipe_name: schedule.recipe_name,
-      schedule,
-    });
     setLoadingBatches(true);
     setSelectedBatchOption(null);
     setAvailableBatches([]);
@@ -1084,14 +917,11 @@ const PlantingSchedulePage = () => {
     try {
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) {
-        console.log('[PlantingSchedule] No session data found, returning early');
         setAvailableBatches([]);
         return;
       }
 
       const { farmUuid } = JSON.parse(sessionData);
-      console.log('[PlantingSchedule] Querying recipe for batch lookup...', { recipe_id: schedule.recipe_id, farmUuid });
-
       const { data: recipeData, error: recipeError } = await withTimeout(
         getSupabaseClient()
           .from('recipes')
@@ -1102,8 +932,6 @@ const PlantingSchedulePage = () => {
         10000,
         'recipe lookup'
       );
-
-      console.log('[PlantingSchedule] Recipe query result:', { recipeData, recipeError });
 
       if (recipeError || !recipeData) {
         console.error('[PlantingSchedule] Error fetching recipe:', recipeError);
@@ -1149,18 +977,6 @@ const PlantingSchedulePage = () => {
       } catch (error) {
         console.error('[PlantingSchedule] Unexpected error fetching variety info:', error);
       }
-
-      console.log('[PlantingSchedule] Recipe data for batch lookup:', {
-        recipe_id: recipeData.recipe_id,
-        variety_id: recipeData.variety_id,
-        variety_name: varietyName,
-        seed_quantity: recipeData.seed_quantity,
-        seed_quantity_unit: recipeData.seed_quantity_unit,
-        seedQuantityPerTray,
-        numberOfTrays,
-        totalSeedNeeded,
-        requiresSoaking,
-      });
 
       const convertToGrams = (quantity: number | string | null | undefined, unit?: string | null) => {
         const numeric = typeof quantity === 'number' ? quantity : Number(quantity ?? 0);
@@ -1280,7 +1096,6 @@ const PlantingSchedulePage = () => {
           purchaseDate: batch.purchasedate,
         }));
 
-      console.log('[PlantingSchedule] Setting availableBatches:', { count: formattedOptions.length, formattedOptions });
       setAvailableBatches(formattedOptions);
     } catch (error) {
       console.error('[PlantingSchedule] Error in fetchAvailableBatchesForRecipe:', error);
@@ -1292,7 +1107,6 @@ const PlantingSchedulePage = () => {
         setBatchNotice('Failed to load seed batches. Please try again.');
       }
     } finally {
-      console.log('[PlantingSchedule] fetchAvailableBatchesForRecipe FINISHED');
       setLoadingBatches(false);
     }
   };
@@ -1310,7 +1124,6 @@ const PlantingSchedulePage = () => {
 
     // Prevent double-clicks
     if (isSubmittingSeeding.current) {
-      console.log('[PlantingSchedule] Seeding already in progress, ignoring duplicate call');
       return;
     }
 
@@ -1355,13 +1168,6 @@ const PlantingSchedulePage = () => {
       // Only use the first N deliveries based on how many trays user wants to create
       const deliveriesToUse = deliveries.slice(0, numberOfTraysToCreate);
 
-      // DEBUG: Log deliveries being used
-      console.log('[PlantingSchedule] DEBUG - Creating trays:', {
-        traysToCreate: numberOfTraysToCreate,
-        totalDeliveries: deliveries.length,
-        deliveriesUsed: deliveriesToUse.length,
-      });
-
       // If we have delivery info, create one request per delivery (with order_schedule_id)
       // Otherwise fall back to creating identical requests
       const requests = deliveriesToUse.length > 0
@@ -1377,13 +1183,6 @@ const PlantingSchedulePage = () => {
               standing_order_id: delivery.standing_order_id,
               order_schedule_id: delivery.schedule_id,
             };
-            // DEBUG: Log each request being built
-            console.log(`[PlantingSchedule] DEBUG - Tray request ${index + 1}:`, {
-              order_schedule_id: delivery.schedule_id,
-              standing_order_id: delivery.standing_order_id,
-              delivery_date: delivery.delivery_date,
-              customer_name: delivery.customer_name,
-            });
             return request;
           })
         : Array.from({ length: numberOfTraysToCreate }, () => ({
@@ -1396,19 +1195,6 @@ const PlantingSchedulePage = () => {
             batch_id: batchIdForRequest,
           }));
 
-      // DEBUG: Log full requests array before insert
-      console.log('[PlantingSchedule] DEBUG - Full requests array to insert:', JSON.stringify(requests, null, 2));
-
-      console.log('[PlantingSchedule] Creating tray creation requests:', {
-        numberOfTraysToCreate,
-        recipeName: recipeData.recipe_name,
-        batchId: batchIdForRequest,
-        sowDate: sowDateISO,
-        deliveriesCount: deliveries.length,
-        orderScheduleIds: deliveriesToUse.map(d => d.schedule_id),
-        standingOrderIds: deliveriesToUse.map(d => d.standing_order_id),
-      });
-
       const { error: requestError } = await getSupabaseClient()
         .from('tray_creation_requests')
         .insert(requests);
@@ -1417,8 +1203,6 @@ const PlantingSchedulePage = () => {
         console.error('[PlantingSchedule] Error creating tray requests:', requestError);
         throw requestError;
       }
-
-      console.log('[PlantingSchedule] Tray creation requests created successfully');
 
       // Create task_completion record so daily flow knows this is done
       const sowDateStr = seedingDate; // Already in YYYY-MM-DD format from date input
@@ -1445,12 +1229,6 @@ const PlantingSchedulePage = () => {
       if (completionError) {
         console.error('[PlantingSchedule] Error creating task completion:', completionError);
         // Don't throw - tray creation succeeded, this is just for tracking
-      } else {
-        console.log('[PlantingSchedule] Task completion created successfully:', {
-          recipe_id: seedingSchedule.recipe_id,
-          task_date: sowDateStr,
-          task_type: 'sowing'
-        });
       }
 
       // Get the schedule key and reference that were stored when dialog opened
@@ -1476,10 +1254,10 @@ const PlantingSchedulePage = () => {
       // Trigger fade-out animation
       setRemovingScheduleKey(scheduleKey);
 
-      // After animation completes, remove from local state (optimistic update)
-      // Use object reference to ensure we remove the exact schedule that was seeded
+      // After animation completes, mark as seeded in local state (optimistic update)
+      // This keeps the schedule visible in the "Already Seeded" count and date groups
       setTimeout(() => {
-        setSchedules(prev => prev.filter(s => s !== scheduleToRemove));
+        setSchedules(prev => prev.map(s => s === scheduleToRemove ? { ...s, isSeeded: true } : s));
         setRemovingScheduleKey(null);
       }, 300);
     } catch (error) {
@@ -1525,20 +1303,6 @@ const PlantingSchedulePage = () => {
   const dateKeys = Object.keys(groupedSchedules).sort();
   const unseededSchedules = filteredSchedules.filter(s => !s.isSeeded);
   const seededSchedules = filteredSchedules.filter(s => s.isSeeded);
-
-  // DEBUG: Log what ends up in filteredOverdue
-  console.log('[PlantingSchedule] DEBUG - Final overdue display:', {
-    filteredSchedules_total: filteredSchedules.length,
-    overdueSchedules_from_separate: overdueSchedules.length,
-    filteredOverdue_after_skip_check: filteredOverdue.length,
-    skipped_count: skippedSchedules.size,
-    overdue_details: filteredOverdue.map(s => ({
-      recipe_name: s.recipe_name,
-      sow_date: s.sow_date,
-      quantity: Math.ceil(s.quantity),
-      customer: s.customer_name,
-    })),
-  });
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">

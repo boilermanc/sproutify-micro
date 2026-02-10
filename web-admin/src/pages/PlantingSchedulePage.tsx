@@ -1215,40 +1215,16 @@ const PlantingSchedulePage = () => {
         return;
       }
 
-      const { data: allBatches, error: allBatchesError } = await withTimeout(
-        getSupabaseClient()
-          .from('seedbatches')
-          .select('*')
-          .eq('farm_uuid', farmUuid),
-        10000,
-        'all batches debug'
-      );
-
-      if (allBatchesError) {
-        console.error('[PlantingSchedule] Error fetching all batches for debug:', allBatchesError);
-      } else {
-        console.log('[PlantingSchedule] All batches for farm:', {
-          count: allBatches?.length || 0,
-          batches: allBatches,
-        });
-      }
-
       const { data: batchesData, error: batchesError } = await withTimeout(
         getSupabaseClient()
-          .from('seedbatches')
-          .select(`
-            batchid,
-            quantity,
-            unit,
-            lot_number,
-            purchasedate,
-            varietyid
-          `)
+          .from('seed_inventory_status')
+          .select('batch_id, variety_id, quantity_grams, seed_quantity_grams, trays_possible, lot_number, purchasedate, stock_status')
           .eq('farm_uuid', farmUuid)
-          .eq('varietyid', recipeData.variety_id)
+          .eq('variety_id', recipeData.variety_id)
+          .eq('is_active', true)
           .order('purchasedate', { ascending: true }),
         10000,
-        'seed batches lookup'
+        'seed inventory status lookup'
       );
 
       if (batchesError) {
@@ -1256,29 +1232,21 @@ const PlantingSchedulePage = () => {
         return;
       }
 
-      // Show all batches with quantity > 0, let user decide how many trays to seed
-      const qualifyingBatches = (batchesData || []).filter((batch: any) => {
-        const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
-        return batchQuantityGrams > 0;
-      });
-
-      const formattedOptions = qualifyingBatches.map((batch: any) => {
-        const batchQuantityGrams = convertToGrams(batch.quantity, batch.unit);
-        // Calculate how many trays this batch can seed
-        const traysPossible = seedPerTray > 0 ? Math.floor(batchQuantityGrams / seedPerTray) : 0;
-        return {
-          key: `seedbatch-${batch.batchid}`,
+      // Show batches with remaining seed > 0
+      const formattedOptions = (batchesData || [])
+        .filter((batch: any) => Number(batch.quantity_grams) > 0)
+        .map((batch: any) => ({
+          key: `seedbatch-${batch.batch_id}`,
           source: 'seedbatch' as const,
-          actualBatchId: batch.batchid,
+          actualBatchId: batch.batch_id,
           variety_name: varietyName,
-          label: `${varietyName} - Batch #${batch.batchid}`,
-          description: '', // Will be shown in card format instead
-          quantityGrams: batchQuantityGrams,
-          traysPossible,
+          label: `${varietyName} - Batch #${batch.batch_id}`,
+          description: '',
+          quantityGrams: Number(batch.quantity_grams),
+          traysPossible: Number(batch.trays_possible) || 0,
           lotNumber: batch.lot_number,
           purchaseDate: batch.purchasedate,
-        };
-      });
+        }));
 
       console.log('[PlantingSchedule] Setting availableBatches:', { count: formattedOptions.length, formattedOptions });
       setAvailableBatches(formattedOptions);

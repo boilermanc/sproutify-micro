@@ -507,6 +507,21 @@ const PlantingSchedulePage = () => {
         const key = `${schedule.recipe_id}-${sowDateKey}`;
         const existing = dedupeMap.get(key);
 
+        // DEBUG: Trace Kohlrabi dedup to diagnose delivery grouping
+        if (schedule.recipe_id === 20) {
+          console.log('[PlantingSchedule] DEBUG - Dedup Kohlrabi:', {
+            recipe_id: schedule.recipe_id,
+            sow_date: sowDateKey,
+            delivery_date: schedule.delivery_date,
+            standing_order_id: schedule.standing_order_id,
+            quantity: schedule.quantity,
+            group_key: key,
+            merging_into_existing: !!existing,
+            existing_quantity: existing?.quantity,
+            existing_deliveries_count: existing?.deliveries?.length,
+          });
+        }
+
         // Look up the actual schedule_id from order_schedules
         // delivery_date is a Date object - use LOCAL date components (not UTC which shifts the date)
         // Key format: "standing_order_id-recipe_id-YYYY-MM-DD"
@@ -578,6 +593,23 @@ const PlantingSchedulePage = () => {
       deduplicatedSchedules.sort((a, b) => a.sow_date.getTime() - b.sow_date.getTime());
 
       console.log(`[PlantingSchedule] Deduplicated ${allSchedules.length} → ${deduplicatedSchedules.length} schedules (skipped ${skippedSeededCount} already-seeded, ${skippedByStatusCount} skipped/completed deliveries)`);
+
+      // DEBUG: Kohlrabi dedup summary
+      const kohlrabiGroups = deduplicatedSchedules.filter(s => s.recipe_id === 20);
+      if (kohlrabiGroups.length > 0) {
+        console.log('[PlantingSchedule] DEBUG - Kohlrabi dedup summary:', kohlrabiGroups.map(s => ({
+          group_key: `${s.recipe_id}-${getLocalDateKey(s.sow_date)}`,
+          sow_date: getLocalDateKey(s.sow_date),
+          total_quantity: s.quantity,
+          deliveries_count: s.deliveries?.length,
+          deliveries: s.deliveries?.map(d => ({
+            delivery_date: d.delivery_date,
+            schedule_id: d.schedule_id,
+            standing_order_id: d.standing_order_id,
+            customer_name: d.customer_name,
+          })),
+        })));
+      }
 
       // DEBUG: Log all schedules with sow_date < today BEFORE tray-check filtering
       const todayForDebug = new Date();

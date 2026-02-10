@@ -1021,6 +1021,9 @@ const PlantingSchedulePage = () => {
     setSelectedBatchOption(null);
     setAvailableBatches([]);
     setBatchNotice(null);
+    // Set tray count from grouped schedule quantity (not per-delivery)
+    // Must be set here synchronously — fetchAvailableBatchesForRecipe runs async
+    setTraysToCreate(Math.max(1, Math.ceil(schedule.quantity)));
     await fetchAvailableBatchesForRecipe(schedule);
   };
 
@@ -1084,7 +1087,7 @@ const PlantingSchedulePage = () => {
       setSeedQuantityPerTray(seedPerTray);
 
       const numberOfTrays = Math.max(1, Math.ceil(schedule.quantity));
-      setTraysToCreate(numberOfTrays); // Default to scheduled quantity
+      // traysToCreate is set synchronously in handleCreateTray (single source of truth)
       const totalSeedNeeded = seedPerTray * numberOfTrays;
 
       if (!recipeData.variety_id) {
@@ -1343,7 +1346,12 @@ const PlantingSchedulePage = () => {
 
       // Create tray creation requests - one per delivery so each tray links to its order
       const batchIdForRequest = selectedBatchOption.actualBatchId;
-      const deliveries = seedingSchedule.deliveries || [];
+      // Sort deliveries by delivery date ascending so earliest deliveries get trays first
+      const deliveries = [...(seedingSchedule.deliveries || [])].sort((a, b) => {
+        const dateA = new Date(a.delivery_date).getTime();
+        const dateB = new Date(b.delivery_date).getTime();
+        return dateA - dateB;
+      });
       // Only use the first N deliveries based on how many trays user wants to create
       const deliveriesToUse = deliveries.slice(0, numberOfTraysToCreate);
 

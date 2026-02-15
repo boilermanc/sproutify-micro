@@ -419,6 +419,17 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
       error: tasksError
     });
 
+    // Build set of recipe_ids that already have soak_request tasks from the view
+    // to prevent duplicates when generating soak tasks from planting_schedule
+    const viewSoakRecipeIds = new Set<number>();
+    if (tasksData) {
+      for (const row of tasksData) {
+        if (row.task_source === 'soak_request' && row.recipe_id) {
+          viewSoakRecipeIds.add(row.recipe_id);
+        }
+      }
+    }
+
     // Always supplement with direct tray queries to ensure we don't miss any active trays
     // The view might miss tasks due to scheduled_date mismatches or other issues
     const supplementalTasks: DailyTask[] = [];
@@ -832,16 +843,26 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
         // Fetch variety_name from recipes table for seeding tasks
         const { data: recipesData, error: recipesError } = recipeIds.length > 0 ? await getSupabaseClient()
           .from('recipes')
-          .select('recipe_id, variety_name')
+          .select('recipe_id, variety_name, variety_id, seed_quantity, seed_quantity_grams, seed_quantity_unit')
           .in('recipe_id', recipeIds)
           .eq('farm_uuid', farmUuid) : { data: null, error: null };
         
         // Create a map of recipe_id -> variety_name
         const varietyNameMap: Record<number, string> = {};
+        // Create a map of recipe_id -> { variety_id, seed_quantity_grams } for soaked seed checks
+        const recipeSeedInfoMap: Record<number, { variety_id: number; seed_quantity_grams: number }> = {};
         if (recipesData && !recipesError) {
           recipesData.forEach((recipe: any) => {
             if (recipe.recipe_id && recipe.variety_name) {
               varietyNameMap[recipe.recipe_id] = recipe.variety_name;
+            }
+            if (recipe.recipe_id && recipe.variety_id) {
+              const grams = recipe.seed_quantity_grams
+                ?? (recipe.seed_quantity_unit === 'oz'
+                    ? recipe.seed_quantity * 28.3495
+                    : recipe.seed_quantity)
+                ?? 50; // last-resort fallback (matches RPC default)
+              recipeSeedInfoMap[recipe.recipe_id] = { variety_id: recipe.variety_id, seed_quantity_grams: grams };
             }
           });
         }
@@ -931,6 +952,21 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             const key = `${ct.task_type}-${ct.recipe_id}`;
             completedTaskKeys.add(key);
           });
+        }
+
+        // Fetch available soaked seed to skip soak tasks when sufficient seed already soaked
+        const { data: availableSoakedData } = await getSupabaseClient()
+          .from('available_soaked_seed')
+          .select('variety_id, quantity_remaining')
+          .eq('farm_uuid', farmUuid);
+
+        const soakedByVariety: Record<number, number> = {};
+        if (availableSoakedData) {
+          for (const row of availableSoakedData) {
+            if (row.variety_id) {
+              soakedByVariety[row.variety_id] = (soakedByVariety[row.variety_id] || 0) + Number(row.quantity_remaining || 0);
+            }
+          }
         }
 
         // Fetch existing tray_creation_requests to avoid duplicates
@@ -1068,7 +1104,33 @@ export const fetchDailyTasks = async (selectedDate?: Date, forceRefresh: boolean
             
             // Check for soaking tasks (sow_date - soak_duration = today)
             // This shows "Soak Seeds" task for recipes that have pre-seeding steps (soak, pre-sprout, etc.)
-            if (soakDateStr === targetDateStr && soakDuration > 0) {
+            // Skip if the view already has a soak_request for this recipe (prevents duplicate soak cards)
+            if (soakDateStr === targetDateStr && soakDuration > 0 && viewSoakRecipeIds.has(schedule.recipe_id)) {
+              console.log('[fetchDailyTasks] Skipping soak task from planting_schedule - soak_request already exists in view:', {
+                recipe_id: schedule.recipe_id,
+                recipe_name: schedule.recipe_name,
+              });
+            } else if (soakDateStr === targetDateStr && soakDuration > 0) {
+              // Check if sufficient soaked seed already exists for this variety
+              const seedInfo = recipeSeedInfoMap[schedule.recipe_id];
+              if (seedInfo) {
+                const availableGrams = soakedByVariety[seedInfo.variety_id] || 0;
+                const traysAvailable = seedInfo.seed_quantity_grams > 0
+                  ? Math.floor(availableGrams / seedInfo.seed_quantity_grams)
+                  : 0;
+                if (traysAvailable >= (schedule.trays_needed || 0)) {
+                  console.log('[fetchDailyTasks] Skipping soak task - sufficient soaked seed available:', {
+                    recipe_id: schedule.recipe_id,
+                    recipe_name: schedule.recipe_name,
+                    variety_id: seedInfo.variety_id,
+                    availableGrams,
+                    traysAvailable,
+                    traysNeeded: schedule.trays_needed,
+                  });
+                  continue;
+                }
+              }
+
               // Check if this soaking task has already been completed
               const soakingKey = `soaking-${schedule.recipe_id}`;
               if (!completedTaskKeys.has(soakingKey)) {

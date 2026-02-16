@@ -6017,6 +6017,12 @@ export default function DailyFlow() {
               <div className="space-y-6 py-4">
                 {/* Summary Card */}
                 <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                  {seedingTask.customerName && (
+                    <div className="mb-3 pb-3 border-b border-indigo-200">
+                      <p className="text-xs text-indigo-600 font-medium uppercase">Customer</p>
+                      <p className="text-xl font-bold text-indigo-900">{seedingTask.customerName}</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-indigo-600 font-medium uppercase">Variety</p>

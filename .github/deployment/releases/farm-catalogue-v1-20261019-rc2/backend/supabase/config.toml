@@ -1,0 +1,3 @@
+project_id = "rmjyfdmwnmaerthcoosq"
+[functions.farm-assistant]
+verify_jwt = true

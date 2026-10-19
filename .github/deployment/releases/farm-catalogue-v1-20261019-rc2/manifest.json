@@ -1,0 +1,37 @@
+{
+  "release": "farm-catalogue-v1-20261019-rc2",
+  "baseline": {
+    "marketing": "5cefd86a00262024334854ad91a16b2158df5fd7eddae8552183c4b334bed66a",
+    "admin": "a7652f7d6e90de705f6edd1789e90dd010c5a45f7e67348d50426720cd89fa3c"
+  },
+  "archiveSha256": "1c744bbeb7eda29f406855eeb34dd4beccef6c3c39c89b3dfe79173c093c99d0",
+  "scriptSha256": "13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8",
+  "indexSha256": {
+    "marketing": "93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352",
+    "admin": "ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717"
+  },
+  "files": 47,
+  "bytes": 7495645,
+  "backend": [
+    {
+      "path": "functions/farm-assistant/index.ts",
+      "sha256": "e43d9b7b5292702f4a52d401924eb208fbd56f89e62c91795a243f5433d65f5b"
+    },
+    {
+      "path": "functions/farm-assistant/handler.mjs",
+      "sha256": "c3d50cdab17a494fa994da833d74de5457a0aa800c25ebb45210b48825444c65"
+    },
+    {
+      "path": "functions/_shared/farm-assistant-core.mjs",
+      "sha256": "95826ee7d9b8c59762dcab8e06218a97f28132a016179977e01957e517a5420f"
+    },
+    {
+      "path": "functions/_shared/farm-realtime-core.mjs",
+      "sha256": "c925673aa1dca3508caa05fb37d049ff4fd8e3e6f07d472f5e4b3120287432c2"
+    },
+    {
+      "path": "functions/_shared/farm-catalogue-core.mjs",
+      "sha256": "385beb64131c1e383a20e75124d96b7f9ebaa3cb5728107b6c92b8e8f4c65691"
+    }
+  ]
+}

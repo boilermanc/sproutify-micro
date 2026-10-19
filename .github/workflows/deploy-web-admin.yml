@@ -1,9 +1,9 @@
-name: Deploy frozen farm voice release to IONOS
+name: Deploy frozen farm catalogue and homepage release
 on:
   workflow_dispatch:
     inputs:
       release_confirmation:
-        description: Enter farm-voice-v1-20261018-rc3
+        description: Enter farm-catalogue-v1-20261019-rc2
         required: true
         type: string
 permissions:
@@ -15,14 +15,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      RELEASE: farm-voice-v1-20261018-rc3
-      ARCHIVE_SHA256: e2cae41f768ad183df2a9987a0ff5f7c6788d5db251b77750ad254ddfd0d577d
-      SCRIPT_SHA256: 2ffba1d2ed1c2ed2156fec8106ec26a8d0156ee5e2dd2a527c2b8dae0e66ae38
+      RELEASE: farm-catalogue-v1-20261019-rc2
+      ARCHIVE_SHA256: 1c744bbeb7eda29f406855eeb34dd4beccef6c3c39c89b3dfe79173c093c99d0
+      SCRIPT_SHA256: 13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8
       BACKEND_READY_RELEASE: ${{ vars.FARM_VOICE_BACKEND_READY_RELEASE }}
       CONFIRMED_RELEASE: ${{ inputs.release_confirmation }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify frozen release and hosted backend qualification gate
+      - name: Verify frozen package and qualified backend
         shell: bash
         run: |
           set -euo pipefail
@@ -32,19 +32,19 @@ jobs:
           printf '%s  %s\n' "$ARCHIVE_SHA256" "$folder/payload.tar.gz" | sha256sum -c -
           printf '%s  %s\n' "$SCRIPT_SHA256" "$folder/deploy.sh" | sha256sum -c -
           bash -n "$folder/deploy.sh"
-      - name: Upload frozen package into private home staging
+      - name: Upload frozen package to private staging
         uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634
         with:
           host: ${{ secrets.IONOS_HOST }}
           username: ${{ secrets.IONOS_USERNAME }}
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
-          source: .github/deployment/releases/farm-voice-v1-20261018-rc3/payload.tar.gz,.github/deployment/releases/farm-voice-v1-20261018-rc3/deploy.sh
-          target: .sproutify-incoming/farm-voice-v1-20261018-rc3
+          source: .github/deployment/releases/farm-catalogue-v1-20261019-rc2/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261019-rc2/deploy.sh
+          target: .sproutify-incoming/farm-catalogue-v1-20261019-rc2
           strip_components: 4
           rm: false
           overwrite: true
-      - name: Back up existing admin and publish assets before index
+      - name: Back up and publish app and homepage
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17
         with:
           host: ${{ secrets.IONOS_HOST }}
@@ -54,15 +54,15 @@ jobs:
           command_timeout: 5m
           script: |
             set -eu
-            incoming="$HOME/.sproutify-incoming/farm-voice-v1-20261018-rc3"
-            printf '%s  %s\n' '2ffba1d2ed1c2ed2156fec8106ec26a8d0156ee5e2dd2a527c2b8dae0e66ae38' "$incoming/deploy.sh" | sha256sum -c -
-            target=/var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin
-            test -z "$(find -P "$target" -type f -links +1 -print -quit)"
-            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" 'e2cae41f768ad183df2a9987a0ff5f7c6788d5db251b77750ad254ddfd0d577d' 'farm-voice-v1-20261018-rc3'
-            served=$(curl --fail --silent --show-error --max-time 20 https://micro.sproutify.app/admin/index.html | sha256sum | cut -d' ' -f1)
-            test "$served" = 'a7652f7d6e90de705f6edd1789e90dd010c5a45f7e67348d50426720cd89fa3c'
-            today=$(curl --fail --silent --show-error --max-time 20 https://micro.sproutify.app/admin/today | sha256sum | cut -d' ' -f1)
-            test "$today" = "$served"
-            growing=$(curl --fail --silent --show-error --max-time 20 https://micro.sproutify.app/admin/growing | sha256sum | cut -d' ' -f1)
-            test "$growing" = "$served"
-            echo 'Served index, Today and Growing match the frozen release.'
+            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261019-rc2"
+            printf '%s  %s\n' '13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8' "$incoming/deploy.sh" | sha256sum -c -
+            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" '1c744bbeb7eda29f406855eeb34dd4beccef6c3c39c89b3dfe79173c093c99d0' 'farm-catalogue-v1-20261019-rc2' '5cefd86a00262024334854ad91a16b2158df5fd7eddae8552183c4b334bed66a' 'a7652f7d6e90de705f6edd1789e90dd010c5a45f7e67348d50426720cd89fa3c'
+            for route in admin/index.html admin/today admin/growing; do
+              served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route" | sha256sum | cut -d' ' -f1)
+              test "$served" = 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'
+            done
+            for route in index.html pre-launch; do
+              served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route" | sha256sum | cut -d' ' -f1)
+              test "$served" = '93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352'
+            done
+            echo 'Hosted app routes and homepage match the frozen release.'

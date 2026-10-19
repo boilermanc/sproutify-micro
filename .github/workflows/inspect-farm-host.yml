@@ -20,6 +20,8 @@ jobs:
           script: |
             set -eu
             echo 'Read-only inspection for micro.sproutify.app; no files are created or changed.'
+            for tool in python3 rsync tar sha256sum; do command -v "$tool" || true; done
+            python3 --version 2>/dev/null || true
             for config in /var/www/vhosts/system/micro.sproutify.app/conf/httpd.conf /var/www/vhosts/system/micro.sproutify.app/conf/nginx.conf; do
               if [ -r "$config" ]; then
                 echo "CONFIG=$config"

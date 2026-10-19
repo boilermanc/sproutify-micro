@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
@@ -42,7 +43,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 
 // --- Custom Icon Component for that "Material" feel ---
 const DashboardIcon = ({ icon: Icon, colorClass, bgClass }: { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>, colorClass: string, bgClass: string }) => (
-  <div className={`p-3 rounded-xl ${bgClass} shadow-sm transition-all duration-300 group-hover:scale-110`}>
+  <div className={`p-3 rounded-xl ${bgClass} shadow-sm transition-all duration-300 `}>
     <Icon className={`h-6 w-6 ${colorClass}`} strokeWidth={2.5} />
   </div>
 );
@@ -160,7 +161,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
       : message;
 
     return (
-      <p className="text-sm text-slate-400 mb-6 leading-relaxed min-h-[40px]">
+      <p className="text-sm text-muted-foreground mb-6 leading-relaxed min-h-[40px]">
         {previewText}
         {shouldTruncate && (
           <button
@@ -170,7 +171,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               event.preventDefault();
               handleOpenDetail(type, title, message);
             }}
-            className="ml-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 focus:outline-none"
+            className="ml-2 text-xs font-semibold text-emerald-700 hover:text-emerald-200 focus:outline-none"
           >
             more...
           </button>
@@ -276,21 +277,19 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="relative rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden"
+                    className="relative rounded-lg bg-card border border-border shadow-none overflow-hidden"
                   >
                     {/* Background Decor - matching Daily Briefing */}
-                    <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
-
+                            
                     {/* Header - matching Daily Briefing style */}
-                    <div className="p-6 border-b border-white/5 flex justify-between items-start bg-white/5">
+                    <div className="p-6 border-b border-border flex justify-between items-start bg-background">
                       <div className="flex gap-4">
                         <div className={`h-12 w-12 rounded-2xl ${colorClasses.bg} flex items-center justify-center shadow-lg`}>
                           <Sparkles className={`${colorClasses.text} h-6 w-6`} />
                         </div>
                         <div>
-                          <h2 className="text-xl font-bold text-white tracking-tight">Action Required</h2>
-                          <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
+                          <h2 className="text-xl font-bold text-foreground tracking-tight">Action Required</h2>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5">
                             <span>Click to take action</span>
                           </div>
                         </div>
@@ -299,7 +298,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                         variant="ghost" 
                         size="icon"
                         onClick={handleClose}
-                        className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+                        className="text-muted-foreground hover:text-foreground hover:bg-secondary rounded-full"
                       >
                         <X size={20} />
                       </Button>
@@ -376,26 +375,26 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
                 transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                className="pointer-events-auto w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden"
+                className="pointer-events-auto w-full max-w-2xl rounded-lg bg-card border border-border shadow-none overflow-hidden"
               >
-                <div className="p-6 border-b border-white/5 bg-slate-950/80 backdrop-blur-sm">
+                <div className="p-6 border-b border-border bg-slate-950/80 backdrop-blur-sm">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-200">Daily Insight</p>
-                      <h3 className="text-xl font-bold text-white mt-1">{detailModal.title}</h3>
+                      <p className="text-xs uppercase tracking-[0.3em] text-foreground">Daily Insight</p>
+                      <h3 className="text-xl font-bold text-foreground mt-1">{detailModal.title}</h3>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={handleCloseDetail}
-                      className="text-slate-200 hover:text-white hover:bg-white/10 rounded-full"
+                      className="text-foreground hover:text-foreground hover:bg-secondary rounded-full"
                     >
                       <X size={20} />
                     </Button>
                   </div>
                 </div>
                 <div className="p-6">
-                  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line">
+                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
                     {detailModal.message}
                   </p>
                   <div className="mt-6 flex justify-end">
@@ -403,7 +402,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
                       variant="outline"
                       size="sm"
                       onClick={handleCloseDetail}
-                      className="text-white border-white/30 hover:border-white/60 hover:bg-white/10"
+                      className="text-foreground border-border hover:border-primary hover:bg-secondary"
                     >
                       Close
                     </Button>
@@ -419,26 +418,24 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
         initial={{ opacity: 0, height: 0 }}
         animate={{ opacity: 1, height: 'auto' }}
         exit={{ opacity: 0, height: 0 }}
-        className="mb-8 relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl"
+        className="mb-8 relative overflow-hidden rounded-lg bg-card border border-border shadow-none"
       >
       {/* Background Decor */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 pointer-events-none" />
 
       {/* Header */}
-      <div className="p-6 border-b border-white/5 flex justify-between items-start bg-white/5">
+      <div className="p-6 border-b border-border flex justify-between items-start bg-background">
         <div className="flex gap-4">
-          <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-900/20">
-            <Sparkles className="text-white h-6 w-6" />
+          <div className="h-12 w-12 rounded-md bg-secondary flex items-center justify-center">
+            <Sparkles className="text-foreground h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">Daily Briefing</h2>
-            <div className="flex items-center gap-2 text-sm text-slate-400 mt-0.5">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Daily Briefing</h2>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5">
               <span>{insights.date}</span>
               <span className="w-1 h-1 rounded-full bg-slate-600" />
-              <span className="text-emerald-400 font-medium flex items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                System Optimal
+              <span className="text-emerald-700 font-medium flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-700" />
+                Farm overview
               </span>
             </div>
           </div>
@@ -447,24 +444,24 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
           variant="ghost" 
           size="icon"
           onClick={onClose}
-          className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full"
+          className="text-muted-foreground hover:text-foreground hover:bg-secondary rounded-full"
         >
           <X size={20} />
         </Button>
       </div>
 
       {/* Insights Grid - Always show the three cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
           
           {/* 1. Opportunity */}
-          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+          <div className="p-6 group hover:bg-background transition-colors">
             <div className="flex items-center gap-2 mb-3">
-              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-700">
                 <TrendingUp size={16} />
               </div>
-              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Opportunity</span>
+              <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Opportunity</span>
             </div>
-            <h3 className="font-semibold text-slate-200 mb-2">{insights.opportunity.title}</h3>
+            <h3 className="font-semibold text-foreground mb-2">{insights.opportunity.title}</h3>
             {renderInsightMessage('opportunity', insights.opportunity.title, insights.opportunity.message)}
             <ExpandableActionButton
               action={insights.opportunity.action}
@@ -474,7 +471,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               colorClasses={{
                 bg: 'bg-emerald-500/10',
                 border: 'border-emerald-500/20',
-                text: 'text-emerald-300',
+                text: 'text-emerald-700',
                 hoverBg: 'hover:bg-emerald-500/20',
                 hoverText: 'hover:text-emerald-200'
               }}
@@ -482,14 +479,14 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
           </div>
 
           {/* 2. Risk */}
-          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+          <div className="p-6 group hover:bg-background transition-colors">
             <div className="flex items-center gap-2 mb-3">
-              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-700">
                 <AlertTriangle size={16} />
               </div>
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Attention Needed</span>
+              <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">Attention Needed</span>
             </div>
-            <h3 className="font-semibold text-slate-200 mb-2">{insights.risk.title}</h3>
+            <h3 className="font-semibold text-foreground mb-2">{insights.risk.title}</h3>
             {renderInsightMessage('risk', insights.risk.title, insights.risk.message)}
             <ExpandableActionButton
               action={insights.risk.action}
@@ -499,7 +496,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               colorClasses={{
                 bg: 'bg-amber-500/10',
                 border: 'border-amber-500/20',
-                text: 'text-amber-300',
+                text: 'text-amber-700',
                 hoverBg: 'hover:bg-amber-500/20',
                 hoverText: 'hover:text-amber-200'
               }}
@@ -507,14 +504,14 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
           </div>
 
           {/* 3. Inventory */}
-          <div className="p-6 group hover:bg-white/[0.02] transition-colors">
+          <div className="p-6 group hover:bg-background transition-colors">
             <div className="flex items-center gap-2 mb-3">
-              <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
+              <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-700">
                 <Package size={16} />
               </div>
-              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Inventory</span>
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wider">Inventory</span>
             </div>
-            <h3 className="font-semibold text-slate-200 mb-2">{insights.inventory.title}</h3>
+            <h3 className="font-semibold text-foreground mb-2">{insights.inventory.title}</h3>
             {renderInsightMessage('inventory', insights.inventory.title, insights.inventory.message)}
             <ExpandableActionButton
               action={insights.inventory.action}
@@ -524,7 +521,7 @@ const SageBriefing = ({ data, isVisible, onClose, navigate }: { data: InsightDat
               colorClasses={{
                 bg: 'bg-blue-500/10',
                 border: 'border-blue-500/20',
-                text: 'text-blue-300',
+                text: 'text-blue-700',
                 hoverBg: 'hover:bg-blue-500/20',
                 hoverText: 'hover:text-blue-200'
               }}
@@ -789,7 +786,7 @@ const Dashboard = () => {
   const [modalLoading, setModalLoading] = useState(false);
 
   // Vibrant Material-like colors
-  const PIE_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6'];
+  const PIE_COLORS = ['#2f5943', '#637d56', '#b8944f', '#93a985', '#394e40'];
 
   // --- Data Fetching Logic ---
   const fetchDashboardData = useCallback(async (showLoadingState = false) => {
@@ -1014,7 +1011,7 @@ const Dashboard = () => {
       // 4. Fetch Daily Insight from daily_insights table (populated by n8n each morning)
       // Skip if we've already determined the table doesn't exist
       if (insightsTableExistsRef.current !== false) {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = localDateString();
         console.log('[DEBUG] Querying daily_insights for date:', todayStr, 'farm_uuid:', farmUuid);
         
         // Query for today's insight
@@ -1485,8 +1482,8 @@ const Dashboard = () => {
       {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div className="flex items-center gap-5">
-          <div className="h-16 w-16 bg-gradient-to-br from-emerald-100 to-green-200 rounded-2xl flex items-center justify-center text-3xl shadow-sm border border-emerald-100">
-            🌱
+          <div className="h-16 w-16 bg-secondary rounded-lg flex items-center justify-center text-3xl shadow-sm border border-emerald-100">
+            <Sprout className="h-7 w-7 text-primary" aria-hidden="true" />
           </div>
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -1495,7 +1492,7 @@ const Dashboard = () => {
               </span>
               {isRefreshing && <span className="text-xs text-gray-400 animate-pulse">Syncing...</span>}
             </div>
-            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">{farmInfo.farmName}</h1>
+            <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">{farmInfo.farmName}</h1>
             <p className="text-gray-500 font-medium mt-1">
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </p>
@@ -1564,8 +1561,8 @@ const Dashboard = () => {
           value={stats.weeklyTasks}
           subtitle="Pending"
           icon={AlertCircle}
-          color="text-rose-600"
-          bg="bg-rose-100"
+          color="text-emerald-700"
+          bg="bg-emerald-100"
           onClick={() => handleStatCardClick('tasks')}
         />
         <StatCard
@@ -1586,8 +1583,8 @@ const Dashboard = () => {
         <div className="lg:col-span-2 space-y-8">
           
           {/* Harvest Chart */}
-          <Card className="border-none shadow-md bg-white rounded-2xl overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b border-gray-100">
+          <Card className="border border-border shadow-none bg-card rounded-lg overflow-hidden">
+            <CardHeader className="bg-background border-b border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg font-bold text-gray-800">Harvest Yield</CardTitle>
@@ -1601,14 +1598,14 @@ const Dashboard = () => {
                 {chartDimensions.bar.width > 0 && chartDimensions.bar.height > 0 ? (
                   <ResponsiveContainer width={chartDimensions.bar.width} height={chartDimensions.bar.height}>
                     <BarChart data={harvestData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#d7dfd2" />
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} dy={10} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
                       <Tooltip 
-                        cursor={{fill: '#f9fafb'}}
+                        cursor={{fill: '#f7f7ee'}}
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
                       />
-                      <Bar dataKey="yield" fill="#10B981" radius={[6, 6, 0, 0]} barSize={40} />
+                      <Bar dataKey="yield" fill="#2f5943" radius={[6, 6, 0, 0]} barSize={40} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : null}
@@ -1617,7 +1614,7 @@ const Dashboard = () => {
           </Card>
 
           {/* Quick Actions Bar */}
-          <Card className="border-none shadow-md bg-white rounded-2xl p-6">
+          <Card className="border border-border shadow-none bg-card rounded-lg p-6">
             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Quick Actions</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <QuickActionBtn 
@@ -1652,7 +1649,7 @@ const Dashboard = () => {
         <div className="space-y-8">
           
           {/* Variety Mix Pie */}
-          <Card className="border-none shadow-md bg-white rounded-2xl">
+          <Card className="border border-border shadow-none bg-card rounded-lg">
             <CardHeader className="border-b border-gray-100">
               <CardTitle className="text-lg font-bold text-gray-800">Current Mix</CardTitle>
             </CardHeader>
@@ -1715,7 +1712,7 @@ const Dashboard = () => {
           </Card>
 
           {/* Activity Feed */}
-          <Card className="border-none shadow-md bg-white rounded-2xl">
+          <Card className="border border-border shadow-none bg-card rounded-lg">
             <CardHeader className="border-b border-gray-100">
               <CardTitle className="text-lg font-bold text-gray-800">Recent Activity</CardTitle>
             </CardHeader>
@@ -1995,13 +1992,13 @@ interface StatCardProps {
 
 const StatCard = ({ title, value, subtitle, icon, color, bg, onClick }: StatCardProps) => (
   <Card
-    className={`border-none shadow-sm hover:shadow-lg transition-all duration-200 rounded-2xl overflow-hidden group ${onClick ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
+    className={`border border-border shadow-none hover:bg-secondary/30 transition-colors rounded-lg overflow-hidden group ${onClick ? 'cursor-pointer' : ''}`}
     onClick={onClick}
   >
     <CardContent className="p-5 flex items-start justify-between">
       <div>
         <p className="text-sm font-medium text-gray-500 mb-1">{title}</p>
-        <h3 className="text-2xl font-black text-gray-900 tracking-tight">{value}</h3>
+        <h3 className="text-2xl font-semibold text-gray-900 tracking-tight">{value}</h3>
         <p className="text-xs font-medium text-gray-400 mt-1">{subtitle}</p>
       </div>
       <DashboardIcon icon={icon} colorClass={color} bgClass={bg} />
@@ -2022,7 +2019,7 @@ const QuickActionBtn = ({ label, icon: Icon, onClick, color }: QuickActionBtnPro
     className={`h-auto py-6 flex flex-col gap-3 rounded-xl border-gray-100 transition-all duration-200 group ${color}`}
     onClick={onClick}
   >
-    <Icon className="h-6 w-6 group-hover:scale-110 transition-transform duration-200" />
+    <Icon className="h-6 w-6  transition-transform duration-200" />
     <span className="font-semibold">{label}</span>
   </Button>
 );

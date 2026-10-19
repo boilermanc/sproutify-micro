@@ -1,0 +1,12 @@
+{
+  "project": "rmjyfdmwnmaerthcoosq",
+  "function": "farm-assistant",
+  "verifyJwt": true,
+  "files": {
+    "supabase/functions/farm-assistant/index.ts": "e43d9b7b5292702f4a52d401924eb208fbd56f89e62c91795a243f5433d65f5b",
+    "supabase/functions/farm-assistant/handler.mjs": "010343eb2982c8a6ca2d1e6b9c503453979e5b248c10ec3dafff168b65d743b1",
+    "supabase/functions/_shared/farm-assistant-core.mjs": "d208f4e9cfbc30fa7d8674b7d5e9fe0bdb334dec3b9fc55a66c74a4cceadfceb",
+    "supabase/functions/_shared/farm-realtime-core.mjs": "18e557c3c7fc07a1d805f567d5c5d9cf4aef6a6c0ef91585ff218a0ae22bfd69",
+    "supabase/config.toml": "0b44526400fcd3b8ec03d88bd8bb49dae0e6d0aa8e3fbdb140d48545c663afa9"
+  }
+}

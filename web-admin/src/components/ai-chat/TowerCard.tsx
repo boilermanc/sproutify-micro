@@ -40,45 +40,45 @@ const TowerCard: React.FC<TowerCardProps> = ({ data, index }) => {
     switch (data.type) {
       case 'harvest':
         return {
-          backgroundColor: '#FEF3C7',
-          borderColor: '#F59E0B',
-          accentColor: '#F59E0B',
+          backgroundColor: '#f5ebd4',
+          borderColor: '#805d2d',
+          accentColor: '#805d2d',
         };
       case 'growing':
         return {
-          backgroundColor: '#F0FDF4',
-          borderColor: '#2F855A',
-          accentColor: '#2F855A',
+          backgroundColor: '#f0f4eb',
+          borderColor: '#2f5943',
+          accentColor: '#2f5943',
         };
       case 'attention':
         return {
-          backgroundColor: '#FEF2F2',
-          borderColor: '#EF4444',
-          accentColor: '#EF4444',
+          backgroundColor: '#fcf3ee',
+          borderColor: '#913e2b',
+          accentColor: '#913e2b',
         };
       case 'sowing':
         return {
-          backgroundColor: '#EFF6FF',
-          borderColor: '#3B82F6',
-          accentColor: '#3B82F6',
+          backgroundColor: '#f3f5ef',
+          borderColor: '#506842',
+          accentColor: '#506842',
         };
       case 'inventory':
         return {
-          backgroundColor: '#F5F3FF',
-          borderColor: '#8B5CF6',
-          accentColor: '#8B5CF6',
+          backgroundColor: '#f3f5ef',
+          borderColor: '#506842',
+          accentColor: '#506842',
         };
       case 'tasks':
         return {
-          backgroundColor: '#EFF6FF',
-          borderColor: '#3B82F6',
-          accentColor: '#3B82F6',
+          backgroundColor: '#f3f5ef',
+          borderColor: '#506842',
+          accentColor: '#506842',
         };
       default:
         return {
-          backgroundColor: '#F9FAFB',
-          borderColor: '#D1D5DB',
-          accentColor: '#6B7280',
+          backgroundColor: '#f7f7ee',
+          borderColor: '#d7dfd2',
+          accentColor: '#56645a',
         };
     }
   };

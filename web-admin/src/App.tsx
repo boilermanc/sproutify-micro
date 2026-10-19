@@ -1,13 +1,14 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
-import { AuthError, AuthApiError } from '@supabase/supabase-js';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSupabaseClient } from './lib/supabaseClient';
-import { buildSessionPayload } from './utils/session';
 import type { SproutifySession } from './utils/session';
 import { clearSupabaseAuthStorage } from './utils/authStorage';
 import { refreshSessionPayload } from './utils/sessionRefresh';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
+import TodayPage from './pages/TodayPage';
+import GrowingPage from './pages/GrowingPage';
+import FarmPage from './pages/FarmPage';
 import UsersPage from './pages/UsersPage';
 import VarietiesPage from './pages/VarietiesPage';
 import RecipesPage from './pages/RecipesPage';
@@ -29,11 +30,11 @@ import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import PricingPage from './pages/PricingPage';
 import DailyFlow from './components/DailyFlow';
-import GrowingMicrogreens from './components/GrowingMicrogreens';
+import LoadingState from './components/LoadingState';
 import Layout from './components/Layout';
 import FarmHandLayout from './components/FarmHandLayout';
-import { FarmHandTasks, FarmHandSeed, FarmHandHarvest, FarmHandCatalog, FarmHandCustomers, FarmHandLabels } from './components/farmhand';
-import SageChat from './components/SageChat';
+import { FarmHandSeed, FarmHandHarvest, FarmHandCatalog, FarmHandCustomers, FarmHandLabels } from './components/farmhand';
+import LocalFarmChat from './components/workspace/LocalFarmChat';
 import Activity from './pages/Activity';
 import HelpCenterPage from './pages/HelpCenterPage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
@@ -57,18 +58,6 @@ import { ToastProvider } from './components/ui/toast';
 import { useIsMobile } from './hooks/useIsMobile';
 import './App.css';
 
-const isInvalidRefreshTokenError = (error?: AuthError | AuthApiError | null): boolean => {
-  if (!error) {
-    return false;
-  }
-
-  try {
-    return /refresh token not found|invalid refresh token/i.test(error.message);
-  } catch {
-    return false;
-  }
-};
-
 // Helper to check if user role is Farm Hand
 const isFarmHandRole = (role: string | null | undefined): boolean => {
   if (!role) return false;
@@ -77,12 +66,13 @@ const isFarmHandRole = (role: string | null | undefined): boolean => {
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const sessionRevision = useRef(0);
+  const sessionMounted = useRef(true);
   const [isLoading, setIsLoading] = useState(true);
   // Session state is maintained to trigger re-renders when session data changes
   // Components access session data from localStorage, but this state ensures
   // the React component tree re-renders when session is refreshed
   const [session, setSession] = useState<SproutifySession | null>(null);
-  const hasCheckedSession = useRef(false);
 
   // Mobile detection - mobile users get simplified FarmHandLayout regardless of role
   const { shouldUseMobileLayout } = useIsMobile();
@@ -91,139 +81,35 @@ function App() {
   // True if: mobile device (not overridden) OR Farm Hand role on any device
   const useSimplifiedLayout = shouldUseMobileLayout || isFarmHandRole(session?.role);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const checkSession = async () => {
-      console.log('[App] checkSession started');
-      try {
-        const client = getSupabaseClient();
-        console.log('[App] Supabase client exists:', !!client);
-
-        if (!client) {
-          console.error('[App] No Supabase client!');
-          setIsLoading(false);
-          return;
-        }
-
-        console.log('[App] Calling getSupabaseClient().auth.getSession()...');
-        const { data: { session }, error } = await client.auth.getSession();
-
-        console.log('[App] getSession result:', { hasSession: !!session, error });
-
-        if (error) {
-          if (isInvalidRefreshTokenError(error)) {
-            console.warn('[App] Invalid refresh token detected, clearing stored session', error.message);
-            try {
-              await client.auth.signOut();
-            } catch (signOutError) {
-              console.warn('[App] Failed to sign out while clearing session', signOutError);
-            }
-          }
-
-          localStorage.removeItem('sproutify_session');
-          setIsAuthenticated(false);
-          if (isMounted) {
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        if (session) {
-          console.log('[App] User session found, fetching profile...');
-          const { data: profile, error: profileError } = await getSupabaseClient()
-            .from('profile')
-            .select('*, farms(*)')
-            .eq('id', session.user.id)
-            .single();
-
-          console.log('[App] Profile result:', { hasProfile: !!profile, profileError });
-          if (profile && !profileError) {
-            console.log('[App] Building session payload...');
-            const sessionPayload = await buildSessionPayload(profile, {
-              email: session.user.email,
-              userId: session.user.id,
-            });
-            localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-            setSession(sessionPayload);
-            console.log('[App] Session payload stored, setting authenticated=true');
-            console.log('[App] Session payload farmUuid:', sessionPayload.farmUuid);
-            setIsAuthenticated(true);
-            if (isMounted) {
-              setIsLoading(false);
-            }
-          } else {
-            console.log('[App] No profile found, clearing session');
-            localStorage.removeItem('sproutify_session');
-            setIsAuthenticated(false);
-            if (isMounted) {
-              setIsLoading(false);
-            }
-          }
-        } else {
-          console.log('[App] No session, clearing localStorage');
-          localStorage.removeItem('sproutify_session');
-          setIsAuthenticated(false);
-          if (isMounted) {
-            setIsLoading(false);
-          }
-        }
-
-        const params = new URLSearchParams(window.location.search);
-        const emailParam = params.get('email');
-
-        if (emailParam && !session) {
-          setIsAuthenticated(false);
-        }
-      } catch (err) {
-        console.error('[App] Session check error:', err);
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    console.log('[App] useEffect running, calling checkSession');
-    if (hasCheckedSession.current) {
-      console.log('[App] checkSession already executed, skipping duplicate run');
+  const refreshFarmSession = useCallback(async () => {
+    const request = ++sessionRevision.current;
+    const refreshed = await refreshSessionPayload();
+    if (!sessionMounted.current || request !== sessionRevision.current) return;
+    if (refreshed) {
+      localStorage.setItem('sproutify_session', JSON.stringify(refreshed));
+      setSession(refreshed); setIsAuthenticated(true);
     } else {
-      hasCheckedSession.current = true;
-      checkSession();
+      localStorage.removeItem('sproutify_session');
+      setSession(null); setIsAuthenticated(false);
     }
+    setIsLoading(false);
+  }, []);
 
-    // Listen for auth state changes
-    const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange(async (event, session) => {
+  useEffect(() => {
+    sessionMounted.current = true;
+    void refreshFarmSession();
+    const { data: { subscription } } = getSupabaseClient().auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
-        localStorage.removeItem('sproutify_session');
-        setSession(null);
-        setIsAuthenticated(false);
-      } else if (event === 'SIGNED_IN' && session) {
-        // Build session payload BEFORE setting authenticated
-        // This prevents the race condition where Dashboard loads before session is ready
-        const { data: profile, error: profileError } = await getSupabaseClient()
-          .from('profile')
-          .select('*, farms(*)')
-          .eq('id', session.user.id)
-          .single();
-
-        if (profile && !profileError) {
-          const sessionPayload = await buildSessionPayload(profile, {
-            email: session.user.email,
-            userId: session.user.id,
-          });
-          localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-          setSession(sessionPayload);
-          setIsAuthenticated(true);
-        }
+        sessionRevision.current++;
+        localStorage.removeItem('sproutify_session'); setSession(null); setIsAuthenticated(false); setIsLoading(false);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        sessionRevision.current++;
+        // Supabase awaits this callback: defer work that needs its Auth lock.
+        setTimeout(() => { if (sessionMounted.current) void refreshFarmSession(); }, 0);
       }
     });
-
-    return () => {
-      isMounted = false;
-      hasCheckedSession.current = false;
-      subscription.unsubscribe();
-    };
-  }, []);
+    return () => { sessionMounted.current = false; sessionRevision.current++; subscription.unsubscribe(); };
+  }, [refreshFarmSession]);
 
   // Update document title based on authentication state
   useEffect(() => {
@@ -234,55 +120,30 @@ function App() {
     }
   }, [isAuthenticated]);
 
-  // Refresh session when tab becomes visible
+  // Every refresh uses one epoch-checked commit, including focus and interval work.
   useEffect(() => {
     if (!isAuthenticated) return;
+    const onFocus = () => { if (document.visibilityState === 'visible') void refreshFarmSession(); };
+    document.addEventListener('visibilitychange', onFocus);
+    const interval = setInterval(() => { void refreshFarmSession(); }, 15 * 60 * 1000);
+    return () => { document.removeEventListener('visibilitychange', onFocus); clearInterval(interval); };
+  }, [isAuthenticated, refreshFarmSession]);
 
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[App] Tab focused - refreshing session...');
-        const refreshedSession = await refreshSessionPayload();
-        if (refreshedSession) {
-          setSession(refreshedSession);
-          console.log('[App] Session refreshed on tab focus');
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [isAuthenticated]);
-
-  // Periodic session refresh (every 15 minutes)
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
-    
-    console.log('[App] Starting periodic session refresh (every 15 minutes)');
-    
-    const intervalId = setInterval(async () => {
-      console.log('[App] Periodic session refresh triggered');
-      const refreshedSession = await refreshSessionPayload();
-      if (refreshedSession) {
-        setSession(refreshedSession);
-        console.log('[App] Periodic session refresh completed');
-      }
-    }, REFRESH_INTERVAL);
-
-    return () => {
-      console.log('[App] Clearing periodic session refresh');
-      clearInterval(intervalId);
-    };
-  }, [isAuthenticated]);
+  const signOutOfFarm = async () => {
+    clearSupabaseAuthStorage();
+    if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+    localStorage.removeItem('sproutify_session');
+    setSession(null);
+    setIsAuthenticated(false);
+  };
+  const workspaceShell = useSimplifiedLayout
+    ? <FarmHandLayout verifiedRole={session?.role} onLogout={signOutOfFarm} />
+    : <Layout onLogout={signOutOfFarm} />;
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <GrowingMicrogreens compact message="Loading..." />
+        <LoadingState compact message="Loading..." />
       </div>
     );
   }
@@ -320,10 +181,15 @@ function App() {
           </Route>
 
           {/* Regular User Routes */}
+          <Route element={isAuthenticated ? workspaceShell : <Navigate to="/login" replace />}>
+            <Route path="/today" element={<TodayPage />} />
+            <Route path="/growing" element={<GrowingPage />} />
+            <Route path="/farm" element={<FarmPage />} />
+          </Route>
           <Route path="/login" element={
             isAuthenticated
-              ? <Navigate to={useSimplifiedLayout ? "/tasks" : "/"} />
-              : <LoginPage onLogin={() => setIsAuthenticated(true)} />
+              ? <Navigate to="/today" replace />
+              : <LoginPage onLogin={(confirmed) => { sessionRevision.current++; setSession(confirmed); setIsAuthenticated(true); }} />
           } />
 
           {/* Checkout Success - standalone page without Layout */}
@@ -334,7 +200,7 @@ function App() {
           {/* Simplified Layout Routes - For mobile users and Farm Hands */}
           <Route path="/tasks" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -342,17 +208,17 @@ function App() {
                 setIsAuthenticated(false);
               }} />
             ) : isAuthenticated ? (
-              <Navigate to="/flow" />
+              <Navigate to="/today" replace />
             ) : (
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<FarmHandTasks />} />
+            <Route index element={<Navigate to="/today" replace />} />
           </Route>
 
           <Route path="/seed" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -370,7 +236,7 @@ function App() {
 
           <Route path="/harvest" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -386,9 +252,23 @@ function App() {
             <Route index element={<FarmHandHarvest />} />
           </Route>
 
+          <Route path="/profile" element={
+            isAuthenticated && useSimplifiedLayout ? (
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
+                clearSupabaseAuthStorage();
+                if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
+                localStorage.removeItem('sproutify_session');
+                setSession(null);
+                setIsAuthenticated(false);
+              }} />
+            ) : <Navigate to={isAuthenticated ? '/settings' : '/login'} />
+          }>
+            <Route index element={<SettingsPage profileOnly />} />
+          </Route>
+
           <Route path="/catalog" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -406,7 +286,7 @@ function App() {
 
           <Route path="/customers" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -425,12 +305,12 @@ function App() {
               <Navigate to="/login" />
             )
           }>
-            <Route index element={useSimplifiedLayout ? <FarmHandCustomers /> : <CustomersPage />} />
+            <Route index element={isFarmHandRole(session?.role) ? <FarmHandCustomers /> : <CustomersPage />} />
           </Route>
 
           <Route path="/labels" element={
             isAuthenticated && useSimplifiedLayout ? (
-              <FarmHandLayout onLogout={async () => {
+              <FarmHandLayout verifiedRole={session?.role} onLogout={async () => {
                 clearSupabaseAuthStorage();
                 if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
                 localStorage.removeItem('sproutify_session');
@@ -449,22 +329,17 @@ function App() {
           {/* Full Dashboard Routes - For desktop Owners/Farm Managers */}
           <Route path="/" element={
             isAuthenticated ? (
-              useSimplifiedLayout ? (
-                <Navigate to="/tasks" />
+              isFarmHandRole(session?.role) ? (
+                <Navigate to="/today" replace />
               ) : (
-                <Layout onLogout={async () => {
-                  clearSupabaseAuthStorage();
-                  if (getSupabaseClient()) await getSupabaseClient().auth.signOut();
-                  localStorage.removeItem('sproutify_session');
-                  setSession(null);
-                  setIsAuthenticated(false);
-                }} />
+                workspaceShell
               )
             ) : (
               <Navigate to="/login" />
             )
           }>
-            <Route index element={<Dashboard />} />
+            <Route index element={<Navigate to="/today" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="varieties" element={<VarietiesPage />} />
             <Route path="recipes" element={<RecipesPage />} />
@@ -493,7 +368,7 @@ function App() {
           </Route>
         </Routes>
         {/* Sage AI Chat - Only for desktop Owners and Farm Managers */}
-        {isAuthenticated && !useSimplifiedLayout && <SageChat />}
+        {isAuthenticated && <LocalFarmChat key={`${session?.userId}:${session?.farmUuid}:${session?.role}`} />}
       </Router>
     </ToastProvider>
   );

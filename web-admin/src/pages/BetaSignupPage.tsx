@@ -1,3 +1,5 @@
+import { completeFarmSignup } from '../utils/accountAccess';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -28,43 +30,26 @@ const BetaSignupPage = () => {
       return;
     }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      setError('Server is missing configuration. Please try again later.');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/signup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          email: formData.email.trim(),
-          password: formData.password,
-          farmName: formData.farmName.trim(),
-        }),
+      const { data, error: signupError } = await getSupabaseClient().auth.signUp({
+        email: formData.email.trim().toLowerCase(),
+        password: formData.password,
+        options: { data: { name: formData.name.trim(), farm_name: formData.farmName.trim() } },
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || result.message || 'Failed to create beta account.');
+      if (signupError) throw signupError;
+      if (!data.user) throw new Error('Signup was not confirmed. Please try again.');
+      if (data.session) {
+        await completeFarmSignup(formData.name.trim(), formData.farmName.trim());
+        setSuccess('Farm created. You can now sign in.');
+      } else {
+        setSuccess('Check your inbox to verify your email, then sign in to finish setting up your farm.');
       }
-
-      setSuccess(result.message || 'Account created! You can now sign in with the credentials you provided.');
       setFormData(INITIAL_FORM);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[BetaSignup] Error creating account:', err);
-      setError(err?.message || 'Failed to create beta account.');
+      setError(err instanceof Error ? err.message : 'Failed to create beta account.');
     } finally {
       setLoading(false);
     }
@@ -129,7 +114,7 @@ const BetaSignupPage = () => {
                 type="password"
                 value={formData.password}
                 onChange={(event) => setFormData((prev) => ({ ...prev, password: event.target.value }))}
-                placeholder="Minimum 6 characters"
+                placeholder="Minimum 12 characters"
               />
             </div>
 
@@ -144,7 +129,7 @@ const BetaSignupPage = () => {
               onClick={() => navigate('/login')}
               className="text-sm font-semibold text-purple-200 hover:text-white"
             >
-              ← Back to admin login
+              ← Back to login
             </button>
           </div>
           <div className="mt-6 text-center text-[10px] text-white/40">

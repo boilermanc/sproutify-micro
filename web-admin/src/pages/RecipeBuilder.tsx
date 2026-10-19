@@ -78,7 +78,9 @@ export const RecipeBuilderPage: React.FC = () => {
         });
 
         // Map global steps to RecipeStep format
-        const mappedSteps: RecipeStep[] = (globalSteps || []).map((step: {
+        const mappedSteps: RecipeStep[] = [...(globalSteps || [])].sort(
+          (a, b) => (a.sequence_order ?? Number.MAX_SAFE_INTEGER) - (b.sequence_order ?? Number.MAX_SAFE_INTEGER)
+        ).map((step: {
           description_id: number;
           description_name: string;
           sequence_order: number;
@@ -88,9 +90,11 @@ export const RecipeBuilderPage: React.FC = () => {
           requires_weight?: boolean;
           weight_lbs?: number;
           do_not_disturb_days?: number;
-          misting_frequency?: string;
+          misting_frequency?: RecipeStep['misting_frequency'];
           misting_start_day?: number;
-          water_type?: string;
+          water_type?: RecipeStep['water_type'];
+          water_method?: RecipeStep['water_method'];
+          water_frequency?: RecipeStep['water_frequency'];
         }, index: number) => {
           const desc = (descData || []).find((d: StepDescription) => d.description_id === step.description_id);
           return {
@@ -108,6 +112,8 @@ export const RecipeBuilderPage: React.FC = () => {
             misting_frequency: step.misting_frequency,
             misting_start_day: step.misting_start_day,
             water_type: step.water_type,
+            water_method: step.water_method,
+            water_frequency: step.water_frequency,
           };
         });
         setSteps(mappedSteps);

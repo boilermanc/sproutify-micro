@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useState, useEffect, useCallback } from 'react';
 import {
   Sprout,
@@ -29,7 +30,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { fetchDailyTasks, completeSeedTask, completeSoakTask, completeSoakTaskByRecipe } from '@/services/dailyFlowService';
+import { completeSeedTask, completeSoakTask, completeSoakTaskByRecipe } from '@/services/dailyFlowService';
+import { fetchWorkerTasks, preparationTraysRemaining, seedBatchAvailableGrams } from '@/services/workerTasks';
 import type { DailyTask } from '@/services/dailyFlowService';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { cn } from '@/lib/utils';
@@ -43,6 +45,10 @@ interface SeedBatch {
 }
 
 const FarmHandSeed = () => {
+  const [canRecordSeeding] = useState(() => {
+    try { return ['Owner','Editor'].includes(JSON.parse(localStorage.getItem('sproutify_session') || '{}').role); }
+    catch { return false; }
+  });
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,7 +67,7 @@ const FarmHandSeed = () => {
       if (showRefresh) setRefreshing(true);
       setError(null);
 
-      const allTasks = await fetchDailyTasks(new Date(), true);
+      const allTasks = await fetchWorkerTasks();
 
       // Filter to seeding-related tasks only:
       // - Seed tasks (from planting schedule or seed_request)
@@ -117,6 +123,7 @@ const FarmHandSeed = () => {
           quantity,
           lot_number,
           purchasedate,
+          unit,
           varieties!inner(name)
         `)
         .eq('farm_uuid', farmUuid)
@@ -124,6 +131,10 @@ const FarmHandSeed = () => {
         .order('purchasedate', { ascending: false });
 
       if (batchesError) throw batchesError;
+
+      const { data: transactions, error: inventoryError } = await getSupabaseClient()
+        .from('seed_transactions').select('batch_id, quantity_grams').eq('farm_uuid', farmUuid);
+      if (inventoryError) throw inventoryError;
 
       // Filter to matching variety and transform
       const matchingBatches = (batchesData || [])
@@ -134,10 +145,10 @@ const FarmHandSeed = () => {
         .map((b: any) => ({
           batchid: b.batchid,
           variety_name: b.varieties?.name || '',
-          quantity: b.quantity,
+          quantity: seedBatchAvailableGrams(Number(b.quantity), (transactions || []).filter(tx => tx.batch_id === b.batchid), b.unit || 'lbs'),
           lot_number: b.lot_number,
           purchasedate: b.purchasedate,
-        }));
+        })).filter(batch => batch.quantity > 0);
 
       setBatches(matchingBatches);
 
@@ -161,14 +172,18 @@ const FarmHandSeed = () => {
 
   const handleComplete = async () => {
     if (!selectedTask) return;
+    if (!canRecordSeeding || !selectedTask.requestId || selectedTask.action.toLowerCase() === 'soak') {
+      setError('Use Today or Growing to record seeding and soaking.');
+      return;
+    }
 
     try {
       setCompleting(true);
       setError(null);
 
       const batchId = selectedBatchId ? parseInt(selectedBatchId) : null;
-      const quantity = selectedTask.trays || selectedTask.quantity || 1;
-      const taskDate = new Date().toISOString().split('T')[0];
+      const quantity = preparationTraysRemaining(selectedTask);
+      const taskDate = localDateString();
 
       // Handle based on task type
       if (selectedTask.action.toLowerCase() === 'soak') {
@@ -213,7 +228,7 @@ const FarmHandSeed = () => {
             recipe_name: selectedTask.crop,
             variety_name: selectedTask.crop,
             quantity: quantity,
-            seed_date: new Date().toISOString().split('T')[0],
+            seed_date: localDateString(),
             status: 'completed',
             source_type: 'manual',
             user_id: userId,
@@ -234,7 +249,8 @@ const FarmHandSeed = () => {
       }, 2000);
     } catch (err) {
       console.error('Error completing seeding:', err);
-      setError('Failed to complete seeding');
+      setError(err instanceof Error ? err.message : 'Failed to complete seeding');
+      if (err instanceof Error && err.name === 'SeedReconciliationError') setSelectedTask(null);
     } finally {
       setCompleting(false);
     }
@@ -277,6 +293,10 @@ const FarmHandSeed = () => {
           </div>
         </Card>
       )}
+
+      {!canRecordSeeding && <Card role="status" className="p-4 bg-amber-50 text-amber-900">
+        Ask an owner or editor to record seeding. Worker completion is not available yet.
+      </Card>}
 
       {/* Task List */}
       {tasks.length === 0 ? (
@@ -334,7 +354,7 @@ const FarmHandSeed = () => {
                         "text-sm font-medium",
                         isSoak ? "text-cyan-700" : "text-emerald-700"
                       )}>
-                        {isSoak ? 'Soak' : 'Seed'} {task.trays || task.quantity || 1} tray{(task.trays || task.quantity || 1) !== 1 ? 's' : ''}
+                        {isSoak ? 'Soak' : 'Seed'} {preparationTraysRemaining(task)} tray{preparationTraysRemaining(task) !== 1 ? 's' : ''}
                       </span>
                     </div>
 
@@ -385,8 +405,8 @@ const FarmHandSeed = () => {
               {selectedTask && (
                 <>
                   {selectedTask.action.toLowerCase() === 'soak' ? 'Soaking' : 'Seeding'}{' '}
-                  {selectedTask.trays || selectedTask.quantity || 1} tray
-                  {(selectedTask.trays || selectedTask.quantity || 1) !== 1 ? 's' : ''}.
+                  {preparationTraysRemaining(selectedTask)} tray
+                  {preparationTraysRemaining(selectedTask) !== 1 ? 's' : ''}.
                   {selectedTask.customerName && (
                     <> For <strong>{selectedTask.customerName}</strong>.</>
                   )}
@@ -450,13 +470,15 @@ const FarmHandSeed = () => {
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Quantity</span>
                       <span className="font-medium">
-                        {selectedTask.trays || selectedTask.quantity || 1} tray{(selectedTask.trays || selectedTask.quantity || 1) !== 1 ? 's' : ''}
+                        {preparationTraysRemaining(selectedTask)} tray{preparationTraysRemaining(selectedTask) !== 1 ? 's' : ''}
                       </span>
                     </div>
                   </div>
                 )}
               </div>
 
+              {selectedTask && (!selectedTask.requestId || selectedTask.action.toLowerCase() === 'soak') &&
+                <p role="status" className="text-sm text-amber-800">Ask an owner to record this task in Daily Flow.</p>}
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button
                   variant="outline"
@@ -467,7 +489,7 @@ const FarmHandSeed = () => {
                 </Button>
                 <Button
                   onClick={handleComplete}
-                  disabled={completing || (batches.length > 0 && !selectedBatchId)}
+                  disabled={completing || loadingBatches || !selectedBatchId || !canRecordSeeding || !selectedTask?.requestId || selectedTask?.action.toLowerCase() === 'soak'}
                   className={cn(
                     selectedTask?.action.toLowerCase() === 'soak'
                       ? "bg-cyan-600 hover:bg-cyan-700"

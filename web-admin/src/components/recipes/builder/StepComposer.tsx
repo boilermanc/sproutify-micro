@@ -27,14 +27,14 @@ const getStepType = (name: string): string => {
 // Get step color matching Daily Flow TaskCard colors
 const getStepColorFromType = (descName: string): string => {
   const name = descName.toLowerCase();
-  if (name.includes('seed')) return '#4f46e5';      // indigo (seed variant)
-  if (name.includes('soak')) return '#7c3aed';      // purple (prep variant)
-  if (name.includes('pre-sprout')) return '#7c3aed'; // purple (prep variant)
-  if (name.includes('blackout')) return '#475569';  // slate (default variant)
-  if (name.includes('germination')) return '#d97706'; // amber (warning variant)
-  if (name.includes('growing') || name.includes('light')) return '#0891b2'; // cyan (water variant)
-  if (name.includes('harvest')) return '#059669';   // emerald (harvest variant)
-  return '#475569'; // default slate
+  if (name.includes('seed')) return '#2f5943';      // indigo (seed variant)
+  if (name.includes('soak')) return '#506842';      // purple (prep variant)
+  if (name.includes('pre-sprout')) return '#506842'; // purple (prep variant)
+  if (name.includes('blackout')) return '#56645a';  // slate (default variant)
+  if (name.includes('germination')) return '#805d2d'; // amber (warning variant)
+  if (name.includes('growing') || name.includes('light')) return '#506842'; // cyan (water variant)
+  if (name.includes('harvest')) return '#2f5943';   // emerald (harvest variant)
+  return '#56645a'; // default slate
 };
 
 const INITIAL_STATE: Partial<RecipeStep> = {
@@ -270,12 +270,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
             <label className="block text-xs font-medium text-gray-700 mb-1.5">Action Type</label>
             <select
               required
-              className="block w-full rounded-md border border-[#e5e7eb] shadow-sm focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-3 py-2 outline-none"
+              className="block w-full rounded-md border border-[#d7dfd2] shadow-sm focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-3 py-2 outline-none"
               value={formData.description_id || ''}
               onChange={handleDescriptionChange}
-              style={{ borderColor: '#e5e7eb' }}
-              onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-              onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+              style={{ borderColor: '#d7dfd2' }}
+              onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+              onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
             >
               <option value="">Select Action...</option>
               {getValidStepOptions().map(d => (
@@ -295,20 +295,20 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                 min="0"
                 step="0.5"
                 required
-                className="block w-1/2 rounded-l-md border border-[#e5e7eb] focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-3 py-2 outline-none"
+                className="block w-1/2 rounded-l-md border border-[#d7dfd2] focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-3 py-2 outline-none"
                 value={formData.duration}
                 onChange={e => setFormData({...formData, duration: parseFloat(e.target.value)})}
-                style={{ borderColor: '#e5e7eb' }}
-                onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                style={{ borderColor: '#d7dfd2' }}
+                onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
               />
               <select
-                className="block w-1/2 rounded-r-md border border-[#e5e7eb] bg-gray-50 focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-2 py-2 outline-none"
+                className="block w-1/2 rounded-r-md border border-[#d7dfd2] bg-gray-50 focus:border-green-400 focus:ring-green-400 focus:ring-1 sm:text-sm px-2 py-2 outline-none"
                 value={formData.duration_unit}
                 onChange={e => setFormData({...formData, duration_unit: e.target.value as 'Days' | 'Hours'})}
-                style={{ borderColor: '#e5e7eb' }}
-                onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                style={{ borderColor: '#d7dfd2' }}
+                onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
               >
                 <option>Days</option>
                 <option>Hours</option>
@@ -365,7 +365,7 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                 <div className="w-full">
                   <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Option</label>
                   <select 
-                    className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                    className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                     value={
                       formData.water_type === 'water' ? 'water' :
                       formData.water_type === 'nutrients' ? 'nutrients' :
@@ -412,9 +412,9 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                         });
                       }
                     }}
-                    style={{ borderColor: '#e5e7eb' }}
-                    onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                    style={{ borderColor: '#d7dfd2' }}
+                    onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                    onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                   >
                     <option value="none">No Water</option>
                     <option value="water">Water</option>
@@ -428,12 +428,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Method</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={formData.water_method || 'top'}
                       onChange={e => setFormData({...formData, water_method: e.target.value as 'top' | 'bottom'})}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="top">Top Water</option>
                       <option value="bottom">Bottom Water</option>
@@ -447,7 +447,7 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Times Per Day</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={
                         formData.water_type === 'water' || formData.water_type === 'nutrients' 
                           ? (formData.water_frequency || '1x daily')
@@ -461,9 +461,9 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                           setFormData({...formData, misting_frequency: freq});
                         }
                       }}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="1x daily">1x Daily</option>
                       <option value="2x daily">2x Daily</option>
@@ -480,12 +480,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
               <div className="w-full">
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">Growing Medium</label>
                 <select 
-                  className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                  className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                   value={formData.medium_type || ''}
                   onChange={e => setFormData({...formData, medium_type: e.target.value as 'soil' | 'coco coir' | 'hemp mat' | 'paper towel' | 'other'})}
-                  style={{ borderColor: '#e5e7eb' }}
-                  onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                  style={{ borderColor: '#d7dfd2' }}
+                  onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                  onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                 >
                   <option value="">Select medium...</option>
                   <option value="soil">Soil</option>
@@ -504,15 +504,15 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                    {isSeeding ? 'Water Medium' : 'Solution Type'}
                  </label>
                  <select 
-                    className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                    className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                     value={formData.water_type || (isSeeding ? 'none' : 'water')}
                     onChange={e => {
                       const value = e.target.value;
                       setFormData({...formData, water_type: value === 'none' ? undefined : value as 'water' | 'nutrients'});
                     }}
-                    style={{ borderColor: '#e5e7eb' }}
-                    onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                    style={{ borderColor: '#d7dfd2' }}
+                    onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                    onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                   >
                    {isSeeding && <option value="none">No Water</option>}
                    <option value="water">Plain Water</option>
@@ -530,7 +530,7 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                 <div className="w-full">
                   <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Option</label>
                   <select 
-                    className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                    className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                     value={
                       formData.water_type === 'water' ? 'water' :
                       formData.water_type === 'nutrients' ? 'nutrients' :
@@ -561,9 +561,9 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                         });
                       }
                     }}
-                    style={{ borderColor: '#e5e7eb' }}
-                    onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                    style={{ borderColor: '#d7dfd2' }}
+                    onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                    onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                   >
                     <option value="none">No Water</option>
                     <option value="water">Water</option>
@@ -576,12 +576,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Method</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={formData.water_method || 'top'}
                       onChange={e => setFormData({...formData, water_method: e.target.value as 'top' | 'bottom'})}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="top">Top Water</option>
                       <option value="bottom">Bottom Water</option>
@@ -594,12 +594,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Times Per Day</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={formData.water_frequency || '1x daily'}
                       onChange={e => setFormData({...formData, water_frequency: e.target.value as '1x daily' | '2x daily' | '3x daily' | 'custom'})}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="1x daily">1x Daily</option>
                       <option value="2x daily">2x Daily</option>
@@ -657,7 +657,7 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                 <div className="w-full">
                   <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Option</label>
                   <select 
-                    className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                    className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                     value={
                       formData.water_type === 'water' ? 'water' :
                       formData.water_type === 'nutrients' ? 'nutrients' :
@@ -688,9 +688,9 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                         });
                       }
                     }}
-                    style={{ borderColor: '#e5e7eb' }}
-                    onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                    style={{ borderColor: '#d7dfd2' }}
+                    onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                    onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                   >
                     <option value="none">No Water</option>
                     <option value="water">Water</option>
@@ -703,12 +703,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Water Method</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={formData.water_method || 'top'}
                       onChange={e => setFormData({...formData, water_method: e.target.value as 'top' | 'bottom'})}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="top">Top Water</option>
                       <option value="bottom">Bottom Water</option>
@@ -721,12 +721,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
                   <div className="w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">Times Per Day</label>
                     <select 
-                      className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                      className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                       value={formData.water_frequency || '1x daily'}
                       onChange={e => setFormData({...formData, water_frequency: e.target.value as '1x daily' | '2x daily' | '3x daily' | 'custom'})}
-                      style={{ borderColor: '#e5e7eb' }}
-                      onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      style={{ borderColor: '#d7dfd2' }}
+                      onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                      onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                     >
                       <option value="1x daily">1x Daily</option>
                       <option value="2x daily">2x Daily</option>
@@ -743,16 +743,16 @@ export const StepComposer: React.FC<StepComposerProps> = ({
               <div className="w-full">
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">Wet Seeds After Sowing</label>
                 <select 
-                  className="block w-full rounded-md border border-[#e5e7eb] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
+                  className="block w-full rounded-md border border-[#d7dfd2] shadow-sm sm:text-sm px-3 py-2 focus:border-green-400 focus:ring-green-400 focus:ring-1 outline-none"
                   value={formData.misting_frequency || 'none'}
                   onChange={e => {
                     const value = e.target.value;
                     // Store as misting_frequency but it's really a one-time action
                     setFormData({...formData, misting_frequency: value as 'none' | 'mist' | 'water'});
                   }}
-                  style={{ borderColor: '#e5e7eb' }}
-                  onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                  style={{ borderColor: '#d7dfd2' }}
+                  onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+                  onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
                 >
                   <option value="none">No</option>
                   <option value="mist">Mist Seeds</option>
@@ -790,12 +790,12 @@ export const StepComposer: React.FC<StepComposerProps> = ({
              <input
                type="text"
                placeholder="Additional instructions (optional)..."
-               className="block w-full border-b border-[#e5e7eb] focus:border-green-400 focus:ring-0 focus:outline-none sm:text-sm bg-transparent px-3 pb-2 pt-1"
+               className="block w-full border-b border-[#d7dfd2] focus:border-green-400 focus:ring-0 focus:outline-none sm:text-sm bg-transparent px-3 pb-2 pt-1"
                value={formData.instructions || ''}
                onChange={e => setFormData({...formData, instructions: e.target.value})}
-               style={{ borderColor: '#e5e7eb' }}
-               onFocus={(e) => e.target.style.borderColor = '#4ade80'}
-               onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+               style={{ borderColor: '#d7dfd2' }}
+               onFocus={(e) => e.target.style.borderColor = '#2f5943'}
+               onBlur={(e) => e.target.style.borderColor = '#d7dfd2'}
              />
           </div>
 

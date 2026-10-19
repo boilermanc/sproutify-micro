@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { seedStockByVariety } from '@/lib/seedStock';
 
 type SortField = 'name' | 'description' | 'status' | 'stock';
 type SortDirection = 'asc' | 'desc';
@@ -104,13 +105,19 @@ const VarietiesPage = () => {
 
       if (error) throw error;
 
+      const [batches, transactions] = await Promise.all([
+        getSupabaseClient().from('seedbatches').select('batchid,varietyid,quantity,unit').eq('farm_uuid', farmUuid),
+        getSupabaseClient().from('seed_transactions').select('batch_id,quantity_grams').eq('farm_uuid', farmUuid),
+      ]);
+      if (batches.error || transactions.error) throw batches.error || transactions.error;
+      const remaining = seedStockByVariety(batches.data || [], transactions.data || []);
       // Map DB columns to expected format: varietyid -> variety_id, name -> variety_name
       const normalized = (data || []).map((v: any) => ({
         ...v,
         variety_id: v.varietyid || v.variety_id,
         variety_name: v.name || v.variety_name || '',
-        stock: v.stock ?? 0,
-        stock_unit: v.stock_unit || v.stockUnit || 'g',
+        stock: remaining.get(v.varietyid || v.variety_id) ?? 0,
+        stock_unit: 'g',
         is_active: v.is_active ?? false, // From farm_varieties via view
       }));
 
@@ -758,7 +765,7 @@ const VarietiesPage = () => {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Description</TableHead>
-              <TableHead>Stock</TableHead>
+              <TableHead>Available seed</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>

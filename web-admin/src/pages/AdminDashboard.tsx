@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,12 +13,16 @@ import {
   ClipboardList
 } from 'lucide-react';
 
+const dashboardFields = ['totalFarms', 'activeFarms', 'totalUsers', 'newUsersToday', 'totalTrays', 'activeTrays', 'totalRecipes', 'totalVarieties', 'totalCustomers', 'totalOrders', 'totalBatches'] as const;
+
 const AdminDashboard = () => {
+  const [loadError, setLoadError] = useState('');
+  const request = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [stats, setStats] = useState({
     totalFarms: 0,
-    activeFarms: 0,
+    activeFarms: null as number | null,
     totalUsers: 0,
     newUsersToday: 0,
     totalTrays: 0,
@@ -34,77 +38,34 @@ const AdminDashboard = () => {
     if (showLoadingState) setIsLoading(true);
     else setIsRefreshing(true);
 
+    const current = ++request.current;
+    setLoadError('');
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString();
-
-      // Fetch all data in parallel
-      const [
-        farmsTotal,
-        farmsActive,
-        usersTotal,
-        usersToday,
-        traysTotal,
-        traysActive,
-        recipesTotal,
-        varietiesTotal,
-        customersTotal,
-        ordersTotal,
-        batchesTotal
-      ] = await Promise.all([
-        // Total Farms
-        getSupabaseClient().from('farms').select('*', { count: 'exact', head: true }),
-        // Active Farms
-        getSupabaseClient().from('farms').select('*', { count: 'exact', head: true }).eq('is_active', true),
-        // Total Users
-        getSupabaseClient().from('profile').select('*', { count: 'exact', head: true }),
-        // New Users Today
-        getSupabaseClient().from('profile').select('*', { count: 'exact', head: true }).gte('created_at', todayStr),
-        // Total Trays
-        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }),
-        // Active Trays (no harvest date)
-        getSupabaseClient().from('trays').select('*', { count: 'exact', head: true }).is('harvest_date', null),
-        // Total Recipes
-        getSupabaseClient().from('recipes').select('*', { count: 'exact', head: true }),
-        // Total Varieties
-        getSupabaseClient().from('varieties').select('*', { count: 'exact', head: true }),
-        // Total Customers
-        getSupabaseClient().from('customers').select('*', { count: 'exact', head: true }),
-        // Total Orders
-        getSupabaseClient().from('orders').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
-        // Total Batches
-        getSupabaseClient().from('seedbatches').select('*', { count: 'exact', head: true }).then(r => r, () => ({ count: 0, error: null })),
-      ]);
-
-      setStats({
-        totalFarms: farmsTotal.count || 0,
-        activeFarms: farmsActive.count || 0,
-        totalUsers: usersTotal.count || 0,
-        newUsersToday: usersToday.count || 0,
-        totalTrays: traysTotal.count || 0,
-        activeTrays: traysActive.count || 0,
-        totalRecipes: recipesTotal.count || 0,
-        totalVarieties: varietiesTotal.count || 0,
-        totalCustomers: customersTotal.count || 0,
-        totalOrders: ordersTotal.count || 0,
-        totalBatches: batchesTotal.count || 0,
-      });
+      const result = await readAdminPage<typeof stats>('dashboard');
+      if(current !== request.current) return;
+      const next = result.rows[0];
+      if (!next || dashboardFields.some(key => (key !== 'activeFarms' || next.activeFarms !== null) && typeof next[key] !== 'number')) throw new Error('Dashboard totals unavailable.');
+      setStats(next);
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      if(current === request.current) setLoadError(error instanceof Error ? error.message : 'Dashboard unavailable.');
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (current === request.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchDashboardData(true);
+    void fetchDashboardData(true);
+    return () => {cancelAdminRead(request);};
   }, [fetchDashboardData]);
 
   const handleRefresh = () => {
     fetchDashboardData(false);
   };
+
+  if (loadError) return <div className="p-6"><p role="alert">{loadError}</p><Button onClick={()=>fetchDashboardData(true)}>Retry</Button></div>;
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -124,6 +85,8 @@ const AdminDashboard = () => {
         <Button 
           variant="outline" 
           size="icon"
+          disabled={isRefreshing}
+          aria-label="Refresh dashboard"
           onClick={handleRefresh}
           className={`rounded-full border-gray-200 hover:bg-gray-50 ${isRefreshing ? 'animate-spin' : ''}`}
           title="Refresh Data"
@@ -137,7 +100,7 @@ const AdminDashboard = () => {
         <StatCard 
           title="Total Farms" 
           value={stats.totalFarms} 
-          subtitle={`${stats.activeFarms} active`}
+          subtitle={`${stats.activeFarms ?? 'Unknown'} active`}
           icon={Building2} 
           color="text-blue-600" 
           bg="bg-blue-100" 
@@ -211,7 +174,7 @@ const AdminDashboard = () => {
             <div className="space-y-4">
               <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <span className="text-sm font-medium text-gray-600">Active Farms</span>
-                <span className="text-lg font-bold text-gray-900">{stats.activeFarms}</span>
+                <span className="text-lg font-bold text-gray-900">{stats.activeFarms ?? 'Unavailable'}</span>
               </div>
               <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <span className="text-sm font-medium text-gray-600">New Users Today</span>

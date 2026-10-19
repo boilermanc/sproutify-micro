@@ -1,3 +1,4 @@
+import { seedBatchAvailableGrams } from '@/services/workerTasks';
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { checkSupplyStock } from '../services/notificationService';
@@ -112,12 +113,13 @@ const SuppliesPage = () => {
 
   const fetchSeedSupplies = async (farmUuid: string): Promise<Supply[]> => {
     try {
-      const [{ data: seedBatches, error: seedError }, { data: varietiesData }] = await Promise.all([
+      const [{ data: seedBatches, error: seedError }, { data: varietiesData }, { data: transactions, error: transactionError }] = await Promise.all([
         getSupabaseClient().from('seedbatches').select('*').eq('farm_uuid', farmUuid),
         getSupabaseClient().from('varieties').select('*'),
+        getSupabaseClient().from('seed_transactions').select('batch_id, quantity_grams').eq('farm_uuid', farmUuid),
       ]);
 
-      if (seedError) {
+      if (seedError || transactionError) {
         console.warn('Error fetching seed batches for supplies:', seedError);
         return [];
       }
@@ -138,58 +140,10 @@ const SuppliesPage = () => {
             ? `Seed Batch ${batchId}`
             : 'Seeds';
 
-        // Smart unit detection: handle cases where quantity doesn't match the stored unit
-        // This happens when deductions convert to grams but the unit field still says 'lbs'
-        let displayUnit = batch.unit || 'lbs';
-        let displayQuantity = Number(Number(batch.quantity ?? 0).toFixed(2));
-        const quantityNum = parseFloat(displayQuantity.toString());
+        const displayUnit = 'grams';
+        let displayQuantity = seedBatchAvailableGrams(Number(batch.quantity ?? 0),
+          (transactions || []).filter(tx => tx.batch_id === batchId), batch.unit || 'lbs');
 
-        // Only convert in specific cases where we're confident the unit is wrong:
-        
-        // Case 1: Unit is 'grams' but quantity is 1 (likely 1 lb mislabeled as grams)
-        // This happens when batches were created before unit field was properly saved
-        if ((displayUnit === 'grams' || displayUnit === 'g') && quantityNum === 1) {
-          // 1 gram is extremely small for a seed batch - more likely it's 1 lb
-          displayUnit = 'lbs';
-          // Quantity stays 1, just change the unit
-        }
-        // Case 2: Unit is 'lbs' but quantity is < 1 lb (has been partially used)
-        // After deductions, the trigger should convert back to lbs, so 0.5 lbs is valid
-        // But if it's a whole number like 160, 200, etc., it's likely grams mislabeled as lbs
-        else if ((displayUnit === 'lbs' || displayUnit === 'lb') && quantityNum > 0 && quantityNum < 1) {
-          // Check if it's a suspicious whole number (like 160, 200) vs a decimal (like 0.56)
-          // If it's a whole number < 1, it's definitely wrong - should be grams
-          if (quantityNum === Math.floor(quantityNum)) {
-            // Whole number less than 1 - this is definitely grams, not lbs
-            displayQuantity = quantityNum * 453.592; // Convert to grams
-            displayUnit = 'grams';
-          }
-          // Otherwise it's a decimal like 0.56 lbs, which is correct after conversions
-        }
-        // Case 3: Unit is 'lbs' but quantity is a whole number 50-500
-        // These are likely grams mislabeled as lbs (e.g., 160 grams showing as 160 lbs)
-        // We exclude 1-49 because those could be valid lbs (1 lb, 2 lbs, etc.)
-        // We exclude 500+ because those could be valid large batches
-        else if ((displayUnit === 'lbs' || displayUnit === 'lb') && quantityNum >= 50 && quantityNum < 500) {
-          // Check if it's a whole number (not a decimal like 1.5 lbs)
-          if (quantityNum === Math.floor(quantityNum)) {
-            // Whole number in suspicious range - likely grams
-            displayUnit = 'grams';
-            // Quantity is already in grams, no conversion needed
-          }
-        }
-        // Case 4: Unit is 'grams' but quantity is very large (2000+), might actually be lbs
-        // But be conservative - only convert if it's a whole number and very large
-        else if ((displayUnit === 'grams' || displayUnit === 'g') && quantityNum >= 2000) {
-          // 2000+ grams = 4.4+ lbs - if it's a whole number like 2000, 3000,
-          // it's more likely to be lbs mislabeled as grams
-          if (quantityNum === Math.floor(quantityNum)) {
-            displayUnit = 'lbs';
-            displayQuantity = quantityNum / 453.592; // Convert grams to lbs
-          }
-        }
-
-        // Final rounding for display
         displayQuantity = Number(displayQuantity.toFixed(2));
 
         return addStatusToSupply({
@@ -199,7 +153,7 @@ const SuppliesPage = () => {
           category: 'Seeds',
           stock: displayQuantity,
           unit: displayUnit,
-          low_stock_threshold: batch.low_stock_threshold ?? batch.reorderlevel ?? 0,
+          low_stock_threshold: seedBatchAvailableGrams(Number(batch.low_stock_threshold ?? batch.reorderlevel ?? 0), [], batch.unit || 'lbs'),
           notes: batch.lot_number || batch.lotnumber ? `Lot ${batch.lot_number || batch.lotnumber}` : undefined,
           is_seed_batch: true,
           created_at: batch.purchasedate || batch.purchase_date,

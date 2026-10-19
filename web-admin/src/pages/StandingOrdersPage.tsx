@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useState, useEffect } from 'react';
 import { Repeat, Plus, Edit, Trash2, Search, X } from 'lucide-react';
 import { getSupabaseClient } from '../lib/supabaseClient';
@@ -50,7 +51,7 @@ const StandingOrdersPage = () => {
     customer_id: '',
     frequency: 'weekly' as 'weekly' | 'bi-weekly',
     delivery_days: [] as string[],
-    start_date: new Date().toISOString().split('T')[0],
+    start_date: localDateString(),
     end_date: '',
     notes: '',
   });
@@ -296,7 +297,7 @@ const StandingOrdersPage = () => {
         customer_id: '',
         frequency: 'weekly',
         delivery_days: [],
-        start_date: new Date().toISOString().split('T')[0],
+        start_date: localDateString(),
         end_date: '',
         notes: '',
       });
@@ -354,7 +355,7 @@ const StandingOrdersPage = () => {
   };
 
   const handleDeleteStandingOrder = async (order: StandingOrder) => {
-    if (!confirm(`Are you sure you want to delete "${order.order_name}"?`)) return;
+    if (!confirm(`Deactivate "${order.order_name}"?`)) return;
 
     try {
       const sessionData = localStorage.getItem('sproutify_session');
@@ -424,7 +425,7 @@ const StandingOrdersPage = () => {
               customer_id: '',
               frequency: 'weekly',
               delivery_days: [],
-              start_date: new Date().toISOString().split('T')[0],
+              start_date: localDateString(),
               end_date: '',
               notes: '',
             });
@@ -761,6 +762,7 @@ const StandingOrdersPage = () => {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleEditStandingOrder(order)}
+                        aria-label={`Edit ${order.order_name}`}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -768,6 +770,7 @@ const StandingOrdersPage = () => {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteStandingOrder(order)}
+                        aria-label={`Deactivate ${order.order_name}`}
                       >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>

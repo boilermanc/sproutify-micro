@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { localDateString } from '@/lib/dateUtils';
 
 interface HarvestReportProps {
   startDate: Date;
@@ -21,10 +22,12 @@ interface HarvestData {
 const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
   const [data, setData] = useState<HarvestData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const fetchHarvestData = useCallback(async () => {
     try {
       setLoading(true);
+      setErrorMessage('');
       const sessionData = localStorage.getItem('sproutify_session');
       if (!sessionData) return;
 
@@ -45,8 +48,8 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
         `)
         .eq('farm_uuid', farmUuid)
         .not('harvest_date', 'is', null)
-        .gte('harvest_date', startDate.toISOString())
-        .lte('harvest_date', endDate.toISOString())
+        .gte('harvest_date', localDateString(startDate))
+        .lte('harvest_date', localDateString(endDate))
         .order('harvest_date', { ascending: false });
 
       if (error) throw error;
@@ -68,7 +71,7 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
             size: null,
             variety_name: variety,
             total_yield: 0,
-            unit: 'oz',
+            unit: 'g',
             harvest_date: tray.harvest_date,
           });
         }
@@ -85,6 +88,8 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
       }));
     } catch (error) {
       console.error('Error fetching harvest data:', error);
+      setData([]);
+      setErrorMessage('Harvest data could not be loaded. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -97,6 +102,8 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
   if (loading) {
     return <div className="text-center py-8">Loading harvest data...</div>;
   }
+
+  if (errorMessage) return <p role="alert" className="py-8 text-red-700">{errorMessage}</p>;
 
   if (data.length === 0) {
     return (
@@ -114,7 +121,7 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Product</TableHead>
+            <TableHead>Recipe</TableHead>
             <TableHead>Size</TableHead>
             <TableHead>Variety</TableHead>
             <TableHead className="text-right">Total Yield</TableHead>
@@ -142,7 +149,7 @@ const HarvestReport = ({ startDate, endDate }: HarvestReportProps) => {
       <div className="mt-4 p-4 bg-gray-50 rounded-lg">
         <div className="text-sm font-semibold">Total Yield: {
           data.reduce((sum, item) => sum + item.total_yield, 0).toFixed(2)
-        } {data[0]?.unit || 'oz'}</div>
+        } {data[0]?.unit || 'g'}</div>
       </div>
     </div>
   );

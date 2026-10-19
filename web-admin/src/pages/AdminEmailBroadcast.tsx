@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { cancelAdminRead, adminAction, readAdminPage } from '../services/adminConsole';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,7 @@ interface BroadcastRecord {
   target_table: string | null;
   trial_status_filter: string | null;
   recipient_count: number;
-  emails_sent: number;
+  emails_sent?: number;
   is_test: boolean;
   test_email: string | null;
   status: 'sending' | 'sent' | 'failed' | 'partial_failure';
@@ -42,7 +43,11 @@ const AdminEmailBroadcast = () => {
   const [testEmail, setTestEmail] = useState('');
   const [targetTable, setTargetTable] = useState<'profile' | 'pre_registrations'>('profile');
   const [trialStatusFilter, setTrialStatusFilter] = useState<string>('all');
-  const [targetUserCount, setTargetUserCount] = useState(0);
+  const [targetUserCount, setTargetUserCount] = useState<number | null>(null);
+  const [countError,setCountError]=useState('');
+  const [historyError,setHistoryError]=useState('');
+  const intent=useRef<{signature:string;requestId:string}|null>(null);
+  const countRequest=useRef(0);
   const [subject, setSubject] = useState('');
   const [htmlBody, setHtmlBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -59,53 +64,33 @@ const AdminEmailBroadcast = () => {
   const fetchTargetCount = useCallback(async () => {
     if (mode === 'test') return;
 
+    const current=++countRequest.current;
+    setTargetUserCount(null);setCountError('');setShowConfirm(false);
     try {
-      let query = getSupabaseClient()
-        .from(targetTable)
-        .select('*', { count: 'exact', head: true })
-        .not('email', 'is', null);
-
-      // Only apply trial_status filter for profile table
-      if (targetTable === 'profile' && trialStatusFilter !== 'all') {
-        // Note: This assumes there's a trial_status field in profile
-        // If not, we'll need to adjust this
-        query = query.eq('trial_status', trialStatusFilter);
-      }
-
-      // For profile table, also filter by is_active
-      if (targetTable === 'profile') {
-        query = query.eq('is_active', true);
-      }
-
-      const { count, error } = await query;
-      if (error) throw error;
-      setTargetUserCount(count || 0);
-    } catch (error) {
-      console.error('Error fetching target count:', error);
-      setTargetUserCount(0);
-    }
-  }, [mode, targetTable, trialStatusFilter]);
+      const result=await adminAction<{rows:{count:number}[]}>('read',{resource:'broadcast_target_count',page:1,page_size:100,target_table:targetTable,trial_status_filter:trialStatusFilter});
+      if(current!==countRequest.current)return;
+      const count=result.rows?.[0]?.count;
+      if(!Number.isInteger(count)||count<0)throw new Error('Recipient count unavailable.');
+      setTargetUserCount(count);
+    }catch(error){if(current===countRequest.current)setCountError(error instanceof Error?error.message:'Recipient count unavailable.');}
+  }, [mode,targetTable,trialStatusFilter]);
 
   const fetchRecentBroadcasts = useCallback(async () => {
     try {
       setLoadingHistory(true);
-      const { data, error } = await getSupabaseClient()
-        .from('email_broadcasts')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      setRecentBroadcasts(data || []);
+      setHistoryError('');
+      const result=await readAdminPage<BroadcastRecord>('email_broadcasts');
+      setRecentBroadcasts(result.rows);
     } catch (error) {
-      console.error('Error fetching broadcast history:', error);
+      setRecentBroadcasts([]);setHistoryError(error instanceof Error?error.message:'History unavailable.');
     } finally {
       setLoadingHistory(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTargetCount();
+    void fetchTargetCount();
+    return () => {cancelAdminRead(countRequest);};
   }, [fetchTargetCount]);
 
   useEffect(() => {
@@ -145,6 +130,7 @@ const AdminEmailBroadcast = () => {
   };
 
   const handleSend = async () => {
+    if (sending) return;
     if (!subject || !htmlBody || htmlBody.length < 10) {
       setSendError('Subject and body (minimum 10 characters) are required');
       return;
@@ -156,7 +142,7 @@ const AdminEmailBroadcast = () => {
         return;
       }
     } else {
-      if (targetUserCount === 0) {
+      if (targetUserCount === null || targetUserCount === 0) {
         setSendError('No users match the selected criteria');
         return;
       }
@@ -180,20 +166,11 @@ const AdminEmailBroadcast = () => {
         throw new Error('Not authenticated');
       }
 
+      const payload={subject,htmlBody,testEmail:mode==='test'?testEmail:undefined,targetTable:mode==='broadcast'?targetTable:undefined,trialStatus:mode==='broadcast'&&targetTable==='profile'&&trialStatusFilter!=='all'?trialStatusFilter:undefined};
+      const signature=JSON.stringify(payload);
+      if(intent.current?.signature!==signature)intent.current={signature,requestId:crypto.randomUUID()};
       const response = await fetch(`${supabaseUrl}/functions/v1/send-broadcast-email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify({
-          subject,
-          htmlBody,
-          testEmail: mode === 'test' ? testEmail : undefined,
-          targetTable: mode === 'broadcast' ? targetTable : undefined,
-          trialStatus: mode === 'broadcast' && targetTable === 'profile' && trialStatusFilter !== 'all' ? trialStatusFilter : undefined,
-        }),
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`,apikey:supabaseAnonKey},body:JSON.stringify({...payload,request_id:intent.current.requestId}),
       });
 
       if (!response.ok) {
@@ -202,14 +179,16 @@ const AdminEmailBroadcast = () => {
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
-      await response.json();
+      const result=await response.json();
+      if(result.request_id!==intent.current?.requestId || result.success!==true || result.partialFailure!==false || result.status!=='sent' || !Number.isInteger(result.emailsSent) || result.emailsSent<=0 || result.emailsSent!==result.recipientCount || typeof result.campaignId!=='string' || typeof result.broadcastId!=='string') throw new Error('Delivery was not confirmed. Check broadcast history before creating a different request.');
+      intent.current=null;
       setSendSuccess(true);
       setSubject('');
       setHtmlBody('');
       setTestEmail('');
       setShowConfirm(false);
       fetchRecentBroadcasts(); // Refresh history
-      setTimeout(() => setSendSuccess(false), 3000);
+
     } catch (error) {
       console.error('Error sending email:', error);
       setSendError(error instanceof Error ? error.message : 'Failed to send email');
@@ -231,7 +210,7 @@ const AdminEmailBroadcast = () => {
           <Button
             variant={mode === 'test' ? 'default' : 'outline'}
             onClick={() => {
-              setMode('test');
+              if(sending)return;setMode('test');
               setShowConfirm(false);
             }}
             className={mode === 'test' ? 'bg-blue-600' : ''}
@@ -242,7 +221,7 @@ const AdminEmailBroadcast = () => {
           <Button
             variant={mode === 'broadcast' ? 'default' : 'outline'}
             onClick={() => {
-              setMode('broadcast');
+              if(sending)return;setMode('broadcast');
               setShowConfirm(false);
             }}
             className={mode === 'broadcast' ? 'bg-red-600' : ''}
@@ -259,7 +238,7 @@ const AdminEmailBroadcast = () => {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-blue-800">
               <TestTube className="h-5 w-5" />
-              <span className="font-medium">Test Mode: Send to a single email address for testing</span>
+              <span className="font-medium">Test Mode: Send only to your verified administrator email address</span>
             </div>
           </CardContent>
         </Card>
@@ -268,12 +247,13 @@ const AdminEmailBroadcast = () => {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-red-800">
               <AlertCircle className="h-5 w-5" />
-              <span className="font-medium">Broadcast Mode: Will send to {targetUserCount} users</span>
+              <span className="font-medium">Broadcast Mode: Will send to {targetUserCount ?? 'an unconfirmed number of'} users</span>
             </div>
           </CardContent>
         </Card>
       )}
 
+      {countError&&<p role="alert">{countError}</p>}
       {/* Target Selection */}
       <Card className="border-none shadow-md">
         <CardHeader>
@@ -282,10 +262,10 @@ const AdminEmailBroadcast = () => {
         <CardContent className="space-y-4">
           {mode === 'test' ? (
             <div className="space-y-2">
-              <Label>Test Email Address *</Label>
+              <Label htmlFor="broadcast-test-email">Your verified administrator email *</Label>
               <Input
                 type="email"
-                value={testEmail}
+                id="broadcast-test-email" value={testEmail} disabled={sending}
                 onChange={(e) => setTestEmail(e.target.value)}
                 placeholder="test@example.com"
               />
@@ -294,7 +274,7 @@ const AdminEmailBroadcast = () => {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Target Table *</Label>
-                <Select value={targetTable} onValueChange={(value: 'profile' | 'pre_registrations') => setTargetTable(value)}>
+                <Select value={targetTable} disabled={sending} onValueChange={(value: 'profile' | 'pre_registrations') => setTargetTable(value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -308,15 +288,15 @@ const AdminEmailBroadcast = () => {
               {targetTable === 'profile' && (
                 <div className="space-y-2">
                   <Label>Filter by Trial Status</Label>
-                  <Select value={trialStatusFilter} onValueChange={setTrialStatusFilter}>
+                  <Select value={trialStatusFilter} disabled={sending} onValueChange={setTrialStatusFilter}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All users</SelectItem>
-                      <SelectItem value="none">No trial</SelectItem>
-                      <SelectItem value="active">Active trial</SelectItem>
-                      <SelectItem value="converted">Converted</SelectItem>
+                      <SelectItem value="trial">Trial</SelectItem>
+                      <SelectItem value="active">Active subscription</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                       <SelectItem value="expired">Expired trial</SelectItem>
                     </SelectContent>
                   </Select>
@@ -324,7 +304,7 @@ const AdminEmailBroadcast = () => {
               )}
               
               <p className="text-sm text-gray-500">
-                Will send to {targetUserCount} {targetTable === 'profile' ? 'users' : 'pre-registrations'} matching the selected criteria
+                Will send to {targetUserCount ?? 'an unconfirmed number of'} {targetTable === 'profile' ? 'users' : 'pre-registrations'} matching the selected criteria
               </p>
             </div>
           )}
@@ -359,18 +339,18 @@ const AdminEmailBroadcast = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>Subject Line *</Label>
+            <Label htmlFor="broadcast-subject">Subject Line *</Label>
             <Input
-              value={subject}
+              id="broadcast-subject" value={subject} disabled={sending}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Testing Micro Broadcast"
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Message Body * (HTML supported)</Label>
+            <Label htmlFor="broadcast-body">Message Body * (HTML supported)</Label>
             <Textarea
-              value={htmlBody}
+              id="broadcast-body" value={htmlBody} disabled={sending}
               onChange={(e) => setHtmlBody(e.target.value)}
               placeholder="Write your email here... HTML is supported (e.g., &lt;h2&gt;Title&lt;/h2&gt;&lt;p&gt;Content&lt;/p&gt;)"
               className="min-h-[300px] font-mono text-sm resize-y"
@@ -398,7 +378,7 @@ const AdminEmailBroadcast = () => {
                 <span className="font-semibold">Confirm Broadcast</span>
               </div>
               <p className="text-red-700">
-                You are about to send this email to <strong>{targetUserCount} {targetTable === 'profile' ? 'users' : 'pre-registrations'}</strong>
+                You are about to send this email to <strong>{targetUserCount ?? 'an unconfirmed number of'} {targetTable === 'profile' ? 'users' : 'pre-registrations'}</strong>
                 {targetTable === 'profile' && trialStatusFilter !== 'all' && ` with status: ${trialStatusFilter}`}.
                 This action cannot be undone.
               </p>
@@ -458,7 +438,7 @@ const AdminEmailBroadcast = () => {
           )}
           <Button
             onClick={handleSend}
-            disabled={sending || !subject || htmlBody.length < 10 || (mode === 'test' && !testEmail)}
+            disabled={sending || (mode==='broadcast' && (targetUserCount===null || targetUserCount===0)) || !subject || htmlBody.length < 10 || (mode === 'test' && !testEmail)}
             className="bg-purple-600 hover:bg-purple-700"
           >
             <Send className="h-4 w-4 mr-2" />
@@ -489,7 +469,7 @@ const AdminEmailBroadcast = () => {
           <CardContent>
             {loadingHistory ? (
               <p className="text-gray-500 text-center py-4">Loading history...</p>
-            ) : recentBroadcasts.length === 0 ? (
+            ) : historyError ? (<p role="alert">{historyError} History is unavailable.</p>) : recentBroadcasts.length === 0 ? (
               <p className="text-gray-500 text-center py-4">No broadcasts sent yet</p>
             ) : (
               <div className="space-y-3">
@@ -541,7 +521,7 @@ const AdminEmailBroadcast = () => {
                               </span>
                             )}
                             <span className="text-sm text-gray-600">
-                              {broadcast.emails_sent}/{broadcast.recipient_count} sent
+                              {broadcast.emails_sent == null ? 'Delivery count unavailable' : `${broadcast.emails_sent}/${broadcast.recipient_count} sent`}
                             </span>
                           </div>
                           {expandedBroadcast === broadcast.id ? (
@@ -589,10 +569,7 @@ const AdminEmailBroadcast = () => {
                             <Eye className="h-4 w-4 text-gray-500" />
                             <p className="text-sm font-medium text-gray-700">Email Content Preview</p>
                           </div>
-                          <div
-                            className="border rounded p-4 bg-gray-50 max-h-64 overflow-y-auto prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: broadcast.html_body }}
-                          />
+                          <iframe title="Email content preview" sandbox="" referrerPolicy="no-referrer" className="border rounded w-full h-64" srcDoc={broadcast.html_body} />
                         </div>
                       </div>
                     )}

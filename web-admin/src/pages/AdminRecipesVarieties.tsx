@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,104 +31,35 @@ interface Variety {
   variety_id: number;
   variety_name: string;
   description: string;
-  farm_uuid: string;
-  is_active: boolean;
-  created_at: string;
-  farm_name?: string;
 }
 
+interface GlobalRecipe { global_recipe_id:number;recipe_name:string;variety_name:string;type:string;description?:string;is_active:boolean;notes?:string;created_at:string; }
+
 const AdminRecipesVarieties = () => {
-  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [globalRecipes, setGlobalRecipes] = useState<any[]>([]);
+  const [globalRecipes, setGlobalRecipes] = useState<GlobalRecipe[]>([]);
   const [varieties, setVarieties] = useState<Variety[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'recipes' | 'varieties' | 'global'>('recipes');
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Fetch recipes with farm names
-      const { data: recipesData, error: recipesError } = await getSupabaseClient()
-        .from('recipes')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (recipesError) {
-        console.error('Recipes error:', recipesError);
-        if (recipesError.code === 'PGRST301' || recipesError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw recipesError;
-      }
-
-      const recipesWithFarmNames = (recipesData || []).map((recipe: any) => ({
-        ...recipe,
-        farm_name: recipe.farms?.farmname || 'Unknown Farm'
-      }));
-
-      setRecipes(recipesWithFarmNames);
-
-      // Fetch varieties with farm names
-      const { data: varietiesData, error: varietiesError } = await getSupabaseClient()
-        .from('varieties')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .limit(100);
-
-      if (varietiesError) {
-        console.error('Varieties error:', varietiesError);
-        if (varietiesError.code === 'PGRST301' || varietiesError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw varietiesError;
-      }
-
-      const varietiesWithFarmNames = (varietiesData || []).map((variety: any) => ({
-        ...variety,
-        farm_name: variety.farms?.farmname || 'Unknown Farm'
-      }));
-
-      setVarieties(varietiesWithFarmNames);
-
-      // Fetch global recipes
-      const { data: globalRecipesData, error: globalRecipesError } = await getSupabaseClient()
-        .from('global_recipes')
-        .select('*')
-        .eq('is_active', true)
-        .order('recipe_name', { ascending: true });
-
-      if (globalRecipesError) {
-        console.error('Global recipes error:', globalRecipesError);
-        // Global recipes might not be accessible, that's okay
-        setGlobalRecipes([]);
-      } else {
-        setGlobalRecipes(globalRecipesData || []);
-      }
+      const [recipePage,varietyPage,globalPage] = await Promise.all([readAdminPage<Recipe & {farms?:{farmname?:string}}>('recipes',page),readAdminPage<Variety>('varieties',page),readAdminPage<GlobalRecipe>('global_recipes',page)]);
+      if(current !== request.current) return;
+      setRecipes(recipePage.rows.map(row=>({...row,farm_name:row.farms?.farmname || 'Unknown Farm'})));
+      setVarieties(varietyPage.rows);setGlobalRecipes(globalPage.rows);setTotal(Math.max(recipePage.total,varietyPage.total,globalPage.total));
     } catch (error) {
-      console.error('Error fetching data:', error);
-      if (error instanceof Error && error.message.includes('RLS')) {
-        alert('Admin access not configured. Please contact support to set up admin RLS policies.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const filteredRecipes = recipes.filter(recipe => {
     const recipeName = (recipe.recipe_name || '').toLowerCase();
@@ -142,10 +73,8 @@ const AdminRecipesVarieties = () => {
 
   const filteredVarieties = varieties.filter(variety => {
     const varietyName = (variety.variety_name || '').toLowerCase();
-    const farmName = (variety.farm_name || '').toLowerCase();
     const searchLower = searchTerm.toLowerCase();
-    return varietyName.includes(searchLower) || 
-           farmName.includes(searchLower);
+    return varietyName.includes(searchLower) || (variety.description || '').toLowerCase().includes(searchLower);
   });
 
   const filteredGlobalRecipes = globalRecipes.filter(recipe => {
@@ -156,8 +85,11 @@ const AdminRecipesVarieties = () => {
            varietyName.includes(searchLower);
   });
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>
@@ -270,7 +202,7 @@ const AdminRecipesVarieties = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => navigate(`/recipe-builder?id=${recipe.recipe_id}`)}
+                    disabled title="Tenant recipe editing requires a farm-scoped management workflow"
                     className="ml-4"
                   >
                     <Edit className="h-4 w-4 mr-2" />
@@ -358,25 +290,17 @@ const AdminRecipesVarieties = () => {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="font-semibold text-lg">{variety.variety_name}</h3>
-                      <Badge variant={variety.is_active ? 'default' : 'secondary'}>
-                        {variety.is_active ? 'Active' : 'Inactive'}
-                      </Badge>
+                      <Badge variant="secondary">Shared catalogue</Badge>
                     </div>
                     <div className="space-y-1 text-sm text-gray-600">
-                      <div key="farm" className="flex items-center gap-2">
-                        <span className="font-medium">Farm:</span>
-                        <span>{variety.farm_name}</span>
-                      </div>
+
                       {variety.description && (
                         <div key="description" className="flex items-center gap-2">
                           <span className="font-medium">Description:</span>
                           <span className="text-gray-500">{variety.description}</span>
                         </div>
                       )}
-                      <div key="created" className="flex items-center gap-2">
-                        <span className="font-medium">Created:</span>
-                        <span>{new Date(variety.created_at).toLocaleDateString()}</span>
-                      </div>
+
                     </div>
                   </div>
                 </div>

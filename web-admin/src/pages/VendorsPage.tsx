@@ -385,7 +385,7 @@ const VendorsPage = () => {
                     <TableCell>{vendor.phone || '-'}</TableCell>
                     <TableCell>{location}</TableCell>
                     <TableCell>
-                      <Badge variant={(vendor.is_active !== false) ? 'default' : 'secondary'} className={(vendor.is_active !== false) ? 'bg-green-500 hover:bg-green-600' : ''}>
+                      <Badge variant={(vendor.is_active !== false) ? 'default' : 'secondary'} className={(vendor.is_active !== false) ? 'bg-green-50 text-green-700 border-green-200' : ''}>
                         {(vendor.is_active !== false) ? 'Active' : 'Inactive'}
                       </Badge>
                     </TableCell>
@@ -484,7 +484,7 @@ const VendorsPage = () => {
 
               <div className="space-y-1">
                 <Label className="text-sm font-semibold text-muted-foreground">Status</Label>
-                <Badge variant={(viewingVendor.is_active !== false) ? 'default' : 'secondary'} className={(viewingVendor.is_active !== false) ? 'bg-green-500 hover:bg-green-600' : ''}>
+                <Badge variant={(viewingVendor.is_active !== false) ? 'default' : 'secondary'} className={(viewingVendor.is_active !== false) ? 'bg-green-50 text-green-700 border-green-200' : ''}>
                   {(viewingVendor.is_active !== false) ? 'Active' : 'Inactive'}
                 </Badge>
               </div>

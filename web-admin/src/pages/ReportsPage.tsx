@@ -1,4 +1,6 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useState } from 'react';
+import { subDays } from 'date-fns';
 import { FileText, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,66 +11,27 @@ import HarvestReport from '../components/reports/HarvestReport';
 import DeliveryReport from '../components/reports/DeliveryReport';
 import SalesReport from '../components/reports/SalesReport';
 import SeedUsageReport from '../components/reports/SeedUsageReport';
-import { generateReport } from '../services/reportService';
 
 type ReportType = 'harvest' | 'delivery' | 'sales' | 'seed-usage';
 
 const ReportsPage = () => {
   const [reportType, setReportType] = useState<ReportType>('harvest');
   const [startDate, setStartDate] = useState<string>(
-    new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    localDateString(subDays(new Date(), 7))
   );
   const [endDate, setEndDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    localDateString()
   );
-  const [generating, setGenerating] = useState(false);
-
-  const handleGenerateReport = async () => {
-    if (reportType === 'seed-usage') {
-      alert('Seed Usage report is generated inline. Use Print/Export to download.');
-      return;
-    }
-    setGenerating(true);
-    try {
-      const result = await generateReport({
-        reportType,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-      });
-
-      if (result.success) {
-        alert(`Report generated successfully! ${result.message || ''}`);
-      } else {
-        // Show a more helpful error message
-        const errorMsg = result.message || 'Unknown error';
-        if (errorMsg.includes('no data') || errorMsg.includes('No data')) {
-          alert(`No data available for the selected date range.\n\nTry:\n• Selecting a different date range\n• Ensuring you have ${reportType === 'harvest' ? 'harvested trays' : reportType === 'delivery' ? 'completed orders' : 'sales data'} in that period`);
-        } else if (errorMsg.includes('CORS') || errorMsg.includes('connect') || errorMsg.includes('network')) {
-          alert(`Unable to connect to the report service.\n\nThis may be due to:\n• The service being temporarily unavailable\n• Network connectivity issues\n• No data available for the selected date range\n\nPlease try again later or contact support if the issue persists.`);
-        } else {
-          alert(`Unable to generate report:\n\n${errorMsg}\n\nIf this persists, the report service may be temporarily unavailable.`);
-        }
-      }
-    } catch (error: any) {
-      console.error('Error generating report:', error);
-      const errorMsg = error.message || 'Unknown error occurred';
-      if (errorMsg.includes('no data') || errorMsg.includes('No data')) {
-        alert(`No data available for the selected date range.\n\nTry selecting a different date range or ensure you have data for the selected period.`);
-      } else if (errorMsg.includes('CORS') || errorMsg.includes('connect') || errorMsg.includes('network') || errorMsg.includes('ERR_FAILED')) {
-        alert(`Unable to connect to the report service.\n\nThis may be due to:\n• The service being temporarily unavailable\n• Network connectivity issues\n• No data available for the selected date range\n\nPlease try again later or contact support if the issue persists.`);
-      } else {
-        alert(`Failed to generate report:\n\n${errorMsg}`);
-      }
-    } finally {
-      setGenerating(false);
-    }
-  };
+  const [revision, setRevision] = useState(0);
+  const rangeStart = new Date(startDate + 'T00:00:00');
+  const rangeEnd = new Date(endDate + 'T23:59:59.999');
+  const validRange = Boolean(startDate && endDate && Number.isFinite(rangeStart.getTime()) && Number.isFinite(rangeEnd.getTime()) && rangeStart <= rangeEnd);
 
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
-        <p className="text-gray-600 mt-1">Generate and view reports for your farm</p>
+        <p className="text-gray-600 mt-1">View and print reports for your farm</p>
       </div>
 
       <Card>
@@ -115,9 +78,9 @@ const ReportsPage = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button onClick={handleGenerateReport} disabled={generating}>
+            <Button onClick={() => setRevision(value => value + 1)} disabled={!validRange}>
               <FileText className="h-4 w-4 mr-2" />
-              {generating ? 'Generating...' : 'Generate Report'}
+              Refresh Preview
             </Button>
             <Button variant="outline" onClick={() => {
               // Preview report
@@ -134,24 +97,25 @@ const ReportsPage = () => {
         <CardHeader>
           <CardTitle>Report Preview</CardTitle>
           <CardDescription>
-            {reportType === 'harvest' && 'Harvest report sorted by product and size'}
+            {reportType === 'harvest' && 'Harvested weight by recipe and variety'}
             {reportType === 'delivery' && 'Delivery report listed by customer, product, size, and price'}
             {reportType === 'sales' && 'Sales report by customer, product, and size'}
             {reportType === 'seed-usage' && 'Seed inventory usage over time by variety'}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {reportType === 'harvest' && (
-            <HarvestReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
+        <CardContent key={`${revision}-${startDate}-${endDate}`}>
+          {!validRange && <p role="alert" className="text-red-700">Choose a start date on or before the end date.</p>}
+          {validRange && reportType === 'harvest' && (
+            <HarvestReport startDate={rangeStart} endDate={rangeEnd} />
           )}
-          {reportType === 'delivery' && (
-            <DeliveryReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
+          {validRange && reportType === 'delivery' && (
+            <DeliveryReport startDate={rangeStart} endDate={rangeEnd} />
           )}
-          {reportType === 'sales' && (
-            <SalesReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
+          {validRange && reportType === 'sales' && (
+            <SalesReport startDate={rangeStart} endDate={rangeEnd} />
           )}
-          {reportType === 'seed-usage' && (
-            <SeedUsageReport startDate={new Date(startDate)} endDate={new Date(endDate)} />
+          {validRange && reportType === 'seed-usage' && (
+            <SeedUsageReport startDate={rangeStart} endDate={rangeEnd} />
           )}
         </CardContent>
       </Card>

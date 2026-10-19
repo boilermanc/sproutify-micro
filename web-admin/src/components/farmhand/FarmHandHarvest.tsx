@@ -22,6 +22,7 @@ import {
 import { fetchDailyTasks, completeTask } from '@/services/dailyFlowService';
 import type { DailyTask } from '@/services/dailyFlowService';
 import { cn } from '@/lib/utils';
+import { isHarvestAction } from '@/lib/taskActions';
 
 const FarmHandHarvest = () => {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
@@ -40,7 +41,7 @@ const FarmHandHarvest = () => {
       const allTasks = await fetchDailyTasks(new Date(), true);
 
       // Filter to only harvest tasks
-      const harvestTasks = allTasks.filter(t => t.action === 'Harvest');
+      const harvestTasks = allTasks.filter(t => isHarvestAction(t.action));
 
       // Sort: urgent first, then by crop name
       harvestTasks.sort((a, b) => {
@@ -208,7 +209,7 @@ const FarmHandHarvest = () => {
             <div className="space-y-2">
               <Label htmlFor="yield" className="flex items-center gap-2">
                 <Scale className="h-4 w-4 text-slate-500" />
-                Total Yield Weight (optional)
+                Total Yield Weight in grams (optional)
               </Label>
               <div className="flex items-center gap-2">
                 <Input
@@ -221,11 +222,11 @@ const FarmHandHarvest = () => {
                   onChange={(e) => setYieldWeight(e.target.value)}
                   className="flex-1"
                 />
-                <span className="text-sm text-slate-500 w-8">lbs</span>
+                <span className="text-sm text-slate-500 w-8">g</span>
               </div>
               {yieldWeight && selectedTask && parseFloat(yieldWeight) > 0 && (
                 <p className="text-xs text-slate-500">
-                  ~{(parseFloat(yieldWeight) / selectedTask.trays).toFixed(2)} lbs per tray
+                  ~{(parseFloat(yieldWeight) / selectedTask.trays).toFixed(2)} g per tray
                 </p>
               )}
             </div>

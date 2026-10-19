@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,10 @@ interface FarmStats {
 
 const AdminProducts = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [products, setProducts] = useState<Product[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [farmStats, setFarmStats] = useState<FarmStats[]>([]);
@@ -43,96 +48,22 @@ const AdminProducts = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Fetch all farms
-      const { data: farmsData, error: farmsError } = await getSupabaseClient()
-        .from('farms')
-        .select('farm_uuid, farmname')
-        .order('farmname', { ascending: true });
-
-      if (farmsError) {
-        console.error('Farms error:', farmsError);
-      } else {
-        setFarms(farmsData || []);
-      }
-
-      // Fetch products with farm names (only if farm is selected)
-      const productsQuery = getSupabaseClient()
-        .from('products')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (selectedFarmUuid) {
-        productsQuery.eq('farm_uuid', selectedFarmUuid);
-      }
-
-      const { data: productsData, error: productsError } = await productsQuery.limit(selectedFarmUuid ? 1000 : 100);
-
-      if (productsError) {
-        console.error('Products error:', productsError);
-        // Products table might not exist, that's okay
-        if (productsError.code === 'PGRST116' || productsError.message.includes('does not exist')) {
-          setProducts([]);
-        } else if (productsError.code === 'PGRST301' || productsError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        } else {
-          setProducts([]);
-        }
-      } else {
-        const productsWithFarmNames = (productsData || []).map((product: any) => ({
-          ...product,
-          farm_name: product.farms?.farmname || 'Unknown Farm'
-        }));
-
-        setProducts(productsWithFarmNames);
-
-        // Calculate stats per farm
-        const statsMap = new Map<string, FarmStats>();
-        
-        // Initialize stats for all farms
-        (farmsData || []).forEach((farm: any) => {
-          statsMap.set(farm.farm_uuid, {
-            farm_uuid: farm.farm_uuid,
-            farm_name: farm.farmname || 'Unknown Farm',
-            product_count: 0
-          });
-        });
-
-        // Count products per farm
-        productsWithFarmNames.forEach((product: Product) => {
-          const stats = statsMap.get(product.farm_uuid);
-          if (stats) {
-            stats.product_count++;
-          } else {
-            statsMap.set(product.farm_uuid, {
-              farm_uuid: product.farm_uuid,
-              farm_name: product.farm_name || 'Unknown Farm',
-              product_count: 1
-            });
-          }
-        });
-
-        setFarmStats(Array.from(statsMap.values()));
-      }
+      const [farmPage,productsPage] = await Promise.all([readAdminPage<Farm>('farms',page),readAdminPage<Product & {farms?:{farmname?:string};recipes?:{recipe_name?:string};customers?:{customer_name?:string;customer_type?:string}}>('products',page,selectedFarmUuid)]);
+      if(current !== request.current) return;
+      setFarms(farmPage.rows);
+      const productsRows = productsPage.rows.map(row=>({...row,farm_name:row.farms?.farmname || 'Unknown Farm'}));
+      setProducts(productsRows);
+      const summaries = new Map<string,FarmStats>();
+      productsRows.forEach(row=>{const entry=summaries.get(row.farm_uuid) || {farm_uuid:row.farm_uuid,farm_name:row.farm_name,product_count:0};entry.product_count++;summaries.set(row.farm_uuid,entry);});
+      setFarmStats([...summaries.values()]);setTotal(Math.max(farmPage.total,productsPage.total));
     } catch (error) {
-      console.error('Error fetching data:', error);
-      if (error instanceof Error && error.message.includes('RLS')) {
-        alert('Admin access not configured. Please contact support to set up admin RLS policies.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedFarmUuid]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page, selectedFarmUuid]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const filteredProducts = products.filter(product => {
     const productName = (product.product_name || '').toLowerCase();
@@ -146,8 +77,11 @@ const AdminProducts = () => {
 
   const totalProducts = farmStats.reduce((sum, stat) => sum + stat.product_count, 0);
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>
@@ -196,10 +130,11 @@ const AdminProducts = () => {
           <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Farm</label>
           <select
             value={selectedFarmUuid || ''}
-            onChange={(e) => setSelectedFarmUuid(e.target.value || null)}
+            onChange={(e) => {setPage(1);setSelectedFarmUuid(e.target.value || null);}}
             className="w-full md:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
           >
             <option value="">All Farms</option>
+            {selectedFarmUuid && !farms.some(farm=>farm.farm_uuid===selectedFarmUuid) && <option value={selectedFarmUuid}>{selectedFarmUuid}</option>}
             {farms.map((farm) => {
               const stats = farmStats.find(s => s.farm_uuid === farm.farm_uuid);
               return (
@@ -213,7 +148,7 @@ const AdminProducts = () => {
         {selectedFarmUuid && (
           <Button
             variant="outline"
-            onClick={() => setSelectedFarmUuid(null)}
+            onClick={() => { setPage(1); setSelectedFarmUuid(null); }}
             className="mt-6 md:mt-0"
           >
             <X className="h-4 w-4 mr-2" />
@@ -233,7 +168,7 @@ const AdminProducts = () => {
                 <Card 
                   key={stat.farm_uuid} 
                   className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => setSelectedFarmUuid(stat.farm_uuid)}
+                  onClick={() => { setPage(1); setSelectedFarmUuid(stat.farm_uuid); }}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-3">

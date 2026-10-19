@@ -331,6 +331,7 @@ const CustomersPage = () => {
                           variant="ghost" 
                           size="icon" 
                           onClick={() => handleEditCustomer(customer)}
+                          aria-label={`Edit ${customer.customer_name}`}
                           type="button"
                         >
                           <Edit className="h-4 w-4" />

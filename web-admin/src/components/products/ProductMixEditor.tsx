@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Save, Plus, Trash2 } from 'lucide-react';
 import { getSupabaseClient } from '../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -484,7 +485,7 @@ const ProductMixEditor = ({ product, open, onOpenChange, onUpdate }: ProductMixE
                   </Select>
                   {varieties.length === 0 && (
                     <p className="text-xs text-amber-600 mt-1">
-                      Add varieties to your catalog in the <a href="/varieties" className="underline">Varieties page</a>
+                      Add varieties to your catalog in the <Link to="/varieties" className="underline">Varieties page</Link>
                     </p>
                   )}
                 </div>

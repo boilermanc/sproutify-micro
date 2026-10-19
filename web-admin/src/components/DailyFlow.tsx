@@ -1,3 +1,5 @@
+import { localDateString } from '@/lib/dateUtils';
+import { assertLegacyFarmWorkAvailable } from '@/services/legacyFarmWork';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -101,7 +103,7 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { resolveVarietyNameFromRelation } from '@/lib/varietyUtils';
-import GrowingMicrogreens from './GrowingMicrogreens';
+import LoadingState from './LoadingState';
 import {
   fetchAssignableTrays,
   assignTrayToCustomer,
@@ -494,7 +496,7 @@ export default function DailyFlow() {
   const [seedingGroup, setSeedingGroup] = useState<SeedGroup | null>(null);
   const [seedingDialogReady, setSeedingDialogReady] = useState(false); // Prevents button clicks during dialog transition
   const [soakTask, setSoakTask] = useState<DailyTask | null>(null);
-  const [soakDate, setSoakDate] = useState<string>(() => new Date().toISOString().split('T')[0]); // Default to today
+  const [soakDate, setSoakDate] = useState<string>(() => localDateString()); // Default to today
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [availableBatches, setAvailableBatches] = useState<any[]>([]);
   useEffect(() => {
@@ -3302,6 +3304,8 @@ export default function DailyFlow() {
       taskDateStr = today.toISOString().split('T')[0];
     }
     try {
+      // Check before this older screen materializes any new planting requests.
+      await assertLegacyFarmWorkAvailable('seed');
       let traysCreated = 0;
 
       if (seedingGroup && seedingGroup.tasks.length > 0) {
@@ -3455,6 +3459,10 @@ export default function DailyFlow() {
       console.error('[DailyFlow] Error in handleSeedingConfirm:', error);
       const errorMessage = error?.message || 'Failed to complete seeding task';
       showNotification('error', errorMessage);
+      if (error?.name === 'SeedReconciliationError') {
+        setSeedingTask(null);
+        setSeedingGroup(null);
+      }
       if (missedStepRef) {
         setMissedStepForSeeding(missedStepRef);
       }
@@ -3686,7 +3694,7 @@ export default function DailyFlow() {
         .insert({
           farm_uuid: farmUuid,
           task_type: 'sowing',
-          task_date: skipOverdueDialog.sowDate || new Date().toISOString().split('T')[0],
+          task_date: skipOverdueDialog.sowDate || localDateString(),
           recipe_id: skipOverdueDialog.recipeId,
           customer_name: skipOverdueDialog.customerName || null,
           status: 'skipped',
@@ -4076,7 +4084,7 @@ export default function DailyFlow() {
     return (
       <div className="min-h-screen bg-white p-4 md:p-8">
         <div className="flex flex-col items-center justify-center h-64">
-          <GrowingMicrogreens compact message="Loading your daily flow..." />
+          <LoadingState compact message="Loading your daily flow..." />
         </div>
       </div>
     );
@@ -5723,7 +5731,7 @@ export default function DailyFlow() {
                     type="date"
                     value={soakDate}
                     onChange={(e) => setSoakDate(e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={localDateString()}
                     className="w-full"
                   />
                   <p className="text-xs text-slate-500">
@@ -6089,7 +6097,7 @@ export default function DailyFlow() {
                               setAvailableBatches([]);
                               setSoakQuantityGrams('');
                               // Default to today for ad-hoc soaks (user is soaking now)
-                              setSoakDate(new Date().toISOString().split('T')[0]);
+                              setSoakDate(localDateString());
                               await fetchAvailableBatchesForRecipe(syntheticSoakTask);
                             }}
                             className="w-full justify-start text-blue-700 border-blue-300 hover:bg-blue-50"
@@ -6547,7 +6555,7 @@ export default function DailyFlow() {
                   type="date"
                   value={rescheduleRequestDialog.newDate}
                   onChange={(e) => setRescheduleRequestDialog({ ...rescheduleRequestDialog, newDate: e.target.value })}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={localDateString()}
                   className="w-full"
                   required
                 />
@@ -7328,7 +7336,7 @@ const atRiskActionConfigs: AtRiskActionConfig[] = [
     label: 'Log customer contact',
     borderClass: 'border-blue-200',
     hoverClass: 'hover:bg-blue-50',
-    strokeColor: '#2563eb',
+    strokeColor: '#2f5943',
   },
   {
     actionType: 'skip',
@@ -7336,7 +7344,7 @@ const atRiskActionConfigs: AtRiskActionConfig[] = [
     label: 'Skip this item',
     borderClass: 'border-amber-200',
     hoverClass: 'hover:bg-amber-50',
-    strokeColor: '#c2410c',
+    strokeColor: '#805d2d',
   },
   {
     actionType: 'substitute',
@@ -7344,7 +7352,7 @@ const atRiskActionConfigs: AtRiskActionConfig[] = [
     label: 'Substitute this item',
     borderClass: 'border-emerald-200',
     hoverClass: 'hover:bg-emerald-50',
-    strokeColor: '#15803d',
+    strokeColor: '#2f5943',
   },
   {
     actionType: 'note',
@@ -7352,7 +7360,7 @@ const atRiskActionConfigs: AtRiskActionConfig[] = [
     label: 'Add a note',
     borderClass: 'border-slate-300',
     hoverClass: 'hover:bg-slate-100',
-    strokeColor: '#475467',
+    strokeColor: '#56645a',
   },
 ];
 
@@ -7538,7 +7546,7 @@ const TaskCard = ({
       border: 'border-emerald-100 hover:border-emerald-300',
       icon: <Scissors size={18} />,
       btn: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200',
-      progressColor: '#059669', // emerald-600
+      progressColor: '#2f5943', // emerald-600
       badge: 'bg-emerald-100 text-emerald-800'
     },
     warning: {
@@ -7548,7 +7556,7 @@ const TaskCard = ({
       border: 'border-amber-100 hover:border-amber-300',
       icon: <Sun size={18} />,
       btn: 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200',
-      progressColor: '#d97706', // amber-600
+      progressColor: '#805d2d', // amber-600
       badge: 'bg-amber-100 text-amber-800'
     },
     prep: {
@@ -7558,7 +7566,7 @@ const TaskCard = ({
       border: 'border-purple-100 hover:border-purple-300',
       icon: <Beaker size={18} />,
       btn: 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-200',
-      progressColor: '#7c3aed', // purple-600
+      progressColor: '#506842', // purple-600
       badge: 'bg-purple-100 text-purple-800'
     },
     seed: {
@@ -7568,7 +7576,7 @@ const TaskCard = ({
       border: 'border-indigo-100 hover:border-indigo-300',
       icon: <Sprout size={18} />,
       btn: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200',
-      progressColor: '#4f46e5', // indigo-600
+      progressColor: '#2f5943', // indigo-600
       badge: 'bg-indigo-100 text-indigo-800'
     },
     water: {
@@ -7578,7 +7586,7 @@ const TaskCard = ({
       border: 'border-cyan-100 hover:border-cyan-300',
       icon: <Droplets size={18} />,
       btn: 'bg-cyan-600 hover:bg-cyan-700 text-white shadow-cyan-200',
-      progressColor: '#0891b2', // cyan-600
+      progressColor: '#506842', // cyan-600
       badge: 'bg-cyan-100 text-cyan-800'
     },
     default: {
@@ -7588,7 +7596,7 @@ const TaskCard = ({
       border: 'border-slate-200 hover:border-slate-300',
       icon: <Droplets size={18} />,
       btn: 'bg-slate-800 hover:bg-slate-900 text-white shadow-slate-200',
-      progressColor: '#475569', // slate-600
+      progressColor: '#56645a', // slate-600
       badge: 'bg-slate-100 text-slate-800'
     }
   };

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +53,10 @@ interface FarmStats {
 
 const AdminTraysBatches = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [trays, setTrays] = useState<Tray[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
@@ -61,145 +66,25 @@ const AdminTraysBatches = () => {
   const [activeTab, setActiveTab] = useState<'trays' | 'batches'>('trays');
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Fetch all farms
-      const { data: farmsData, error: farmsError } = await getSupabaseClient()
-        .from('farms')
-        .select('farm_uuid, farmname')
-        .order('farmname', { ascending: true });
-
-      if (farmsError) {
-        console.error('Farms error:', farmsError);
-      } else {
-        setFarms(farmsData || []);
-      }
-
-      // Fetch trays with farm and recipe names (only if farm is selected)
-      const traysQuery = getSupabaseClient()
-        .from('trays')
-        .select(`
-          *,
-          farms (
-            farmname
-          ),
-          recipes (
-            recipe_name
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (selectedFarmUuid) {
-        traysQuery.eq('farm_uuid', selectedFarmUuid);
-      }
-
-      const { data: traysData, error: traysError } = await traysQuery.limit(selectedFarmUuid ? 1000 : 100);
-
-      if (traysError) {
-        console.error('Trays error:', traysError);
-        if (traysError.code === 'PGRST301' || traysError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw traysError;
-      }
-
-      const traysWithNames = (traysData || []).map((tray: any) => ({
-        ...tray,
-        farm_name: tray.farms?.farmname || 'Unknown Farm',
-        recipe_name: tray.recipes?.recipe_name || 'Unknown Recipe'
-      }));
-
-      setTrays(traysWithNames);
-
-      // Fetch batches with farm names (only if farm is selected)
-      const batchesQuery = getSupabaseClient()
-        .from('seedbatches')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (selectedFarmUuid) {
-        batchesQuery.eq('farm_uuid', selectedFarmUuid);
-      }
-
-      const { data: batchesData, error: batchesError } = await batchesQuery.limit(selectedFarmUuid ? 1000 : 100);
-
-      if (batchesError) {
-        console.error('Batches error:', batchesError);
-        if (batchesError.code === 'PGRST301' || batchesError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw batchesError;
-      }
-
-      const batchesWithNames = (batchesData || []).map((batch: any) => ({
-        ...batch,
-        farm_name: batch.farms?.farmname || 'Unknown Farm'
-      }));
-
-      setBatches(batchesWithNames);
-
-      // Calculate stats per farm
-      const statsMap = new Map<string, FarmStats>();
-      
-      // Initialize stats for all farms
-      (farmsData || []).forEach((farm: any) => {
-        statsMap.set(farm.farm_uuid, {
-          farm_uuid: farm.farm_uuid,
-          farm_name: farm.farmname || 'Unknown Farm',
-          tray_count: 0,
-          batch_count: 0
-        });
-      });
-
-      // Count trays per farm
-      traysWithNames.forEach((tray: Tray) => {
-        const stats = statsMap.get(tray.farm_uuid);
-        if (stats) {
-          stats.tray_count++;
-        } else {
-          statsMap.set(tray.farm_uuid, {
-            farm_uuid: tray.farm_uuid,
-            farm_name: tray.farm_name || 'Unknown Farm',
-            tray_count: 1,
-            batch_count: 0
-          });
-        }
-      });
-
-      // Count batches per farm
-      batchesWithNames.forEach((batch: Batch) => {
-        const stats = statsMap.get(batch.farm_uuid);
-        if (stats) {
-          stats.batch_count++;
-        } else {
-          statsMap.set(batch.farm_uuid, {
-            farm_uuid: batch.farm_uuid,
-            farm_name: batch.farm_name || 'Unknown Farm',
-            tray_count: 0,
-            batch_count: 1
-          });
-        }
-      });
-
-      setFarmStats(Array.from(statsMap.values()));
+      const [farmPage,traysPage,seedbatchesPage] = await Promise.all([readAdminPage<Farm>('farms',page),readAdminPage<Tray & {farms?:{farmname?:string};recipes?:{recipe_name?:string};customers?:{customer_name?:string;customer_type?:string}}>('trays',page,selectedFarmUuid),readAdminPage<Batch & {farms?:{farmname?:string};recipes?:{recipe_name?:string};customers?:{customer_name?:string;customer_type?:string}}>('seedbatches',page,selectedFarmUuid)]);
+      if(current !== request.current) return;
+      setFarms(farmPage.rows);
+      const traysRows = traysPage.rows.map(row=>({...row,farm_name:row.farms?.farmname || 'Unknown Farm',recipe_name:row.recipes?.recipe_name || 'Unknown Recipe'}));
+      setTrays(traysRows);
+      const seedbatchesRows = seedbatchesPage.rows.map(row=>({...row,farm_name:row.farms?.farmname || 'Unknown Farm'}));
+      setBatches(seedbatchesRows);
+      const summaries = new Map<string,FarmStats>();
+      traysRows.forEach(row=>{const entry=summaries.get(row.farm_uuid) || {farm_uuid:row.farm_uuid,farm_name:row.farm_name,tray_count:0,batch_count:0};entry.tray_count++;summaries.set(row.farm_uuid,entry);});
+      seedbatchesRows.forEach(row=>{const entry=summaries.get(row.farm_uuid) || {farm_uuid:row.farm_uuid,farm_name:row.farm_name,tray_count:0,batch_count:0};entry.batch_count++;summaries.set(row.farm_uuid,entry);});
+      setFarmStats([...summaries.values()]);setTotal(Math.max(farmPage.total,traysPage.total,seedbatchesPage.total));
     } catch (error) {
-      console.error('Error fetching data:', error);
-      if (error instanceof Error && error.message.includes('RLS')) {
-        alert('Admin access not configured. Please contact support to set up admin RLS policies.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedFarmUuid]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page, selectedFarmUuid]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const filteredTrays = trays.filter(tray => {
     const trayId = (tray.tray_unique_id || '').toLowerCase();
@@ -222,8 +107,11 @@ const AdminTraysBatches = () => {
   const totalTrays = farmStats.reduce((sum, stat) => sum + stat.tray_count, 0);
   const totalBatches = farmStats.reduce((sum, stat) => sum + stat.batch_count, 0);
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>
@@ -285,10 +173,11 @@ const AdminTraysBatches = () => {
           <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Farm</label>
           <select
             value={selectedFarmUuid || ''}
-            onChange={(e) => setSelectedFarmUuid(e.target.value || null)}
+            onChange={(e) => {setPage(1);setSelectedFarmUuid(e.target.value || null);}}
             className="w-full md:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
           >
             <option value="">All Farms</option>
+            {selectedFarmUuid && !farms.some(farm=>farm.farm_uuid===selectedFarmUuid) && <option value={selectedFarmUuid}>{selectedFarmUuid}</option>}
             {farms.map((farm) => {
               const stats = farmStats.find(s => s.farm_uuid === farm.farm_uuid);
               return (
@@ -302,7 +191,7 @@ const AdminTraysBatches = () => {
         {selectedFarmUuid && (
           <Button
             variant="outline"
-            onClick={() => setSelectedFarmUuid(null)}
+            onClick={() => { setPage(1); setSelectedFarmUuid(null); }}
             className="mt-6 md:mt-0"
           >
             <X className="h-4 w-4 mr-2" />
@@ -322,7 +211,7 @@ const AdminTraysBatches = () => {
                 <Card 
                   key={stat.farm_uuid} 
                   className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => setSelectedFarmUuid(stat.farm_uuid)}
+                  onClick={() => { setPage(1); setSelectedFarmUuid(stat.farm_uuid); }}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-3">

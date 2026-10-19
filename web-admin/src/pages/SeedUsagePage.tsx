@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,7 +13,7 @@ const SeedUsagePage = () => {
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
   const [endDate, setEndDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    localDateString()
   );
   const [loading, setLoading] = useState(false);
   const [usedMock, setUsedMock] = useState(false);

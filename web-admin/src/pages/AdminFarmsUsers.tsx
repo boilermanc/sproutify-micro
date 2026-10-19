@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,110 +48,29 @@ const formatDate = (dateString: string | undefined): string => {
 
 const AdminFarmsUsers = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'farms' | 'users'>('farms');
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Fetch farms with user counts
-      const { data: farmsData, error: farmsError } = await getSupabaseClient()
-        .from('farms')
-        .select('*')
-        .limit(100);
-
-      if (farmsError) {
-        console.error('Farms error:', farmsError);
-        // If RLS error, show helpful message
-        if (farmsError.code === 'PGRST301' || farmsError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw farmsError;
-      }
-
-      // Fetch user counts for each farm
-      const farmsWithCounts: Farm[] = await Promise.all(
-        (farmsData || []).map(async (farm: Record<string, unknown>) => {
-          const { count } = await getSupabaseClient()
-            .from('profile')
-            .select('*', { count: 'exact', head: true })
-            .eq('farm_uuid', farm.farm_uuid as string);
-          // Normalize farm name - handle both farmname and farm_name
-          const farmName = (farm.farmname || farm.farm_name || 'Unknown Farm') as string;
-          return { 
-            ...farm, 
-            farm_name: farmName, 
-            user_count: count || 0,
-            farm_uuid: farm.farm_uuid as string,
-            is_active: (farm.is_active ?? true) as boolean,
-            created_at: farm.created_at as string | undefined
-          } as Farm;
-        })
-      );
-
-      setFarms(farmsWithCounts);
-
-      // Fetch users with farm names
-      const { data: usersData, error: usersError } = await getSupabaseClient()
-        .from('profile')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .limit(100);
-
-      if (usersError) {
-        console.error('Users error:', usersError);
-        // If RLS error, show helpful message
-        if (usersError.code === 'PGRST301' || usersError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw usersError;
-      }
-
-      const usersWithFarmNames: User[] = (usersData || []).map((user: Record<string, unknown>) => {
-        const farmsData = user.farms as Record<string, unknown> | undefined;
-        const farmName = (farmsData?.farmname || 'No Farm') as string;
-        return {
-          ...user,
-          farm_name: farmName,
-          id: user.id as string,
-          email: user.email as string,
-          name: user.name as string,
-          farm_uuid: user.farm_uuid as string,
-          role: user.role as string,
-          is_active: (user.is_active ?? false) as boolean,
-          created_at: user.created_at as string,
-          last_active: user.last_active as string
-        } as User;
-      });
-
-      // Sort users by created_at descending (newest first)
-      usersWithFarmNames.sort((a, b) => {
-        const dateA = new Date(a.created_at).getTime();
-        const dateB = new Date(b.created_at).getTime();
-        return dateB - dateA;
-      });
-
-      setUsers(usersWithFarmNames);
+      const [farmPage,userPage] = await Promise.all([readAdminPage<Farm>('farms',page),readAdminPage<User & {firstname?:string;lastname?:string;farms?:{farmname?:string}}>('users',page)]);
+      if(current !== request.current) return;
+      setFarms(farmPage.rows.map(farm=>({...farm,farm_name:farm.farmname || 'Unknown Farm'})));
+      setUsers(userPage.rows.map(user=>({...user,name:[user.firstname,user.lastname].filter(Boolean).join(' '),farm_name:user.farms?.farmname || 'No Farm'})));
+      setTotal(Math.max(farmPage.total,userPage.total));
     } catch (error) {
-      console.error('Error fetching data:', error);
-      // Show user-friendly error
-      if (error instanceof Error && error.message.includes('RLS')) {
-        alert('Admin access not configured. Please contact support to set up admin RLS policies.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const filteredFarms = farms.filter(farm => {
     const farmName = (farm.farm_name || farm.farmname || '').toLowerCase();
@@ -173,8 +93,11 @@ const AdminFarmsUsers = () => {
     'Viewer': 'bg-gray-100 text-gray-700',
   };
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>
@@ -246,7 +169,7 @@ const AdminFarmsUsers = () => {
                 <div className="flex items-start justify-between">
                   <CardTitle className="text-lg">{farm.farm_name || farm.farmname || 'Unknown Farm'}</CardTitle>
                   <Badge variant={farm.is_active ? 'default' : 'secondary'}>
-                    {farm.is_active ? 'Active' : 'Inactive'}
+                    {farm.is_active == null ? 'Status unavailable' : farm.is_active ? 'Active' : 'Inactive'}
                   </Badge>
                 </div>
               </CardHeader>
@@ -254,7 +177,7 @@ const AdminFarmsUsers = () => {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Users:</span>
-                    <span className="font-medium">{farm.user_count || 0}</span>
+                    <span className="font-medium">{farm.user_count ?? 'Unavailable'}</span>
                   </div>
                   {farm.created_at && (
                     <div className="flex justify-between">

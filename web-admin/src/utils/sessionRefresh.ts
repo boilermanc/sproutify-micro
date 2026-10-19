@@ -1,3 +1,4 @@
+import { hasActiveFarmMembership } from './accountAccess';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { buildSessionPayload } from './session';
 import type { SproutifySession } from './session';
@@ -9,7 +10,7 @@ import type { SproutifySession } from './session';
  * This function:
  * - Verifies the user is still authenticated
  * - Fetches the latest profile and farm data
- * - Rebuilds and stores the session payload
+ * - Rebuilds the session payload; the caller commits it after checking for stale work
  * - Returns the refreshed session or null if refresh fails
  * 
  * @returns The refreshed session payload or null if refresh fails
@@ -24,9 +25,9 @@ export async function refreshSessionPayload(): Promise<SproutifySession | null> 
     }
 
     // Check if user is still authenticated
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    const { data: { user }, error: sessionError } = await client.auth.getUser();
     
-    if (sessionError || !session) {
+    if (sessionError || !user) {
       console.warn('[SessionRefresh] No active session, skipping refresh');
       return null;
     }
@@ -35,23 +36,20 @@ export async function refreshSessionPayload(): Promise<SproutifySession | null> 
     const { data: profile, error: profileError } = await client
       .from('profile')
       .select('*, farms(*)')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
-    if (profileError || !profile) {
+    if (profileError || !hasActiveFarmMembership(profile)) {
       console.error('[SessionRefresh] Failed to fetch profile:', profileError);
       return null;
     }
 
     // Build refreshed session payload
     const sessionPayload = await buildSessionPayload(profile, {
-      email: session.user.email,
-      userId: session.user.id,
+      email: user.email,
+      userId: user.id,
     });
 
-    // Update localStorage with refreshed data
-    localStorage.setItem('sproutify_session', JSON.stringify(sessionPayload));
-    
     console.log('[SessionRefresh] Session refreshed successfully', {
       farmUuid: sessionPayload.farmUuid,
       farmName: sessionPayload.farmName,

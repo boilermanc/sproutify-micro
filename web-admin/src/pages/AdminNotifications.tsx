@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, adminAction, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,10 @@ const InfoTooltip = ({ description }: { description: string }) => (
 
 const AdminNotifications = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; email: string; name: string }>>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,147 +68,43 @@ const AdminNotifications = () => {
   const [sending, setSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [reason, setReason] = useState('');
+  const [sentCount, setSentCount] = useState<number | null>(null);
+  const intent = useRef<{ signature: string; requestId: string } | null>(null);
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Fetch notifications with farm info (user_id references auth.users, not profile directly)
-      const { data: notificationsData, error: notificationsError } = await getSupabaseClient()
-        .from('notifications')
-        .select(`
-          *,
-          farms (
-            farmname
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (notificationsError) {
-        console.error('Notifications error:', notificationsError);
-        if (notificationsError.code === 'PGRST301' || notificationsError.message.includes('permission denied')) {
-          throw new Error('Admin RLS policies not configured. Please run migration 033_add_admin_rls_policies.sql');
-        }
-        throw notificationsError;
-      }
-
-      // Fetch users for dropdown and to map user_id to user info
-      // Note: Using select('*') to avoid column name issues
-      const { data: usersData, error: usersError } = await getSupabaseClient()
-        .from('profile')
-        .select('*')
-        .limit(1000);
-
-      if (usersError) {
-        console.error('Users error:', usersError);
-      }
-
-      // Create a map of user_id to user info
-      const userMap = new Map();
-      (usersData || []).forEach((user: any) => {
-        userMap.set(user.id, user);
-      });
-
-      // Merge notifications with user and farm info
-      const notificationsWithNames = (notificationsData || []).map((notif: any) => {
-        const user = userMap.get(notif.user_id);
-        return {
-          ...notif,
-          user_email: user?.email || 'Unknown',
-          user_name: user?.name || 'Unknown',
-          farm_name: notif.farms?.farmname || 'Unknown Farm'
-        };
-      });
-
-      setNotifications(notificationsWithNames);
-      setUsers(usersData || []);
+      const [notificationPage,userPage] = await Promise.all([readAdminPage<Notification>('notifications',page),readAdminPage<{id:string;email:string;name:string;firstname?:string;lastname?:string}>('users',page)]);
+      if(current !== request.current) return;
+      setNotifications(notificationPage.rows);setUsers(userPage.rows.map(user=>({...user,name:[user.firstname,user.lastname].filter(Boolean).join(' ')})));
+      setTotal(Math.max(notificationPage.total,userPage.total));
     } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const handleSendNotification = async () => {
-    if (!notificationTitle || !notificationBody) {
-      setSendError('Title and body are required');
-      return;
+    if (sending) return;
+    setSendError(''); setSendSuccess(false); setSentCount(null);
+    if (!notificationTitle.trim() || !notificationBody.trim() || !reason.trim() || (!sendToAll && !selectedUserId)) {
+      setSendError('Title, body, reason and a recipient are required.'); return;
     }
-
+    const payload = { target: sendToAll ? 'all' : 'user', ...(sendToAll ? {} : {user_id:selectedUserId}), type:notificationType, title:notificationTitle, message:notificationBody, ...(notificationLink.trim() ? {link:notificationLink.trim()} : {}), reason };
+    const signature = JSON.stringify(payload);
+    if (intent.current?.signature !== signature) intent.current = { signature, requestId:crypto.randomUUID() };
+    const requestId = intent.current.requestId;
     setSending(true);
-    setSendError('');
-    setSendSuccess(false);
-
     try {
-      let targetUsers: Array<{ id: string; farm_uuid: string }> = [];
-
-      if (sendToAll) {
-        // Get all users
-        const { data: allUsers, error } = await getSupabaseClient()
-          .from('profile')
-          .select('id, farm_uuid')
-          .eq('is_active', true)
-          .limit(10000);
-
-        if (error) throw error;
-        targetUsers = allUsers || [];
-      } else {
-        if (!selectedUserId) {
-          setSendError('Please select a user');
-          setSending(false);
-          return;
-        }
-        // Get selected user's farm
-        const { data: user, error } = await getSupabaseClient()
-          .from('profile')
-          .select('id, farm_uuid')
-          .eq('id', selectedUserId)
-          .single();
-
-        if (error) throw error;
-        if (user) targetUsers = [user];
-      }
-
-      // Create notifications in batches
-      const batchSize = 100;
-
-      for (let i = 0; i < targetUsers.length; i += batchSize) {
-        const batch = targetUsers.slice(i, i + batchSize);
-        const notificationsToInsert = batch.map(user => ({
-          farm_uuid: user.farm_uuid,
-          user_id: user.id,
-          type: notificationType as Notification['type'],
-          title: notificationTitle,
-          message: notificationBody,
-          link: notificationLink || null,
-          is_read: false
-        }));
-
-        const { error: insertError } = await getSupabaseClient()
-          .from('notifications')
-          .insert(notificationsToInsert);
-
-        if (insertError) throw insertError;
-      }
-
-      setSendSuccess(true);
-      setNotificationTitle('');
-      setNotificationBody('');
-      setNotificationLink('');
-      setTimeout(() => {
-        setSendSuccess(false);
-        fetchData();
-      }, 2000);
-    } catch (error) {
-      console.error('Error sending notification:', error);
-      setSendError(error instanceof Error ? error.message : 'Failed to send notification');
-    } finally {
-      setSending(false);
-    }
+      const result = await adminAction<{inserted:number;request_id:string}>('send_notification', {...payload,request_id:requestId});
+      if (result.request_id !== requestId || !Number.isInteger(result.inserted) || result.inserted <= 0) throw new Error('No notifications were confirmed. Refresh before trying a different request.');
+      setSentCount(result.inserted); setSendSuccess(true); intent.current=null;
+      setNotificationTitle('');setNotificationBody('');setNotificationLink('');setReason('');
+      void fetchData();
+    } catch(error) { setSendError(error instanceof Error ? error.message : 'Unable to send notifications.'); }
+    finally {setSending(false);}
   };
 
   const filteredNotifications = notifications.filter(notif => {
@@ -309,8 +210,11 @@ const AdminNotifications = () => {
     },
   ];
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>
@@ -363,7 +267,7 @@ const AdminNotifications = () => {
             </Label>
             {sendToAll && (
               <span className="text-sm text-gray-500">
-                ({users.length} users)
+                All active eligible users; the backend confirms the final count.
               </span>
             )}
           </div>
@@ -408,18 +312,18 @@ const AdminNotifications = () => {
           </div>
 
           <div className="space-y-2">
-            <Label>Title *</Label>
+            <Label htmlFor="notification-title">Title *</Label>
             <Input
-              value={notificationTitle}
+              id="notification-title" value={notificationTitle} disabled={sending} maxLength={200}
               onChange={(e) => setNotificationTitle(e.target.value)}
               placeholder="Notification title"
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Body *</Label>
+            <Label htmlFor="notification-body">Body *</Label>
             <Textarea
-              value={notificationBody}
+              id="notification-body" value={notificationBody} disabled={sending} maxLength={5000}
               onChange={(e) => setNotificationBody(e.target.value)}
               placeholder="Notification message"
               rows={4}
@@ -435,6 +339,7 @@ const AdminNotifications = () => {
             />
           </div>
 
+          <div className="space-y-2"><Label htmlFor="notification-reason">Reason *</Label><Input id="notification-reason" value={reason} onChange={e=>setReason(e.target.value)} disabled={sending} maxLength={500} /></div>
           {sendError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
               {sendError}
@@ -442,14 +347,14 @@ const AdminNotifications = () => {
           )}
 
           {sendSuccess && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-              Notification sent successfully!
+            <div role="status" className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+              Confirmed {sentCount} notifications created.
             </div>
           )}
 
           <Button
             onClick={handleSendNotification}
-            disabled={sending || !notificationTitle || !notificationBody}
+            disabled={sending || !notificationTitle || !notificationBody || !reason.trim()}
             className="w-full md:w-auto"
           >
             <Send className="h-4 w-4 mr-2" />

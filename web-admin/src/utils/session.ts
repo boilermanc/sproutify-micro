@@ -60,7 +60,7 @@ export const buildSessionPayload = async (
     userId: overrides?.userId ?? profile.id ?? null,
     farmName: farmName?.trim() || 'My Farm',
     trialEndDate,
-    isAdmin: profile.is_admin ?? false,
+    isAdmin: false,
   };
 };
 

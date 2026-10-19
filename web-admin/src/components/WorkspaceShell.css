@@ -1,0 +1,62 @@
+.workspace-shell .workspace-header,
+.workspace-shell .workspace-sidebar,
+.workspace-shell .workspace-simplified-nav,
+.workspace-shell .workspace-bottom-nav {
+  font-family: 'Instrument Sans', 'Segoe UI', sans-serif;
+}
+.workspace-shell .workspace-header { background: #FFFDF8; border-color: #E3DDCF; }
+.workspace-shell .workspace-sidebar {
+  width: 208px;
+  flex-shrink: 0;
+  background: #1F2A1E;
+  color: #F5F2EA;
+  border-color: #354332;
+}
+.workspace-shell .workspace-sidebar > div { border-color: #354332; }
+.workspace-shell .workspace-sidebar [aria-label='Sproutify Micro'] { color: #F5F2EA; }
+.workspace-shell .workspace-sidebar [aria-label='Sproutify Micro'] > span { font-size: 16px; letter-spacing: -.03em; }
+.workspace-shell .workspace-sidebar [aria-label='Sproutify Micro'] > span > span { color: #9CCB7A; }
+.workspace-shell .workspace-sidebar :is(button, a) { color: #B8B4A6; min-height: 44px; }
+.workspace-shell .workspace-sidebar :is(button, a):hover { background: #9ccb7a20; color: white; }
+.workspace-shell .workspace-sidebar a:is([aria-current='page'], [data-workspace-active='true']) { background: #9ccb7a29; color: white; font-weight: 600; }
+.workspace-bottom-nav, .workspace-nav-brand, .workspace-mobile-actions { display: none; }
+@media (min-width: 1024px) {
+  .workspace-shell .workspace-sidebar[data-collapsed='true'] { width: 80px; }
+  .workspace-simplified { padding-left: 208px; }
+  .workspace-shell .workspace-simplified-nav {
+    position: fixed; inset: 0 auto 0 0; width: 208px; background: #1F2A1E;
+    color: #F5F2EA; border: 0; border-right: 1px solid #354332;
+  }
+  .workspace-nav-brand { display: flex; padding: 24px 16px; border-bottom: 1px solid #354332; }
+  .workspace-nav-brand [aria-label='Sproutify Micro'] { color: #F5F2EA; }
+  .workspace-nav-brand [aria-label='Sproutify Micro'] > span { font-size: 16px; }
+  .workspace-nav-brand [aria-label='Sproutify Micro'] > span > span { color: #9CCB7A; }
+  .workspace-simplified-nav .workspace-primary-links { display: flex; flex-direction: column; align-items: stretch; height: auto; padding: 16px 12px; gap: 4px; }
+  .workspace-simplified-nav .workspace-primary-links a { flex-direction: row; justify-content: flex-start; padding: 12px; color: #B8B4A6; background: transparent; }
+  .workspace-simplified-nav .workspace-primary-links a:is([aria-current='page'], [data-workspace-active='true']) { background: #9ccb7a29; color: white; }
+  .workspace-simplified-nav .workspace-primary-links a:hover { background: #9ccb7a20; color: white; }
+  .workspace-simplified-nav .workspace-primary-links a span { font-size: 14px; }
+}
+@media (max-width: 1023px) {
+  .workspace-desktop .workspace-sidebar { display: none; }
+  .workspace-desktop > div.fixed { display: none; }
+  .workspace-desktop .workspace-header button[aria-label='Open navigation'] { display: none; }
+  .workspace-mobile-actions { display: flex; gap: 8px; font-size: 12px; }
+  .workspace-mobile-actions :is(a, button) { min-height: 44px; display: inline-flex; align-items: center; padding-inline: 6px; }
+  .workspace-shell .workspace-bottom-nav, .workspace-shell .workspace-simplified-nav {
+    display: flex; align-items: center; justify-content: space-around; position: fixed;
+    inset: auto 0 0; z-index: 40; background: #FFFDF8; border-top: 1px solid #E3DDCF;
+    padding-bottom: env(safe-area-inset-bottom, 0px); min-height: 64px;
+  }
+  .workspace-shell .workspace-simplified-nav .workspace-primary-links { display: flex; width: 100%; max-width: 520px; padding-inline: 8px; justify-content: space-around; gap: 0; }
+  .workspace-shell .workspace-bottom-nav a,
+  .workspace-shell .workspace-simplified-nav .workspace-primary-links a {
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    min-width: 60px; min-height: 56px; gap: 4px; padding: 8px; font-size: 11px; color: #6B6A5E;
+  }
+  .workspace-shell .workspace-bottom-nav a:is([aria-current='page'], [data-workspace-active='true']),
+  .workspace-shell .workspace-simplified-nav .workspace-primary-links a:is([aria-current='page'], [data-workspace-active='true']) { color: #2F6B2A; font-weight: 600; background: #EFEADF; }
+  .workspace-shell .workspace-scroll { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .workspace-shell .workspace-header { gap: 12px; }
+  .workspace-shell .workspace-header > div { min-width: 0; }
+}

@@ -1,5 +1,6 @@
 import type { Config } from 'tailwindcss'
 import tailwindcssAnimate from 'tailwindcss-animate'
+import { neutral, forest, sage, caution, danger } from './farm-palette'
 
 const config: Config = {
   darkMode: ['class'],
@@ -22,6 +23,26 @@ const config: Config = {
         sm: 'calc(var(--radius) - 4px)',
       },
       colors: {
+        slate: neutral,
+        gray: neutral,
+        zinc: neutral,
+        emerald: forest,
+        green: forest,
+        teal: forest,
+        blue: sage,
+        sky: sage,
+        cyan: sage,
+        indigo: sage,
+        violet: sage,
+        purple: sage,
+        fuchsia: sage,
+        pink: sage,
+        lime: sage,
+        amber: caution,
+        yellow: caution,
+        orange: caution,
+        red: danger,
+        rose: danger,
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -57,7 +78,7 @@ const config: Config = {
         },
       },
       boxShadow: {
-        brand: '0 20px 50px -12px rgba(16, 185, 129, 0.35)',
+        brand: '0 1px 2px rgba(25, 57, 45, 0.06)',
       },
       keyframes: {
         'accordion-down': {

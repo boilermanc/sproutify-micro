@@ -1,3 +1,4 @@
+import { formatCalendarDate, localDateString } from '@/lib/dateUtils';
 import { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Edit, History, Package, Plus, Search } from 'lucide-react';
@@ -173,7 +174,7 @@ const BatchesPage = () => {
     quantity: '',
     unit: 'lbs',
     lot_number: '',
-    purchase_date: new Date().toISOString().split('T')[0],
+    purchase_date: localDateString(),
     cost: '',
   });
   const vendorOptions = vendors
@@ -551,7 +552,7 @@ const BatchesPage = () => {
         quantity: '',
         unit: 'lbs',
         lot_number: '',
-        purchase_date: new Date().toISOString().split('T')[0],
+        purchase_date: localDateString(),
         cost: '',
       });
       setIsAddDialogOpen(false);
@@ -585,7 +586,7 @@ const BatchesPage = () => {
       lot_number: batch.lot_number || batch.lotnumber || '',
       purchase_date: batch.purchase_date || batch.purchasedate
         ? new Date(batch.purchase_date || batch.purchasedate).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0],
+        : localDateString(),
       cost: batch.totalprice?.toString() || batch.cost?.toString() || '',
       low_stock_threshold: batch.low_stock_threshold ?? null,
       originalQuantity: parseNumericValue(batch.quantity),
@@ -1077,7 +1078,7 @@ const BatchesPage = () => {
                     </button>
                   </TableCell>
                   <TableCell>{batch.variety_name || 'N/A'}</TableCell>
-                  <TableCell>{(batch.purchase_date || batch.purchasedate) ? new Date((batch.purchase_date || batch.purchasedate) as string).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{(batch.purchase_date || batch.purchasedate) ? formatCalendarDate((batch.purchase_date || batch.purchasedate) as string) : 'N/A'}</TableCell>
                   <TableCell>
                     {batch.stock_quantity !== undefined ? `${formatQuantityDisplay(batch.stock_quantity)} lbs` : 'N/A'}
                   </TableCell>
@@ -1159,7 +1160,7 @@ const BatchesPage = () => {
                   <Label className="text-muted-foreground">Purchase Date</Label>
                   <div>
                     {(selectedBatch.purchase_date || selectedBatch.purchasedate) 
-                      ? new Date((selectedBatch.purchase_date || selectedBatch.purchasedate) as string).toLocaleDateString() 
+                      ? formatCalendarDate((selectedBatch.purchase_date || selectedBatch.purchasedate) as string)
                       : 'N/A'}
                   </div>
                 </div>

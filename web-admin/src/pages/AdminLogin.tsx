@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { verifyPlatformAdmin } from '../utils/accountAccess';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,39 +33,13 @@ const AdminLogin = () => {
         throw new Error('Authentication failed');
       }
 
-      const { data: profile, error: profileError } = await getSupabaseClient()
-        .from('profile')
-        .select('*, farms(*)')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profileError) {
-        throw profileError;
+      if (!(await verifyPlatformAdmin())) {
+        await getSupabaseClient().auth.signOut();
+        throw new Error('This portal requires an active Sproutify administrator grant.');
       }
+      localStorage.removeItem('sproutify_admin_session');
 
-      // Check if user has admin access via database
-      const isAdmin = profile?.is_admin ?? false;
-
-      // This portal is ONLY for internal Sproutify team admins
-      if (!isAdmin) {
-        throw new Error('This portal is restricted to Sproutify team members only. Beta users should use the main login page.');
-      }
-
-      const normalizedProfileRole = profile?.role?.toLowerCase();
-      const normalizedUserRole = user.app_metadata?.role?.toLowerCase();
-      const baseRole =
-        normalizedProfileRole ||
-        normalizedUserRole ||
-        'admin';
-
-      localStorage.setItem('sproutify_admin_session', JSON.stringify({
-        email: user.email,
-        userId: user.id,
-        role: baseRole,
-        farmUuid: profile?.farm_uuid ?? '',
-      }));
-
-      // Use full page redirect to avoid hanging getSession() promise from App.tsx
+      // Open the separately guarded internal portal.
       window.location.href = '/admin/admin-portal';
     } catch (error) {
       console.error('Admin login error:', error);

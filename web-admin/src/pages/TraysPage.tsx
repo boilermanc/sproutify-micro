@@ -1,3 +1,4 @@
+import { formatCalendarDate, localDateString } from '@/lib/dateUtils';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getSupabaseClient } from '../lib/supabaseClient';
@@ -42,12 +43,12 @@ const TraysPage = () => {
   const { subscription, canCreateTrays: checkCanCreateTrays, refresh: refreshSubscription } = useSubscription();
 
   const stageColors: Record<string, string> = {
-    Germination: 'bg-yellow-500 hover:bg-yellow-600',
-    Blackout: 'bg-purple-500 hover:bg-purple-600',
-    Grow: 'bg-green-500 hover:bg-green-600',
-    Growing: 'bg-green-500 hover:bg-green-600',
-    Harvest: 'bg-blue-500 hover:bg-blue-600',
-    Harvesting: 'bg-blue-500 hover:bg-blue-600',
+    Germination: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    Blackout: 'bg-purple-50 text-purple-700 border-purple-200',
+    Grow: 'bg-green-50 text-green-700 border-green-200',
+    Growing: 'bg-green-50 text-green-700 border-green-200',
+    Harvest: 'bg-blue-50 text-blue-700 border-blue-200',
+    Harvesting: 'bg-blue-50 text-blue-700 border-blue-200',
   };
   const [trays, setTrays] = useState<any[]>([]);
   const [recipes, setRecipes] = useState<any[]>([]);
@@ -82,7 +83,7 @@ const TraysPage = () => {
   }>({
     recipe_id: '',
     quantity: 1,
-    seed_date: new Date().toISOString().split('T')[0],
+    seed_date: localDateString(),
     location: '',
     batch_id: '',
   });
@@ -468,9 +469,9 @@ const TraysPage = () => {
           location: tray.location || 'Not set',
           status,
           loss_reason: tray.loss_reason || null,
-          harvest_date: tray.harvest_date ? new Date(tray.harvest_date).toLocaleDateString() : projectedHarvestDate,
+          harvest_date: tray.harvest_date ? formatCalendarDate(tray.harvest_date) : projectedHarvestDate,
           harvest_date_raw: tray.harvest_date || '',
-          seeding_date: tray.sow_date ? new Date(tray.sow_date).toLocaleDateString() : 'Not set',
+          seeding_date: tray.sow_date ? formatCalendarDate(tray.sow_date) : 'Not set',
           seeding_date_raw: tray.sow_date || '',
           created_at: new Date(tray.created_at).toLocaleDateString()
         };
@@ -974,7 +975,7 @@ const TraysPage = () => {
       setNewTray({
         recipe_id: '',
         quantity: 1,
-        seed_date: new Date().toISOString().split('T')[0],
+        seed_date: localDateString(),
         location: ''
       });
       setIsAddDialogOpen(false);
@@ -1391,7 +1392,7 @@ const TraysPage = () => {
               recipe_id: '',
               batch_id: '',
               quantity: 1,
-              seed_date: new Date().toISOString().split('T')[0],
+              seed_date: localDateString(),
               location: '',
             });
           }
@@ -1473,21 +1474,15 @@ const TraysPage = () => {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setNewTray({ ...newTray, seed_date: new Date().toISOString().split('T')[0] })}
+                    onClick={() => setNewTray({ ...newTray, seed_date: localDateString() })}
                   >
                     Today
                   </Button>
                 </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="location">Location (Optional)</Label>
-                <Input
-                  id="location"
-                  placeholder="e.g., Rack A • Shelf 1"
-                  value={newTray.location}
-                  onChange={(e) => setNewTray({ ...newTray, location: e.target.value })}
-                />
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Set each tray&apos;s location after seeding from the Trays page.
+              </p>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
@@ -1594,7 +1589,7 @@ const TraysPage = () => {
                   <TableCell>
                   <Badge
                     variant={tray.status === 'Lost' ? 'destructive' : tray.status === 'Harvested' ? 'secondary' : 'default'}
-                    className={stageColors[tray.status] || (tray.status === 'Lost' ? '' : tray.status === 'Harvested' ? '' : 'bg-green-500 hover:bg-green-600')}
+                    className={stageColors[tray.status] || (tray.status === 'Lost' ? '' : tray.status === 'Harvested' ? '' : 'bg-green-50 text-green-700 border-green-200')}
                   >
                     {tray.status}
                   </Badge>
@@ -1611,7 +1606,7 @@ const TraysPage = () => {
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
                         </DropdownMenuItem>
-                        {tray.status === 'Growing' && (
+                        {!['Harvested', 'Lost'].includes(tray.status) && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -1680,7 +1675,7 @@ const TraysPage = () => {
                   <Label className="text-sm font-semibold text-muted-foreground">Status</Label>
                   <Badge
                     variant={viewingTray.status === 'Lost' ? 'destructive' : viewingTray.status === 'Harvested' ? 'secondary' : 'default'}
-                    className={stageColors[viewingTray.status] || (viewingTray.status === 'Lost' ? '' : viewingTray.status === 'Harvested' ? '' : 'bg-green-500 hover:bg-green-600')}
+                    className={stageColors[viewingTray.status] || (viewingTray.status === 'Lost' ? '' : viewingTray.status === 'Harvested' ? '' : 'bg-green-50 text-green-700 border-green-200')}
                   >
                     {viewingTray.status}
                   </Badge>
@@ -1719,7 +1714,7 @@ const TraysPage = () => {
                   </Label>
                   <p className="text-base">
                     {trayDetails.sow_date 
-                      ? new Date(trayDetails.sow_date).toLocaleDateString() 
+                      ? formatCalendarDate(trayDetails.sow_date)
                       : 'Not set'}
                   </p>
                 </div>
@@ -1730,7 +1725,7 @@ const TraysPage = () => {
                   </Label>
                   <p className="text-base">
                     {trayDetails.harvest_date 
-                      ? new Date(trayDetails.harvest_date).toLocaleDateString() 
+                      ? formatCalendarDate(trayDetails.harvest_date)
                       : 'Not harvested'}
                   </p>
                 </div>

@@ -88,7 +88,7 @@ const TrialBanner = ({
     const legacyExpired = legacyDays <= 0;
 
     return (
-      <div className="trial-banner" style={{ background: legacyExpired ? '#E57373' : legacyExpiring ? '#FFB74D' : undefined }}>
+      <div className="trial-banner" style={{ background: legacyExpired ? '#f8e5da' : legacyExpiring ? '#f5ebd4' : undefined }}>
         <div className="trial-banner-content">
           {legacyExpired ? (
             <>
@@ -132,11 +132,11 @@ const TrialBanner = ({
 
   let backgroundColor: string | undefined;
   if (isExpired || isCancelled || isTrialExpired) {
-    backgroundColor = '#E57373'; // Red
+    backgroundColor = '#f8e5da';
   } else if (isPastDue || isExpiring || isAtLimit) {
-    backgroundColor = '#FFB74D'; // Orange/Yellow
+    backgroundColor = '#f5ebd4';
   } else if (isApproachingLimit) {
-    backgroundColor = '#FFB74D'; // Orange/Yellow
+    backgroundColor = '#f5ebd4';
   }
 
   // Determine banner content

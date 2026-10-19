@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../../../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,7 @@ interface BatchStepProps {
 
 const BatchStep = ({ onNext, onBack, onSkip, varietyId, onDataCreated }: BatchStepProps) => {
   const [varietyName, setVarietyName] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [purchaseDate, setPurchaseDate] = useState(localDateString());
   const [quantity, setQuantity] = useState('');
   const [vendorId, setVendorId] = useState<number | null>(null);
   const [vendors, setVendors] = useState<any[]>([]);

@@ -1,6 +1,7 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { format, parseISO } from 'date-fns';
+import { addDays, format, parseISO } from 'date-fns';
 import { AlertTriangle, Calendar, Check, CheckCircle2, ChevronDown, Clock, FileText, Info, Loader2, RefreshCw, Sprout, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -100,7 +101,7 @@ const WeeklyTasksPage = () => {
 
   useEffect(() => {
     if (detailsOpen && details.length > 0) {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = localDateString();
       console.log('Order items (render):', details.map((i) => ({
         recipe: i.recipe_name,
         sow_date: i.sow_date,
@@ -439,8 +440,8 @@ const WeeklyTasksPage = () => {
         <CardContent className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="text-sm text-gray-600">
-              Week of {new Date(selectedWeek).toLocaleDateString()} to{' '}
-              {new Date(new Date(selectedWeek).setDate(new Date(selectedWeek).getDate() + 6)).toLocaleDateString()}
+              Week of {format(parseISO(selectedWeek), 'P')} to{' '}
+              {format(addDays(parseISO(selectedWeek), 6), 'P')}
             </div>
             <Input
               type="date"
@@ -723,7 +724,7 @@ const WeeklyTasksPage = () => {
                 </TableHeader>
                 <TableBody>
                   {details.map((item) => {
-                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayStr = localDateString();
                     let itemStatus: 'ready' | 'plantable' | 'at_risk' | 'missed';
                     if ((item.trays_ready || 0) >= (item.trays_needed || 0)) {
                       itemStatus = 'ready';

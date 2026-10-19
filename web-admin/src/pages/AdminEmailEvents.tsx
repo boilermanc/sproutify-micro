@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getSupabaseClient } from '../lib/supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { cancelAdminRead, readAdminPage } from '../services/adminConsole';
+import AdminDataStatus from '../components/AdminDataStatus';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,49 +27,27 @@ interface EmailEvent {
 
 const AdminEmailEvents = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const request = useRef(0);
   const [events, setEvents] = useState<EmailEvent[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
+    const current = ++request.current;
+    setIsLoading(true); setLoadError(''); setTotal(null);
     try {
-      // Note: This assumes an email_events table exists
-      // If it doesn't exist yet, this will show an empty state
-      const { data: eventsData, error: eventsError } = await getSupabaseClient()
-        .from('email_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
-
-      if (eventsError) {
-        // Table might not exist yet - that's okay
-        if (eventsError.code === 'PGRST116' || eventsError.message.includes('does not exist')) {
-          console.log('Email events table does not exist yet');
-          setEvents([]);
-        } else if (eventsError.code === '42501' || eventsError.code === 'PGRST301' || eventsError.message.includes('permission denied')) {
-          console.error('Permission denied - admin RLS policies may not be configured');
-          // Show empty state with helpful message
-          setEvents([]);
-        } else {
-          console.error('Error fetching email events:', eventsError);
-          setEvents([]);
-        }
-      } else {
-        setEvents(eventsData || []);
-      }
+      const result = await readAdminPage<EmailEvent>('email_events',page);
+      if(current !== request.current) return;
+      setEvents(result.rows);setTotal(result.total);
     } catch (error) {
-      console.error('Error fetching email events:', error);
-      setEvents([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      if (current === request.current) setLoadError(error instanceof Error ? error.message : 'Unable to load admin data.');
+    } finally { if (current === request.current) setIsLoading(false); }
+  }, [page]);
+  useEffect(() => { void fetchData(); return () => { cancelAdminRead(request); }; }, [fetchData]);
 
   const filteredEvents = events.filter(event => {
     if (typeFilter !== 'all' && event.event_type !== typeFilter) return false;
@@ -120,8 +99,11 @@ const AdminEmailEvents = () => {
     ? Math.round((metrics.clicked / metrics.delivered) * 100) 
     : 0;
 
+  if (loadError) return <div className="p-6 space-y-4"><p role="alert">{loadError} Data is unavailable.</p><Button onClick={fetchData}>Retry</Button></div>;
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <AdminDataStatus error={loadError} page={page} total={total} loading={isLoading} onPage={setPage} />
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-gray-100 pb-6">
         <div>

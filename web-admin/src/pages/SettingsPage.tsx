@@ -41,10 +41,11 @@ interface ProfileData {
   country?: string;
   bio?: string;
   role: string;
+  is_active: boolean;
   farm_uuid: string;
 }
 
-const SettingsPage = () => {
+const SettingsPage = ({ profileOnly = false }: { profileOnly?: boolean }) => {
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -53,6 +54,9 @@ const SettingsPage = () => {
   const [farmData, setFarmData] = useState<FarmData | null>(null);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const canEditFarm = profileData?.is_active === true
+    && profileData.role === 'Owner'
+    && profileData.farm_uuid === farmData?.farm_uuid;
 
   // Subscription hook
   const {
@@ -66,7 +70,7 @@ const SettingsPage = () => {
   // Farm settings
   const [farmName, setFarmName] = useState('');
   const [seedingDays, setSeedingDays] = useState<string[]>(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
-  
+
   // User profile
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -77,7 +81,7 @@ const SettingsPage = () => {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('');
   const [bio, setBio] = useState('');
-  
+
   // Preferences
   const [defaultUnit, setDefaultUnit] = useState('pcs');
   const [dateFormat, setDateFormat] = useState('MM/DD/YYYY');
@@ -116,7 +120,7 @@ const SettingsPage = () => {
     setPortalLoading(true);
     try {
       await openPortal();
-    } catch (err) {
+    } catch {
       addToast({
         type: 'error',
         title: 'Error',
@@ -127,47 +131,53 @@ const SettingsPage = () => {
     }
   };
 
+  // The display cache must not determine identity or editing permissions.
+  const getCurrentProfile = async (): Promise<ProfileData> => {
+    const client = getSupabaseClient();
+    const { data: { user }, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!user) throw new Error('Please sign in again to access settings.');
+
+    const { data: profile, error } = await client
+      .from('profile')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+    if (error) throw error;
+    if (!profile || profile.id !== user.id) throw new Error('Your profile could not be verified.');
+    return profile;
+  };
+
   const fetchSettings = async () => {
     try {
-      const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) return;
+      const profile = await getCurrentProfile();
+      setProfileData(profile);
+      setFirstName(profile.firstname || '');
+      setLastName(profile.lastname || '');
+      setPhone(profile.phone || '');
+      setStreet(profile.street || '');
+      setCity(profile.city || '');
+      setState(profile.state || '');
+      setPostalCode(profile.postalcode || '');
+      setCountry(profile.country || '');
+      setBio(profile.bio || '');
 
-      const { farmUuid, userId } = JSON.parse(sessionData);
+      if (profile.is_active !== true || !profile.farm_uuid) {
+        throw new Error('An active farm membership is required to load farm settings.');
+      }
 
       // Fetch farm data
       const { data: farm, error: farmError } = await getSupabaseClient()
         .from('farms')
         .select('*')
-        .eq('farm_uuid', farmUuid)
+        .eq('farm_uuid', profile.farm_uuid)
         .single();
 
       if (farmError) throw farmError;
-      if (farm) {
-        setFarmData(farm);
-        setFarmName(farm.farmname || '');
-        setSeedingDays(farm.seeding_days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
-      }
-
-      // Fetch profile data
-      const { data: profile, error: profileError } = await getSupabaseClient()
-        .from('profile')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError) throw profileError;
-      if (profile) {
-        setProfileData(profile);
-        setFirstName(profile.firstname || '');
-        setLastName(profile.lastname || '');
-        setPhone(profile.phone || '');
-        setStreet(profile.street || '');
-        setCity(profile.city || '');
-        setState(profile.state || '');
-        setPostalCode(profile.postalcode || '');
-        setCountry(profile.country || '');
-        setBio(profile.bio || '');
-      }
+      if (!farm || farm.farm_uuid !== profile.farm_uuid) throw new Error('Farm settings could not be verified.');
+      setFarmData(farm);
+      setFarmName(farm.farmname || '');
+      setSeedingDays(farm.seeding_days || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
 
       // Load preferences from localStorage
       const savedPreferences = localStorage.getItem('sproutify_preferences');
@@ -194,27 +204,63 @@ const SettingsPage = () => {
   };
 
   const handleSaveFarm = async () => {
-    if (!farmData) return;
+    if (saving || !farmData || !canEditFarm) return;
 
     setSaving(true);
 
     try {
-      const { error } = await getSupabaseClient()
+      const profile = await getCurrentProfile();
+      if (profile.id !== profileData?.id || profile.farm_uuid !== farmData.farm_uuid) {
+        setProfileData(null);
+        throw new Error('Your account access changed. Reload settings before saving.');
+      }
+      setProfileData(profile);
+      if (profile.is_active !== true || profile.role !== 'Owner') {
+        throw new Error('Only an active farm owner can edit farm settings.');
+      }
+      const savedDays = farmData.seeding_days
+        || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      if (farmName === (farmData.farmname || '')
+        && seedingDays.length === savedDays.length
+        && seedingDays.every(day => savedDays.includes(day))) {
+        addToast({
+          type: 'info',
+          title: 'No changes to save',
+          description: 'Farm information is already up to date.',
+        });
+        return;
+      }
+
+      const { data: updatedFarm, error } = await getSupabaseClient()
         .from('farms')
-        .update({ 
+        .update({
           farmname: farmName,
           seeding_days: seedingDays
         })
-        .eq('farm_uuid', farmData.farm_uuid);
+        .eq('farm_uuid', farmData.farm_uuid)
+        .select('farm_uuid, farmname, seeding_days')
+        .single();
 
       if (error) throw error;
+      if (!updatedFarm || updatedFarm.farm_uuid !== farmData.farm_uuid) {
+        throw new Error('No farm information was updated.');
+      }
+      setFarmData({ ...farmData, ...updatedFarm });
+      setFarmName(updatedFarm.farmname);
+      setSeedingDays(updatedFarm.seeding_days || []);
 
-      // Update session
-      const sessionData = localStorage.getItem('sproutify_session');
-      if (sessionData) {
-        const session = JSON.parse(sessionData);
-        session.farmName = farmName;
-        localStorage.setItem('sproutify_session', JSON.stringify(session));
+      // Update only a matching cache after the database confirms the save.
+      try {
+        const sessionData = localStorage.getItem('sproutify_session');
+        if (sessionData) {
+          const session = JSON.parse(sessionData);
+          if (session.userId === profile.id && session.farmUuid === updatedFarm.farm_uuid) {
+            session.farmName = updatedFarm.farmname;
+            localStorage.setItem('sproutify_session', JSON.stringify(session));
+          }
+        }
+      } catch {
+        // An unavailable display cache must not invalidate a confirmed save.
       }
 
       addToast({
@@ -235,27 +281,50 @@ const SettingsPage = () => {
   };
 
   const handleSaveProfile = async () => {
-    if (!profileData) return;
+    if (saving || !profileData || profileData.is_active !== true) return;
 
     setSaving(true);
 
     try {
-      const { error } = await getSupabaseClient()
+      const profile = await getCurrentProfile();
+      if (profile.id !== profileData.id || profile.farm_uuid !== profileData.farm_uuid) {
+        setProfileData(null);
+        throw new Error('Your account access changed. Reload settings before saving.');
+      }
+      setProfileData(profile);
+      if (profile.is_active !== true) throw new Error('An active account is required to save your profile.');
+      const changes = {
+        firstname: firstName,
+        lastname: lastName,
+        phone,
+        street,
+        city,
+        state,
+        postalcode: postalCode,
+        country,
+        bio,
+      };
+      if (Object.entries(changes).every(([key, value]) =>
+        value === (profileData[key as keyof typeof changes] || ''))) {
+        addToast({
+          type: 'info',
+          title: 'No changes to save',
+          description: 'Your profile is already up to date.',
+        });
+        return;
+      }
+      const { data: updatedProfile, error } = await getSupabaseClient()
         .from('profile')
-        .update({ 
-          firstname: firstName,
-          lastname: lastName,
-          phone: phone,
-          street: street,
-          city: city,
-          state: state,
-          postalcode: postalCode,
-          country: country,
-          bio: bio
-        })
-        .eq('id', profileData.id);
+        .update(changes)
+        .eq('id', profile.id)
+        .select('id')
+        .single();
 
       if (error) throw error;
+      if (!updatedProfile || updatedProfile.id !== profile.id) {
+        throw new Error('No profile information was updated.');
+      }
+      setProfileData({ ...profile, ...changes });
 
       addToast({
         type: 'success',
@@ -418,6 +487,148 @@ const SettingsPage = () => {
     );
   }
 
+  const profileCard = (
+    <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            <CardTitle>User Profile</CardTitle>
+          </div>
+          <CardDescription>Manage your personal information</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="firstName">First Name</Label>
+              <Input
+                id="firstName"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Enter your first name"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Enter your last name"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Email</Label>
+              <Input value={profileData?.email || ''} disabled />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="phone">Phone</Label>
+              <Input
+                id="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Enter your phone number"
+                type="tel"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Role</Label>
+            <Input value={profileData?.role || ''} disabled />
+          </div>
+
+          <Separator />
+
+          <div>
+            <Label className="text-base font-semibold">Address</Label>
+            <p className="text-sm text-muted-foreground mb-3">Your contact address information</p>
+
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="street">Street Address</Label>
+                <Input
+                  id="street"
+                  value={street}
+                  onChange={(e) => setStreet(e.target.value)}
+                  placeholder="Enter your street address"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="city">City</Label>
+                  <Input
+                    id="city"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter city"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="state">State / Province</Label>
+                  <Input
+                    id="state"
+                    value={state}
+                    onChange={(e) => setState(e.target.value)}
+                    placeholder="Enter state or province"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="postalCode">Postal Code</Label>
+                  <Input
+                    id="postalCode"
+                    value={postalCode}
+                    onChange={(e) => setPostalCode(e.target.value)}
+                    placeholder="Enter postal code"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="country">Country</Label>
+                  <Input
+                    id="country"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="Enter country"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-2">
+            <Label htmlFor="bio">Bio</Label>
+            <Textarea
+              id="bio"
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              placeholder="Tell us a bit about yourself..."
+              rows={4}
+            />
+          </div>
+
+          <Button onClick={handleSaveProfile} disabled={saving || profileData?.is_active !== true}>
+            <Save className="h-4 w-4 mr-2" />
+            Save Profile
+          </Button>
+        </CardContent>
+      </Card>
+  );
+
+  if (profileOnly) return (
+    <div className="p-4 sm:p-8 space-y-6">
+      <div><h1 className="text-3xl font-bold">My Profile</h1><p className="text-muted-foreground">Update your personal details.</p></div>
+      {profileCard}
+    </div>
+  );
+
   return (
     <div className="p-8 space-y-6">
       <div className="flex justify-between items-center">
@@ -441,6 +652,7 @@ const SettingsPage = () => {
             <Label htmlFor="farmName">Farm Name</Label>
             <Input
               id="farmName"
+              disabled={!canEditFarm || saving}
               value={farmName}
               onChange={(e) => setFarmName(e.target.value)}
               placeholder="Enter farm name"
@@ -456,6 +668,7 @@ const SettingsPage = () => {
                 <div key={day} className="flex items-center space-x-2">
                   <input
                     id={`seeding-${day}`}
+                    disabled={!canEditFarm || saving}
                     type="checkbox"
                     checked={seedingDays.includes(day)}
                     onChange={(e) => {
@@ -474,10 +687,16 @@ const SettingsPage = () => {
               ))}
             </div>
           </div>
-          <Button onClick={handleSaveFarm} disabled={saving}>
-            <Save className="h-4 w-4 mr-2" />
-            Save Farm Information
-          </Button>
+          {canEditFarm ? (
+            <Button onClick={handleSaveFarm} disabled={saving}>
+              <Save className="h-4 w-4 mr-2" />
+              Save Farm Information
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Only an active farm owner can edit farm settings.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -615,139 +834,7 @@ const SettingsPage = () => {
         </CardContent>
       </Card>
 
-      {/* User Profile */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="h-5 w-5" />
-            <CardTitle>User Profile</CardTitle>
-          </div>
-          <CardDescription>Manage your personal information</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="firstName">First Name</Label>
-              <Input
-                id="firstName"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Enter your first name"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Enter your last name"
-              />
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Email</Label>
-              <Input value={profileData?.email || ''} disabled />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="phone">Phone</Label>
-              <Input
-                id="phone"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Enter your phone number"
-                type="tel"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Role</Label>
-            <Input value={profileData?.role || ''} disabled />
-          </div>
-
-          <Separator />
-
-          <div>
-            <Label className="text-base font-semibold">Address</Label>
-            <p className="text-sm text-muted-foreground mb-3">Your contact address information</p>
-            
-            <div className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="street">Street Address</Label>
-                <Input
-                  id="street"
-                  value={street}
-                  onChange={(e) => setStreet(e.target.value)}
-                  placeholder="Enter your street address"
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="city">City</Label>
-                  <Input
-                    id="city"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="Enter city"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="state">State / Province</Label>
-                  <Input
-                    id="state"
-                    value={state}
-                    onChange={(e) => setState(e.target.value)}
-                    placeholder="Enter state or province"
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="postalCode">Postal Code</Label>
-                  <Input
-                    id="postalCode"
-                    value={postalCode}
-                    onChange={(e) => setPostalCode(e.target.value)}
-                    placeholder="Enter postal code"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="country">Country</Label>
-                  <Input
-                    id="country"
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                    placeholder="Enter country"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="grid gap-2">
-            <Label htmlFor="bio">Bio</Label>
-            <Textarea
-              id="bio"
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Tell us a bit about yourself..."
-              rows={4}
-            />
-          </div>
-
-          <Button onClick={handleSaveProfile} disabled={saving}>
-            <Save className="h-4 w-4 mr-2" />
-            Save Profile
-          </Button>
-        </CardContent>
-      </Card>
+      {profileCard}
 
       {/* Preferences */}
       <Card>

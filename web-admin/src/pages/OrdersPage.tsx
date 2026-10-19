@@ -1,3 +1,4 @@
+import { localDateString } from '@/lib/dateUtils';
 import { useState, useEffect } from 'react';
 import { 
   LineChart, 
@@ -66,7 +67,7 @@ const OrdersPage = () => {
     new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
   const [deliveryCustomEndDate, setDeliveryCustomEndDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    localDateString()
   );
   const [deliverySortField, setDeliverySortField] = useState<DeliverySortField>('date');
   const [deliverySortDirection, setDeliverySortDirection] = useState<SortDirection>('desc');
@@ -87,7 +88,7 @@ const OrdersPage = () => {
   const [updating, setUpdating] = useState(false);
   const [newOrder, setNewOrder] = useState({
     customer_id: '',
-    order_date: new Date().toISOString().split('T')[0],
+    order_date: localDateString(),
     delivery_date: '',
     order_type: 'one-time' as 'one-time' | 'weekly' | 'bi-weekly' | 'standing',
     status: 'Pending',
@@ -101,7 +102,7 @@ const OrdersPage = () => {
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
   const [customEndDate, setCustomEndDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    localDateString()
   );
   const [chartSortOrder, setChartSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -907,7 +908,7 @@ const OrdersPage = () => {
       // Reset form
       setNewOrder({
         customer_id: '',
-        order_date: new Date().toISOString().split('T')[0],
+        order_date: localDateString(),
         delivery_date: '',
         order_type: 'one-time',
         status: 'Pending',
@@ -1007,7 +1008,7 @@ const OrdersPage = () => {
         
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button disabled aria-describedby="product-orders-readiness">
               <Plus className="mr-2 h-4 w-4" />
               Add Order
             </Button>
@@ -1148,6 +1149,10 @@ const OrdersPage = () => {
           </DialogContent>
         </Dialog>
       </div>
+
+      <p id="product-orders-readiness" className="text-sm text-muted-foreground">
+        Product-based order creation is not available yet. You can view existing orders and delivery history below.
+      </p>
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-gray-200">

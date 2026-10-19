@@ -1,0 +1,3 @@
+project_id = "sproutify-farm-voice-release"
+[functions.farm-assistant]
+verify_jwt = true

@@ -28,34 +28,36 @@ const UsersPage = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [canManage, setCanManage] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
-    role: 'Viewer',
+    role: 'Farm Hand',
   });
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const sessionData = localStorage.getItem('sproutify_session');
-        if (!sessionData) return;
+        const client = getSupabaseClient();
+        const { data: { user }, error: authError } = await client.auth.getUser();
+        if (authError || !user) throw new Error('Please sign in again.');
+        const { data: own, error: ownError } = await client.from('profile').select('farm_uuid, role, is_active').eq('id', user.id).single();
+        if (ownError || !own?.farm_uuid || own.is_active !== true) throw new Error('Active farm membership required.');
 
-        const { farmUuid } = JSON.parse(sessionData);
-
-        const { data, error } = await getSupabaseClient()
-          .from('profile')
-          .select('*')
-          .eq('farm_uuid', farmUuid);
+        const { data, error } = own.role === 'Owner'
+          ? await client.rpc('list_farm_users')
+          : await client.from('profile').select('*').eq('id', user.id);
 
         if (error) throw error;
 
-        const formattedUsers: User[] = (data || []).map((user: any) => ({
+        const formattedUsers: User[] = (data || []).map((user: { id: string; firstname?: string; lastname?: string; email?: string; role?: string; is_active: boolean; last_active?: string; created_at?: string }) => ({
           id: user.id,
-          name: user.name || '',
+          name: [user.firstname, user.lastname].filter(Boolean).join(' '),
           email: user.email || '',
           role: user.role || 'Viewer',
           isActive: user.is_active,
@@ -64,9 +66,11 @@ const UsersPage = () => {
         }));
 
         setUsers(formattedUsers);
+        setCanManage(own.role === 'Owner');
       } catch (error) {
         console.error('Error fetching users:', error);
-        setError('Failed to load users');
+        setCanManage(false);
+        setError('Team management is unavailable. Please contact support before adding accounts.');
       } finally {
         setLoading(false);
       }
@@ -76,8 +80,8 @@ const UsersPage = () => {
   }, []);
 
   const handleCreateUser = async () => {
-    if (!formData.name || !formData.email || !formData.password) {
-      setError('Please fill in all fields');
+    if (!formData.name.trim() || !formData.email.trim() || formData.password.length < 12) {
+      setError('Enter a name, email and a password with at least 12 characters.');
       return;
     }
 
@@ -85,17 +89,14 @@ const UsersPage = () => {
     setError('');
 
     try {
-      const sessionData = localStorage.getItem('sproutify_session');
-      if (!sessionData) {
-        throw new Error('Session not found');
-      }
-
-      const { farmUuid } = JSON.parse(sessionData);
-      const { data: { session } } = await getSupabaseClient().auth.getSession();
-
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
+      const client = getSupabaseClient();
+      const { data: { user }, error: authError } = await client.auth.getUser();
+      if (authError || !user) throw new Error('Please sign in again.');
+      const { data: own, error: ownError } = await client.from('profile').select('farm_uuid, role, is_active').eq('id', user.id).single();
+      if (ownError || own?.role !== 'Owner' || own.is_active !== true) throw new Error('Only an active farm owner can create accounts.');
+      const farmUuid = own.farm_uuid;
+      const { data: { session } } = await client.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const response = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
@@ -105,9 +106,9 @@ const UsersPage = () => {
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          email: formData.email,
+          email: formData.email.trim().toLowerCase(),
           password: formData.password,
-          name: formData.name,
+          name: formData.name.trim(),
           role: formData.role,
           farmUuid,
         }),
@@ -115,28 +116,29 @@ const UsersPage = () => {
 
       const result = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || result.success !== true || !result.user?.id || result.user.farmUuid !== farmUuid || result.user.role !== formData.role) {
         throw new Error(result.error || 'Failed to create user');
       }
 
       // Format and add the new user to the list
       const newUser: User = {
         id: result.user.id,
-        name: result.user.name || formData.name,
-        email: result.user.email || formData.email,
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
         role: result.user.role || formData.role,
         isActive: result.user.isActive ?? true,
         lastActive: 'Just now',
         createdAt: result.user.createdAt ? new Date(result.user.createdAt).toLocaleDateString() : new Date().toLocaleDateString(),
       };
-      setUsers([newUser, ...users]);
+      setUsers(current => [newUser, ...current]);
       
       // Reset form and close modal
-      setFormData({ name: '', email: '', password: '', role: 'Viewer' });
+      setFormData({ name: '', email: '', password: '', role: 'Farm Hand' });
       setShowAddModal(false);
       setError('');
-    } catch (err: any) {
-      setError(err.message || 'Failed to create user');
+      setNotice(result.verificationDelivery === 'sent' ? 'Account created. A verification email was requested for the new user.' : 'Account created, but the verification email could not be sent. Use Resend verification on the login page; do not create the account again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create user');
     } finally {
       setCreating(false);
     }
@@ -182,7 +184,7 @@ const UsersPage = () => {
         </div>
         <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
           <DialogTrigger asChild>
-            <Button>
+            <Button disabled={!canManage}>
               <UserPlus className="mr-2 h-4 w-4" />
               Add User
             </Button>
@@ -241,7 +243,7 @@ const UsersPage = () => {
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="Minimum 6 characters"
+                    placeholder="Minimum 12 characters"
                     className="pl-8 pr-10"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -256,7 +258,7 @@ const UsersPage = () => {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-muted-foreground">Password must be at least 6 characters long</p>
+                <p className="text-xs text-muted-foreground">Password must be at least 12 characters long</p>
               </div>
 
               <div className="grid gap-2">
@@ -270,12 +272,13 @@ const UsersPage = () => {
                     <SelectValue placeholder="Select a role" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="Farm Hand">Farm Hand - Daily farm work</SelectItem>
                     <SelectItem value="Viewer">Viewer - Read-only access</SelectItem>
                     <SelectItem value="Editor">Editor - Can edit data</SelectItem>
-                    <SelectItem value="Owner">Owner - Full access</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
+                  {formData.role === 'Farm Hand' && 'Can record daily farm work without managing customers, billing, or users'}
                   {formData.role === 'Viewer' && 'Can view data but cannot make changes'}
                   {formData.role === 'Editor' && 'Can view and edit data but cannot manage users'}
                   {formData.role === 'Owner' && 'Full access including user management'}
@@ -287,7 +290,7 @@ const UsersPage = () => {
               <Button variant="outline" onClick={() => setShowAddModal(false)} disabled={creating}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateUser} disabled={creating}>
+              <Button onClick={handleCreateUser} disabled={creating || !canManage}>
                 {creating ? (
                   <>
                     <span className="animate-spin mr-2">⏳</span>
@@ -305,6 +308,8 @@ const UsersPage = () => {
         </Dialog>
       </div>
 
+      {notice && <p role="status">{notice}</p>}
+      {error && !showAddModal && <p role="alert">{error}</p>}
       <div className="flex items-center space-x-4">
         <div className="flex-1 max-w-sm">
           <Input
@@ -322,6 +327,7 @@ const UsersPage = () => {
               <SelectItem value="All">All Roles</SelectItem>
               <SelectItem value="Owner">Owner</SelectItem>
               <SelectItem value="Editor">Editor</SelectItem>
+              <SelectItem value="Farm Hand">Farm Hand</SelectItem>
               <SelectItem value="Viewer">Viewer</SelectItem>
             </SelectContent>
           </Select>
@@ -359,7 +365,7 @@ const UsersPage = () => {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.isActive ? 'default' : 'secondary'} className={user.isActive ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500'}>
+                    <Badge variant={user.isActive ? 'default' : 'secondary'} className={user.isActive ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700'}>
                       {user.isActive ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>

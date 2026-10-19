@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Check,
   Droplets,
@@ -19,7 +20,9 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { fetchDailyTasks, completeTask } from '@/services/dailyFlowService';
+import { completeTask } from '@/services/dailyFlowService';
+import { fetchWorkerTasks } from '@/services/workerTasks';
+import { isHarvestAction } from '@/lib/taskActions';
 import type { DailyTask } from '@/services/dailyFlowService';
 import { cn } from '@/lib/utils';
 
@@ -42,6 +45,7 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 const FarmHandTasks = () => {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,11 +58,11 @@ const FarmHandTasks = () => {
       if (showRefresh) setRefreshing(true);
       setError(null);
 
-      const allTasks = await fetchDailyTasks(new Date(), true);
+      const allTasks = await fetchWorkerTasks();
 
       // Filter out harvest tasks (they go to the Harvest tab)
       // Keep: Water, Uncover, Blackout, Seed, Soak, and other maintenance tasks
-      const nonHarvestTasks = allTasks.filter(t => t.action !== 'Harvest');
+      const nonHarvestTasks = allTasks.filter(t => !isHarvestAction(t.action));
 
       setTasks(nonHarvestTasks);
     } catch (err) {
@@ -151,7 +155,10 @@ const FarmHandTasks = () => {
                   colorClass,
                   task.status === 'urgent' && "ring-2 ring-red-400 ring-offset-2"
                 )}
-                onClick={() => setConfirmTask(task)}
+                onClick={() => {
+                  if (['Seed', 'Soak'].includes(task.action)) navigate('/seed');
+                  else setConfirmTask(task);
+                }}
               >
                 <div className="flex items-start gap-3">
                   <div className={cn("p-2 rounded-lg", colorClass.split(' ')[1])}>

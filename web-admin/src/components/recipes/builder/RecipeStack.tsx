@@ -246,10 +246,10 @@ export const RecipeStack: React.FC<RecipeStackProps> = ({
                        <Trash2 className="w-3.5 h-3.5" />
                      </button>
                      <div className="flex space-x-0.5 justify-center pt-1 border-t border-gray-200">
-                        <button onClick={() => onMove(step.ui_id, 'up')} disabled={index === 0} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 disabled:opacity-20">
+                        <button aria-label={`Move ${step.description_name} up`} onClick={() => onMove(step.ui_id, 'up')} disabled={index === 0} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 disabled:opacity-20">
                           <ChevronUp className="w-3 h-3" />
                         </button>
-                        <button onClick={() => onMove(step.ui_id, 'down')} disabled={index === steps.length - 1} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 disabled:opacity-20">
+                        <button aria-label={`Move ${step.description_name} down`} onClick={() => onMove(step.ui_id, 'down')} disabled={index === steps.length - 1} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 disabled:opacity-20">
                           <ChevronDown className="w-3 h-3" />
                         </button>
                      </div>

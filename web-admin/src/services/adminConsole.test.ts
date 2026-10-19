@@ -1,0 +1,11 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { adminAction, readAdminPage } from './adminConsole';
+const mocks=vi.hoisted(()=>({session:vi.fn(),fetch:vi.fn()}));
+vi.mock('../lib/supabaseClient',()=>({getSupabaseClient:()=>({auth:{getSession:mocks.session}})}));
+beforeEach(()=>{vi.stubGlobal('fetch',mocks.fetch);mocks.session.mockResolvedValue({data:{session:{access_token:'verified-token'}},error:null});mocks.fetch.mockResolvedValue({ok:true,json:async()=>({rows:[],total:0,page:1,page_size:100})});});
+afterEach(()=>{vi.clearAllMocks();vi.unstubAllGlobals();});
+it('sends the current bearer session and fixed request body to the admin backend',async()=>{await readAdminPage('farms');expect(mocks.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer verified-token');expect(JSON.parse(mocks.fetch.mock.calls[0][1].body)).toEqual({action:'read',payload:{resource:'farms',page:1,page_size:100}});});
+it('does not call the backend without a session',async()=>{mocks.session.mockResolvedValue({data:{session:null},error:null});await expect(readAdminPage('farms')).rejects.toThrow('Sign in again');expect(mocks.fetch).not.toHaveBeenCalled();});
+it('surfaces authorization errors without converting them to empty rows',async()=>{mocks.fetch.mockResolvedValue({ok:false,json:async()=>({error:'Administrator required'})});await expect(readAdminPage('farms')).rejects.toThrow('Administrator required');});
+it('rejects incomplete pagination metadata',async()=>{mocks.fetch.mockResolvedValue({ok:true,json:async()=>({rows:[]})});await expect(readAdminPage('users')).rejects.toThrow('incomplete');});
+it('rejects a non-JSON response rather than claiming success',async()=>{mocks.fetch.mockResolvedValue({ok:true,json:async()=>{throw new Error('invalid');}});await expect(adminAction('set_demo_access',{})).rejects.toThrow('Admin request failed');});

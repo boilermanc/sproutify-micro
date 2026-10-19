@@ -604,20 +604,20 @@
 
 /* ===== Trial Banner ===== */
 .trial-banner {
-  background: linear-gradient(135deg, #5B7C99 0%, #4A6B8A 100%);
-  color: white;
-  padding: 1rem 2rem;
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  padding: 0.65rem 1.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 0.8125rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 4px 12px rgba(91, 124, 153, 0.3);
-  animation: slideDown 0.5s ease-out;
   position: relative;
   overflow: hidden;
 }
 
 .trial-banner::before {
-  content: '';
+  content: none;
   position: absolute;
   top: 0;
   left: -100%;
@@ -651,17 +651,18 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .trial-countdown {
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
 }
 
 .trial-banner-close {
   background: rgba(255, 255, 255, 0.2);
   border: none;
-  color: white;
+  color: hsl(var(--foreground));
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -674,7 +675,6 @@
 
 .trial-banner-close:hover {
   background: rgba(255, 255, 255, 0.3);
-  transform: rotate(90deg);
 }
 
 .trial-banner-actions {
@@ -687,8 +687,8 @@
 
 .trial-banner-upgrade {
   background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
   padding: 0.5rem 1rem;
   border-radius: 6px;
   font-weight: 600;
@@ -701,7 +701,6 @@
 
 .trial-banner-upgrade:hover {
   background: rgba(255, 255, 255, 0.3);
-  transform: translateX(2px);
 }
 
 .trial-usage {

@@ -55,6 +55,12 @@ class SiteReleaseTests(unittest.TestCase):
   self.assertIn(b'/admin/assets/index-',(ROOT/'admin/index.html').read_bytes());self.assertIn(b'/assets/index-',(ROOT/'index.html').read_bytes())
   self.assertEqual(len(list((ROOT/'admin/assets').glob('*.webp'))),27)
   self.assertTrue((ROOT/'admin/assets/old.js').exists());self.assertTrue((ROOT/'assets/old.js').exists())
+ def test_actual_frozen_checksums_are_portable_lf(self):
+  path=pathlib.Path('/repo/.github/deployment/releases')/RELEASE/'payload.tar.gz'
+  with tarfile.open(path,'r:gz') as archive:
+   manifest=archive.extractfile('SHA256SUMS').read()
+  self.assertNotIn(b'\r',manifest,'Older hosting sha256sum treats CR as part of filenames')
+  self.assertTrue(manifest.endswith(b'\n'))
  def test_second_index_failure_restores_both_indexes(self):
   fake=self.home/'bin';fake.mkdir();wrapper=fake/'mv'
   wrapper.write_text('#!/bin/bash\necho "$*" >> "$HOME/mv-calls"\nif [[ "$2" == */httpdocs/.index-farm-catalogue* ]]; then exit 77; fi\nexec /bin/mv "$@"\n');wrapper.chmod(0o755)

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       release_confirmation:
-        description: Enter farm-catalogue-v1-20261019-rc3
+        description: Enter farm-catalogue-v1-20261019-rc4
         required: true
         type: string
 permissions:
@@ -15,8 +15,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      RELEASE: farm-catalogue-v1-20261019-rc3
-      ARCHIVE_SHA256: 26b353e029046baf616d0121eb73fd74a106d3782d1d2af83cc16110a90b967b
+      RELEASE: farm-catalogue-v1-20261019-rc4
+      ARCHIVE_SHA256: 98e9882d78bebe0c4d8d004587222b250cf265f4d273f39b0de6e8974cd6f7c9
       SCRIPT_SHA256: 13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8
       BACKEND_READY_RELEASE: ${{ vars.MICRO_CONSENT_BACKEND_READY_RELEASE }}
       CONFIRMED_RELEASE: ${{ inputs.release_confirmation }}
@@ -39,8 +39,8 @@ jobs:
           username: ${{ secrets.IONOS_USERNAME }}
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
-          source: .github/deployment/releases/farm-catalogue-v1-20261019-rc3/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261019-rc3/deploy.sh
-          target: .sproutify-incoming/farm-catalogue-v1-20261019-rc3
+          source: .github/deployment/releases/farm-catalogue-v1-20261019-rc4/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261019-rc4/deploy.sh
+          target: .sproutify-incoming/farm-catalogue-v1-20261019-rc4
           strip_components: 4
           rm: false
           overwrite: true
@@ -54,9 +54,9 @@ jobs:
           command_timeout: 5m
           script: |
             set -eu
-            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261019-rc3"
+            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261019-rc4"
             printf '%s  %s\n' '13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8' "$incoming/deploy.sh" | sha256sum -c -
-            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" '26b353e029046baf616d0121eb73fd74a106d3782d1d2af83cc16110a90b967b' 'farm-catalogue-v1-20261019-rc3' '93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352' 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'
+            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" '98e9882d78bebe0c4d8d004587222b250cf265f4d273f39b0de6e8974cd6f7c9' 'farm-catalogue-v1-20261019-rc4' '93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352' 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'
             for route in admin/index.html admin/today admin/growing; do
               served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route" | sha256sum | cut -d' ' -f1)
               test "$served" = 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'

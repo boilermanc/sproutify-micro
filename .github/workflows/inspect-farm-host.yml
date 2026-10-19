@@ -1,0 +1,41 @@
+name: Inspect farm hosting (read only)
+on:
+  push:
+    branches: [codex/farm-voice-release]
+    paths: [.github/workflows/inspect-farm-host.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read exact micro hosting configuration and served-file fingerprints
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          command_timeout: 2m
+          script: |
+            set -eu
+            echo 'Read-only inspection for micro.sproutify.app; no files are created or changed.'
+            for config in /var/www/vhosts/system/micro.sproutify.app/conf/httpd.conf /var/www/vhosts/system/micro.sproutify.app/conf/nginx.conf; do
+              if [ -r "$config" ]; then
+                echo "CONFIG=$config"
+                awk '/^[[:space:]]*DocumentRoot[[:space:]]|^[[:space:]]*root[[:space:]]/ {print}' "$config"
+              fi
+            done
+            for root in /var/www/vhosts/micro.sproutify.app/httpdocs /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs "$HOME/micro.sproutify.app/httpdocs"; do
+              if [ -d "$root/admin" ]; then
+                echo "CANDIDATE=$(realpath -e "$root")"
+                if [ -f "$root/admin/index.html" ]; then sha256sum "$root/admin/index.html"; fi
+                if [ -f "$root/admin/.htaccess" ]; then sha256sum "$root/admin/.htaccess"; fi
+              fi
+            done
+            if command -v curl >/dev/null 2>&1; then
+              echo 'SERVED_ADMIN_INDEX_SHA256'
+              curl --fail --silent --show-error --max-time 20 https://micro.sproutify.app/admin/index.html | sha256sum
+              echo 'SERVED_ADMIN_ROUTE_SHA256'
+              curl --fail --silent --show-error --max-time 20 https://micro.sproutify.app/admin/ | sha256sum
+            fi

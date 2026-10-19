@@ -1,0 +1,15 @@
+{
+  "release": "farm-catalogue-v1-20261019-rc5",
+  "baseline": {
+    "marketing": "d516e8749199896a8554bd9377fceaa6fa37e56a5b0857f534cd9d39c346e9ce",
+    "admin": "ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717"
+  },
+  "archiveSha256": "8e65116511c137ba66c4a09027a5f3fec09edf1ac6c9fe463c13ddab7860b33a",
+  "scriptSha256": "13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8",
+  "indexSha256": {
+    "marketing": "e02d5352f6202160860f9ea5b44ca29f0cfe024e94fc8f10385067c6acc403aa",
+    "admin": "ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717"
+  },
+  "files": 49,
+  "scope": "homepage only; unchanged admin; no backend or account settings"
+}

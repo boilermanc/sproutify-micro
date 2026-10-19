@@ -1,0 +1,22 @@
+{
+  "release": "farm-catalogue-v1-20261019-rc3",
+  "baseline": {
+    "marketing": "93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352",
+    "admin": "ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717"
+  },
+  "scope": "email-consent; admin unchanged",
+  "archiveSha256": "26b353e029046baf616d0121eb73fd74a106d3782d1d2af83cc16110a90b967b",
+  "scriptSha256": "13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8",
+  "indexSha256": {
+    "marketing": "d516e8749199896a8554bd9377fceaa6fa37e56a5b0857f534cd9d39c346e9ce",
+    "admin": "ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717"
+  },
+  "files": 47,
+  "backendSha256": {
+    "supabase/config.toml": "c580ba85642d7b0eaacfb778a3d183ed5e46622e7e34a111e996b5a4f7de2bd8",
+    "supabase/.temp/cli-latest": "268f7ae709209256d49c0d4c3e21b95ef2b87de338c074932e790effc7a728c0",
+    "supabase/functions/email-subscriptions/index.ts": "fab6f081e9bc64b8f4d506354bc1dbcf043117520b1531c3d8a960f564f55206",
+    "supabase/functions/_shared/email-consent-core.mjs": "b745c6eefa46eb03b071cd1bcc600468f0322073fcd33d039270e72de1b4288a"
+  },
+  "migrationSha256": "644ab7017ca86d03b483c398af0637b04cf9a23f3e1f38d78689f161d4b8e46b"
+}

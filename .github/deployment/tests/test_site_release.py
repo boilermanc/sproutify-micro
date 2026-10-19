@@ -2,7 +2,7 @@
 import hashlib,io,os,pathlib,shutil,subprocess,tarfile,tempfile,unittest
 ROOT=pathlib.Path('/var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs')
 SCRIPT='/repo/.github/deployment/site-release-deploy.sh'
-RELEASE='farm-catalogue-v1-20261019-rc2'
+RELEASE=os.environ.get('DEPLOY_TEST_RELEASE','farm-catalogue-v1-20261019-rc2')
 def digest(data): return hashlib.sha256(data).hexdigest()
 class SiteReleaseTests(unittest.TestCase):
  def setUp(self):

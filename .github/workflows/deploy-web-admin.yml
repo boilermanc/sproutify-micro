@@ -1,9 +1,9 @@
-name: Deploy frozen farm catalogue and homepage release
+name: Deploy frozen email consent website release
 on:
   workflow_dispatch:
     inputs:
       release_confirmation:
-        description: Enter farm-catalogue-v1-20261019-rc2
+        description: Enter farm-catalogue-v1-20261019-rc3
         required: true
         type: string
 permissions:
@@ -15,10 +15,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      RELEASE: farm-catalogue-v1-20261019-rc2
-      ARCHIVE_SHA256: 1c744bbeb7eda29f406855eeb34dd4beccef6c3c39c89b3dfe79173c093c99d0
+      RELEASE: farm-catalogue-v1-20261019-rc3
+      ARCHIVE_SHA256: 26b353e029046baf616d0121eb73fd74a106d3782d1d2af83cc16110a90b967b
       SCRIPT_SHA256: 13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8
-      BACKEND_READY_RELEASE: ${{ vars.FARM_VOICE_BACKEND_READY_RELEASE }}
+      BACKEND_READY_RELEASE: ${{ vars.MICRO_CONSENT_BACKEND_READY_RELEASE }}
       CONFIRMED_RELEASE: ${{ inputs.release_confirmation }}
     steps:
       - uses: actions/checkout@v4
@@ -39,8 +39,8 @@ jobs:
           username: ${{ secrets.IONOS_USERNAME }}
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
-          source: .github/deployment/releases/farm-catalogue-v1-20261019-rc2/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261019-rc2/deploy.sh
-          target: .sproutify-incoming/farm-catalogue-v1-20261019-rc2
+          source: .github/deployment/releases/farm-catalogue-v1-20261019-rc3/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261019-rc3/deploy.sh
+          target: .sproutify-incoming/farm-catalogue-v1-20261019-rc3
           strip_components: 4
           rm: false
           overwrite: true
@@ -54,15 +54,15 @@ jobs:
           command_timeout: 5m
           script: |
             set -eu
-            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261019-rc2"
+            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261019-rc3"
             printf '%s  %s\n' '13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8' "$incoming/deploy.sh" | sha256sum -c -
-            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" '1c744bbeb7eda29f406855eeb34dd4beccef6c3c39c89b3dfe79173c093c99d0' 'farm-catalogue-v1-20261019-rc2' '5cefd86a00262024334854ad91a16b2158df5fd7eddae8552183c4b334bed66a' 'a7652f7d6e90de705f6edd1789e90dd010c5a45f7e67348d50426720cd89fa3c'
+            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" '26b353e029046baf616d0121eb73fd74a106d3782d1d2af83cc16110a90b967b' 'farm-catalogue-v1-20261019-rc3' '93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352' 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'
             for route in admin/index.html admin/today admin/growing; do
               served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route" | sha256sum | cut -d' ' -f1)
               test "$served" = 'ebaefc681fbb537c1b7542231d9bf3a34bd9c58e2e6c992f8e8a43fa99965717'
             done
             for route in index.html pre-launch; do
               served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route" | sha256sum | cut -d' ' -f1)
-              test "$served" = '93454e6b39425a5eccfd6891496e5887fff08a5df9744ed8127d54f7b8c31352'
+              test "$served" = 'd516e8749199896a8554bd9377fceaa6fa37e56a5b0857f534cd9d39c346e9ce'
             done
             echo 'Hosted app routes and homepage match the frozen release.'

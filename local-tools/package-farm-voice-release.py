@@ -6,7 +6,7 @@ import shutil
 import tarfile
 
 root = Path(__file__).resolve().parents[1]
-release = 'farm-voice-v1-20261018-rc2'
+release = 'farm-voice-v1-20261018-rc3'
 source = root / 'local-qa/today-growing/production-voice-dist'
 destination = root / '.github/deployment/releases' / release
 destination.mkdir(exist_ok=False)
@@ -26,7 +26,8 @@ for file in sorted(source.rglob('*')):
     shutil.copyfile(file, output)
     checksums.append((f'admin/{relative.as_posix()}', hashlib.sha256(output.read_bytes()).hexdigest()))
 assert len(checksums) == 8, f'Unexpected compiled file count: {len(checksums)}'
-(staging / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in checksums), encoding='utf8')
+# sha256sum treats CR as part of a filename on Linux. Write platform-neutral bytes.
+(staging / 'SHA256SUMS').write_bytes(''.join(f'{digest}  {name}\n' for name, digest in checksums).encode('utf8'))
 metadata = {'release': release, 'savingEnabled': False, 'backend': 'farm-assistant', 'realtimeModel': 'gpt-realtime-2.1', 'files': dict(checksums)}
 (staging / 'RELEASE.json').write_text(json.dumps(metadata, indent=2), encoding='utf8')
 archive = destination / 'payload.tar.gz'

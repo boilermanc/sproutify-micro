@@ -12,7 +12,7 @@ import unittest
 SCRIPT = Path('/repo/.github/deployment/farm-app-deploy.sh')
 ROOT = Path('/var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs')
 TARGET = ROOT / 'admin'
-RELEASE = 'farm-voice-v1-20261018-rc2'
+RELEASE = 'farm-voice-v1-20261018-rc3'
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -84,6 +84,21 @@ class FarmDeployTests(unittest.TestCase):
     def test_wrong_digest_does_not_change_production(self):
         self.assertNotEqual(self.run_deploy('0' * 64).returncode, 0)
         self.assertEqual((TARGET / 'index.html').read_text(), 'previous-admin')
+        self.unchanged()
+
+    def test_actual_frozen_package_uses_linux_checksums_and_deploys(self):
+        frozen = Path('/repo/.github/deployment/releases') / RELEASE
+        self.payload = frozen / 'payload.tar.gz'
+        with tarfile.open(self.payload) as archive:
+            sums = archive.extractfile('SHA256SUMS').read()
+            self.assertNotIn(b'\r', sums)
+            for line in sums.decode().splitlines():
+                expected, name = line.split('  ', 1)
+                self.assertEqual(digest(archive.extractfile(name).read()), expected)
+            expected_index = archive.extractfile('admin/index.html').read()
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual((TARGET / 'index.html').read_bytes(), expected_index)
         self.unchanged()
 
     def test_production_drift_is_refused(self):

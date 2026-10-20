@@ -1,0 +1,68 @@
+name: Deploy founding grower access and usage limits
+on:
+  workflow_dispatch:
+    inputs:
+      release_confirmation:
+        description: Enter farm-catalogue-v1-20261020-rc7
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: micro-farm-app-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE: farm-catalogue-v1-20261020-rc7
+      ARCHIVE_SHA256: d8d42523b892eacb573513362387a170c47810965e44b9abb8440b2334b6df52
+      SCRIPT_SHA256: 13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8
+      BACKEND_READY_RELEASE: ${{ vars.MICRO_FOUNDING_BACKEND_READY_RELEASE }}
+      CONFIRMED_RELEASE: ${{ inputs.release_confirmation }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen package and qualified founding access backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CONFIRMED_RELEASE" = "$RELEASE"
+          test "$BACKEND_READY_RELEASE" = "$RELEASE"
+          folder=".github/deployment/releases/$RELEASE"
+          printf '%s  %s\n' "$ARCHIVE_SHA256" "$folder/payload.tar.gz" | sha256sum -c -
+          printf '%s  %s\n' "$SCRIPT_SHA256" "$folder/deploy.sh" | sha256sum -c -
+          bash -n "$folder/deploy.sh"
+      - name: Upload frozen package to private staging
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          source: .github/deployment/releases/farm-catalogue-v1-20261020-rc7/payload.tar.gz,.github/deployment/releases/farm-catalogue-v1-20261020-rc7/deploy.sh
+          target: .sproutify-incoming/farm-catalogue-v1-20261020-rc7
+          strip_components: 4
+          rm: false
+          overwrite: true
+      - name: Back up and publish founding access app; preserve homepage
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17
+        with:
+          host: ${{ secrets.IONOS_HOST }}
+          username: ${{ secrets.IONOS_USERNAME }}
+          password: ${{ secrets.IONOS_PASSWORD }}
+          port: 2222
+          command_timeout: 5m
+          script: |
+            set -eu
+            incoming="$HOME/.sproutify-incoming/farm-catalogue-v1-20261020-rc7"
+            printf '%s  %s\n' '13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8' "$incoming/deploy.sh" | sha256sum -c -
+            bash "$incoming/deploy.sh" "$incoming/payload.tar.gz" 'd8d42523b892eacb573513362387a170c47810965e44b9abb8440b2334b6df52' 'farm-catalogue-v1-20261020-rc7' 'e02d5352f6202160860f9ea5b44ca29f0cfe024e94fc8f10385067c6acc403aa' '7135fdb502880c8ff223850a514724c465037f93391850bdbc255e5938bab932'
+            for route in admin/index.html admin/today admin/growing; do
+              served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route")
+              printf '%s' "$served" | grep -Fq '/admin/assets/index-CVQFO8Lh.js'
+            done
+            for route in index.html pre-launch; do
+              served=$(curl --fail --silent --show-error --max-time 20 "https://micro.sproutify.app/$route")
+              printf '%s' "$served" | grep -Fq '/assets/index-pm0DlGvD.js'
+            done
+            echo 'Hosted app routes and homepage match the frozen release.'

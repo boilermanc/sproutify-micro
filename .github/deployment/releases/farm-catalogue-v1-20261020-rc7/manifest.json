@@ -1,0 +1,15 @@
+{
+  "release": "farm-catalogue-v1-20261020-rc7",
+  "baseline": {
+    "marketing": "e02d5352f6202160860f9ea5b44ca29f0cfe024e94fc8f10385067c6acc403aa",
+    "admin": "7135fdb502880c8ff223850a514724c465037f93391850bdbc255e5938bab932"
+  },
+  "archiveSha256": "d8d42523b892eacb573513362387a170c47810965e44b9abb8440b2334b6df52",
+  "scriptSha256": "13a7bb8a6f42201fb6dcd252a3677b33763e4767a7fa23f6a3f9dccb517f08c8",
+  "indexSha256": {
+    "marketing": "e02d5352f6202160860f9ea5b44ca29f0cfe024e94fc8f10385067c6acc403aa",
+    "admin": "3d7a6b280723ea38a6aafd6d042557d6888762bec6599dc06547ed5c7a350ba3"
+  },
+  "files": 49,
+  "scope": "founding access admin UI; exact deployed homepage retained; backend gate required"
+}

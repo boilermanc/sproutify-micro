@@ -182,14 +182,16 @@ jobs:
             echo "Admin directory cleaned"
 
       - name: Deploy to IONOS via SFTP (web admin)
-        uses: Dylan700/sftp-upload-action@v1.2.3
+        uses: eiserv/easySFTP@v3
         with:
-          server: ${{ secrets.IONOS_HOST }}
+          host: ${{ secrets.IONOS_HOST }}
           username: ${{ secrets.IONOS_USERNAME }}
           password: ${{ secrets.IONOS_PASSWORD }}
           port: 2222
-          uploads: |
-            ./web-admin/dist/ => /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin/
+          host-key: ${{ secrets.IONOS_HOST_KEY }}
+          source: ./web-admin/dist/
+          target: /var/www/vhosts/sweetwaterurbanfarms.com/micro.sproutify.app/httpdocs/admin/
+          mode: overlay
 
       - name: Set file permissions
         uses: appleboy/ssh-action@v1.2.0
